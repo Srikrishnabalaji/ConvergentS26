@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Floor Plan Node Editor</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, sans-serif; background: #12121e; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+/* ── TOP BAR ── */
+#topbar {
+  display: flex; align-items: center; gap: 10px; padding: 7px 14px;
+  background: #1a1a2e; border-bottom: 1px solid #2a2a4a; flex-shrink: 0;
+}
+#topbar h1 { font-size: 15px; font-weight: 700; color: #7c6ff7; margin-right: 6px; white-space: nowrap; }
+.sep { width: 1px; height: 22px; background: #2a2a4a; margin: 0 2px; }
+.btn {
+  padding: 5px 11px; border: 1px solid #3a3a5a; background: #1e1e38;
+  color: #ccc; border-radius: 5px; cursor: pointer; font-size: 12px; white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+}
+.btn:hover { background: #2a2a4a; color: #fff; }
+.btn.active { background: #7c6ff7; border-color: #7c6ff7; color: #fff; }
+.btn.danger { border-color: #e94560; color: #e94560; }
+.btn.danger:hover { background: #e94560; color: #fff; }
+.btn.danger.active { background: #e94560; border-color: #e94560; color: #fff; }
+#building-name { background: #1e1e38; border: 1px solid #3a3a5a; color: #ccc; padding: 4px 8px; border-radius: 5px; font-size: 12px; width: 160px; }
+
+/* ── MAIN ── */
+#main { display: flex; flex: 1; overflow: hidden; }
+
+/* ── SIDEBAR ── */
+#sidebar {
+  width: 210px; background: #1a1a2e; border-right: 1px solid #2a2a4a;
+  display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0;
+}
+.sb-section { border-bottom: 1px solid #2a2a4a; }
+.sb-title { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #666; padding: 9px 12px 5px; }
+#floor-list { padding: 4px 6px; }
+.floor-tab {
+  padding: 6px 8px; border-radius: 5px; cursor: pointer; font-size: 12px;
+  color: #999; display: flex; align-items: center; gap: 6px; border: 1px solid transparent; margin-bottom: 2px;
+}
+.floor-tab:hover { background: #22223a; color: #ddd; }
+.floor-tab.active { background: #22223a; border-color: #7c6ff7; color: #fff; }
+.floor-tab-badge { font-size: 10px; background: #2a2a4a; padding: 1px 5px; border-radius: 10px; margin-left: auto; }
+
+#node-type-list { padding: 4px 6px; }
+.nt-row {
+  display: flex; align-items: center; gap: 7px; padding: 6px 8px; border-radius: 5px;
+  cursor: pointer; font-size: 12px; color: #999; border: 1px solid transparent; margin-bottom: 2px;
+}
+.nt-row:hover { background: #22223a; color: #ddd; }
+.nt-row.active { background: #22223a; border-color: var(--c); color: #fff; }
+.nt-dot { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; background: var(--c); }
+
+#info-panel { padding: 10px 12px; flex: 1; overflow-y: auto; }
+.info-label { font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 0.8px; margin: 8px 0 3px; }
+.info-input {
+  width: 100%; padding: 4px 7px; background: #12121e; border: 1px solid #2a2a4a;
+  color: #ddd; border-radius: 4px; font-size: 12px;
+}
+.info-input:focus { outline: none; border-color: #7c6ff7; }
+.info-val { font-size: 12px; color: #aaa; padding: 2px 0; }
+.info-delete-btn { margin-top: 10px; width: 100%; padding: 5px; background: #2a1a1a; border: 1px solid #e94560; color: #e94560; border-radius: 4px; cursor: pointer; font-size: 12px; }
+.info-delete-btn:hover { background: #e94560; color: #fff; }
+#info-empty { color: #555; font-size: 12px; padding: 4px 0; }
+
+/* ── CANVAS AREA ── */
+#canvas-area {
+  flex: 1; position: relative; overflow: auto; background: #0e0e1a;
+  display: flex; justify-content: center; align-items: flex-start;
+}
+#canvas-container { position: relative; display: inline-block; margin: 20px; }
+#floor-canvas { display: block; }
+#graph-svg { position: absolute; top: 0; left: 0; overflow: visible; }
+
+/* ── DROP ZONE ── */
+#drop-zone {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 14px; color: #555; text-align: center;
+}
+#drop-zone h2 { font-size: 22px; color: #888; }
+#drop-zone p { font-size: 13px; color: #555; max-width: 280px; line-height: 1.5; }
+#drop-zone label {
+  padding: 10px 22px; background: #22223a; border: 1px dashed #3a3a5a;
+  border-radius: 8px; cursor: pointer; font-size: 13px; color: #999; transition: all 0.15s;
+}
+#drop-zone label:hover { background: #2a2a4a; color: #ddd; border-color: #7c6ff7; }
+
+/* ── FLOATING NODE INPUT ── */
+#node-popup {
+  display: none; position: fixed; background: #1e1e38; border: 1px solid #7c6ff7;
+  border-radius: 8px; padding: 12px; z-index: 1000; box-shadow: 0 4px 24px rgba(0,0,0,0.6);
+  min-width: 220px;
+}
+#node-popup h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.8px; color: #7c6ff7; margin-bottom: 10px; }
+#node-popup label { font-size: 11px; color: #888; display: block; margin-bottom: 3px; }
+#node-popup input {
+  width: 100%; padding: 5px 8px; background: #12121e; border: 1px solid #3a3a5a;
+  color: #ddd; border-radius: 4px; font-size: 12px; margin-bottom: 8px;
+}
+#node-popup input:focus { outline: none; border-color: #7c6ff7; }
+#node-popup-group { display: none; }
+.popup-btns { display: flex; gap: 6px; margin-top: 4px; }
+.popup-btns button { flex: 1; padding: 5px; border-radius: 4px; cursor: pointer; font-size: 12px; border: 1px solid #3a3a5a; }
+#popup-confirm { background: #7c6ff7; border-color: #7c6ff7; color: #fff; }
+#popup-cancel { background: #1e1e38; color: #aaa; }
+
+/* ── STATUS BAR ── */
+#statusbar {
+  padding: 3px 14px; background: #1a1a2e; border-top: 1px solid #2a2a4a;
+  font-size: 11px; color: #555; flex-shrink: 0;
+}
+
+/* ── LEGEND TOOLTIP ── */
+#legend {
+  position: fixed; bottom: 32px; right: 14px;
+  background: #1e1e38; border: 1px solid #2a2a4a; border-radius: 8px;
+  padding: 10px 12px; font-size: 11px; color: #888;
+}
+#legend h4 { font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; color: #666; margin-bottom: 6px; }
+.leg-row { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+.leg-icon { width: 12px; height: 12px; flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div id="topbar">
+  <h1>FloorGraph</h1>
+  <input id="building-name" type="text" placeholder="Building name…" value="Gates Dell Complex">
+  <div class="sep"></div>
+  <button class="btn" onclick="document.getElementById('pdf-input').click()">📂 Load PDF</button>
+  <input id="pdf-input" type="file" accept="application/pdf" style="display:none" onchange="loadPDF(this.files[0])">
+  <div class="sep"></div>
+  <button class="btn active" id="tool-place"   onclick="setTool('place')">✦ Place</button>
+  <button class="btn"        id="tool-connect" onclick="setTool('connect')">⟵ Connect</button>
+  <button class="btn"        id="tool-select"  onclick="setTool('select')">↖ Select</button>
+  <button class="btn danger" id="tool-delete"  onclick="setTool('delete')">✕ Delete</button>
+  <div class="sep"></div>
+  <button class="btn" onclick="linkInterFloor()" title="Auto-link stairwells/elevators with the same group name across floors">🔗 Link Inter-Floor</button>
+  <button class="btn" onclick="exportJSON()">⬇ Export JSON</button>
+  <button class="btn" onclick="document.getElementById('json-input').click()">⬆ Import JSON</button>
+  <input id="json-input" type="file" accept="application/json" style="display:none" onchange="importJSON(this.files[0])">
+  <div class="sep"></div>
+  <button class="btn" onclick="clearFloor()" title="Remove all nodes on current floor">Clear Floor</button>
+  <button class="btn" onclick="clearAll()" title="Remove everything">Clear All</button>
+  <div class="sep"></div>
+  <span style="font-size:11px;color:#888;white-space:nowrap">Map opacity</span>
+  <input type="range" id="pdf-opacity" min="10" max="100" value="100"
+    style="width:70px;cursor:pointer;accent-color:#7c6ff7"
+    oninput="document.getElementById('floor-canvas').style.opacity=this.value/100">
+</div>
+
+<!-- MAIN -->
+<div id="main">
+  <!-- SIDEBAR -->
+  <div id="sidebar">
+    <div class="sb-section">
+      <div class="sb-title">Floors</div>
+      <div id="floor-list"><div style="font-size:11px;color:#444;padding:6px 8px">No PDF loaded</div></div>
+    </div>
+    <div class="sb-section">
+      <div class="sb-title">Node Type</div>
+      <div id="node-type-list">
+        <div class="nt-row active" style="--c:#4a9eff" data-type="room"       onclick="setNodeType('room')">       <div class="nt-dot"></div> Room</div>
+        <div class="nt-row"        style="--c:#aaaaaa" data-type="hallway"    onclick="setNodeType('hallway')">    <div class="nt-dot"></div> Hallway / Junction</div>
+        <div class="nt-row"        style="--c:#ff9f43" data-type="door"       onclick="setNodeType('door')">       <div class="nt-dot"></div> Door</div>
+        <div class="nt-row"        style="--c:#ff6b6b" data-type="stairwell"  onclick="setNodeType('stairwell')">  <div class="nt-dot"></div> Stairwell</div>
+        <div class="nt-row"        style="--c:#a29bfe" data-type="elevator"   onclick="setNodeType('elevator')">   <div class="nt-dot"></div> Elevator</div>
+        <div class="nt-row"        style="--c:#00b894" data-type="entrance"   onclick="setNodeType('entrance')">   <div class="nt-dot"></div> Entrance / Exit</div>
+      </div>
+    </div>
+    <div class="sb-section" style="flex:1; overflow:hidden; display:flex; flex-direction:column;">
+      <div class="sb-title">Selection Info</div>
+      <div id="info-panel"><div id="info-empty">Click a node or edge to inspect it.</div></div>
+    </div>
+  </div>
+
+  <!-- CANVAS AREA -->
+  <div id="canvas-area">
+    <div id="drop-zone">
+      <h2>Floor Plan Node Editor</h2>
+      <p>Load a multi-page PDF of floor plans. Each page becomes a floor you can annotate with nodes and connections.</p>
+      <label for="pdf-input">Choose PDF file</label>
+      <p style="font-size:11px; color:#444">Door arcs on the floor plan indicate valid pathways between spaces.</p>
+    </div>
+    <div id="canvas-container" style="display:none">
+      <canvas id="floor-canvas"></canvas>
+      <svg id="graph-svg"></svg>
+    </div>
+  </div>
+</div>
+
+<!-- STATUS BAR -->
+<div id="statusbar" id="statusbar">Ready — load a PDF to begin.</div>
+
+<!-- LEGEND -->
+<div id="legend" style="display:none">
+  <h4>Node Shapes</h4>
+  <div class="leg-row"><svg class="leg-icon" viewBox="0 0 12 12"><circle cx="6" cy="6" r="5" fill="#4a9eff"/></svg> Room</div>
+  <div class="leg-row"><svg class="leg-icon" viewBox="0 0 12 12"><polygon points="6,1 11,6 6,11 1,6" fill="#aaa"/></svg> Hallway</div>
+  <div class="leg-row"><svg class="leg-icon" viewBox="0 0 12 12"><circle cx="6" cy="6" r="5" fill="#ff9f43"/></svg> Door</div>
+  <div class="leg-row"><svg class="leg-icon" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" rx="2" fill="#ff6b6b"/></svg> Stairwell</div>
+  <div class="leg-row"><svg class="leg-icon" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" rx="2" fill="#a29bfe"/></svg> Elevator</div>
+  <div class="leg-row"><svg class="leg-icon" viewBox="0 0 12 12"><circle cx="6" cy="6" r="5" fill="#00b894"/></svg> Entrance</div>
+</div>
+
+<!-- FLOATING NODE INPUT -->
+<div id="node-popup">
+  <h3 id="popup-title">Place Node</h3>
+  <label>Label / Room Number</label>
+  <input id="popup-label" type="text" placeholder="e.g. GDC 1.302">
+  <div id="node-popup-group">
+    <label>Group Name <span style="color:#555">(links same group across floors)</span></label>
+    <input id="popup-group" type="text" placeholder="e.g. Stairwell A">
+  </div>
+  <div class="popup-btns">
+    <button id="popup-confirm" onclick="confirmPlacement()">Add Node</button>
+    <button id="popup-cancel"  onclick="cancelPlacement()">Cancel</button>
+  </div>
+</div>
+
+<script>
+// ────────────────────────────────────────────────────────────
+// PDF.js
+// ────────────────────────────────────────────────────────────
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+// ────────────────────────────────────────────────────────────
+// STATE
+// ────────────────────────────────────────────────────────────
+const NODE_COLORS = {
+  room:      '#4a9eff',
+  hallway:   '#aaaaaa',
+  door:      '#ff9f43',
+  stairwell: '#ff6b6b',
+  elevator:  '#a29bfe',
+  entrance:  '#00b894',
+};
+const NODE_RADIUS = { room:7, hallway:5, door:6, stairwell:9, elevator:9, entrance:8 };
+
+const S = {
+  pdf: null,
+  floors: [],           // [{id, name, pageIndex}]
+  curFloor: 0,
+  nodes: [],            // [{id, floorId, x, y, label, type, groupId}]
+  edges: [],            // [{id, from, to, weight, interFloor}]
+  tool: 'place',
+  nodeType: 'room',
+  connectingFrom: null, // node id
+  selectedId: null,     // node or edge id
+  W: 0, H: 0,          // canvas dimensions
+  pendingX: 0, pendingY: 0,   // normalized coords of pending placement
+  cursorSVG: null,      // {x,y} for connect preview
+};
+
+function uid() { return Math.random().toString(36).slice(2, 9); }
+function floorId() { return S.floors[S.curFloor]?.id; }
+function getNode(id) { return S.nodes.find(n => n.id === id); }
+function getEdge(id) { return S.edges.find(e => e.id === id); }
+
+// ────────────────────────────────────────────────────────────
+// PDF LOADING
+// ────────────────────────────────────────────────────────────
+async function loadPDF(file) {
+  setStatus('Loading PDF…');
+  const buf = await file.arrayBuffer();
+  S.pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  S.floors = Array.from({ length: S.pdf.numPages }, (_, i) => ({
+    id: `f${i}`, name: `Floor ${i + 1}`, pageIndex: i,
+  }));
+  S.curFloor = 0;
+  S.nodes = [];
+  S.edges = [];
+  document.getElementById('drop-zone').style.display = 'none';
+  document.getElementById('canvas-container').style.display = 'inline-block';
+  document.getElementById('legend').style.display = 'block';
+  renderFloorList();
+  await renderPage();
+}
+
+async function renderPage() {
+  const floor = S.floors[S.curFloor];
+  if (!floor || !S.pdf) return;
+  const page = await S.pdf.getPage(floor.pageIndex + 1);
+  const vp = page.getViewport({ scale: 2.0 });
+  const canvas = document.getElementById('floor-canvas');
+  canvas.width = vp.width; canvas.height = vp.height;
+  S.W = vp.width; S.H = vp.height;
+  await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+  const svg = document.getElementById('graph-svg');
+  svg.setAttribute('width', S.W);
+  svg.setAttribute('height', S.H);
+  renderGraph();
+  setStatus(`Floor ${S.curFloor + 1} of ${S.floors.length} — ${S.W}×${S.H}px`);
+}
+
+// ────────────────────────────────────────────────────────────
+// TOOL & TYPE SELECTION
+// ────────────────────────────────────────────────────────────
+function setTool(t) {
+  S.tool = t;
+  S.connectingFrom = null;
+  S.selectedId = null;
+  ['place','connect','select','delete'].forEach(x => {
+    document.getElementById(`tool-${x}`).classList.toggle('active', x === t);
+  });
+  renderGraph();
+  updateInfoPanel();
+  const cursors = { place:'crosshair', connect:'crosshair', select:'default', delete:'not-allowed' };
+  document.getElementById('graph-svg').style.cursor = cursors[t] || 'default';
+  setStatus(`Tool: ${t}`);
+}
+
+function setNodeType(type) {
+  S.nodeType = type;
+  document.querySelectorAll('.nt-row').forEach(el =>
+    el.classList.toggle('active', el.dataset.type === type));
+}
+
+// ────────────────────────────────────────────────────────────
+// FLOOR LIST
+// ────────────────────────────────────────────────────────────
+function renderFloorList() {
+  const list = document.getElementById('floor-list');
+  list.innerHTML = S.floors.map((f, i) => {
+    const count = S.nodes.filter(n => n.floorId === f.id).length;
+    return `<div class="floor-tab ${i === S.curFloor ? 'active' : ''}" onclick="switchFloor(${i})">
+      ${f.name} <span class="floor-tab-badge">${count}</span>
+    </div>`;
+  }).join('');
+}
+
+async function switchFloor(i) {
+  S.curFloor = i;
+  S.connectingFrom = null;
+  S.selectedId = null;
+  renderFloorList();
+  await renderPage();
+  updateInfoPanel();
+}
+
+// ────────────────────────────────────────────────────────────
+// GRAPH RENDERING
+// ────────────────────────────────────────────────────────────
+function renderGraph() {
+  const svg = document.getElementById('graph-svg');
+  if (!svg) return;
+  const fid = floorId();
+  const floorNodes = S.nodes.filter(n => n.floorId === fid);
+  const nodeIds = new Set(floorNodes.map(n => n.id));
+  const nodeMap = new Map(S.nodes.map(n => [n.id, n]));
+
+  // Only show edges where both nodes are on this floor (inter-floor shown differently)
+  const localEdges = S.edges.filter(e => nodeIds.has(e.from) && nodeIds.has(e.to) && !e.interFloor);
+  // Show inter-floor edges as stubs if one end is on this floor
+  const interEdges = S.edges.filter(e => e.interFloor && (nodeIds.has(e.from) || nodeIds.has(e.to)));
+
+  // ── edges: two passes — dark outline first, bright fill on top ──
+  let edgeBase = '';   // wide dark outlines (bottom)
+  let edgeTop  = '';   // bright strokes + weight labels (top)
+
+  for (const edge of localEdges) {
+    const a = nodeMap.get(edge.from), b = nodeMap.get(edge.to);
+    if (!a || !b) continue;
+    const x1 = a.x * S.W, y1 = a.y * S.H;
+    const x2 = b.x * S.W, y2 = b.y * S.H;
+    const mx = (x1+x2)/2, my = (y1+y2)/2;
+    const sel = edge.id === S.selectedId;
+    edgeBase += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
+      stroke="rgba(0,0,0,0.82)" stroke-width="${sel?7:5}" stroke-linecap="round"/>`;
+    edgeTop  += `<line class="edge" data-id="${edge.id}"
+      x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
+      stroke="${sel?'#f0d060':'#c8d8ff'}" stroke-width="${sel?3.5:2.5}"
+      stroke-linecap="round" cursor="pointer"/>`;
+    edgeTop += `<rect x="${mx-13}" y="${my-14}" width="26" height="13" rx="3"
+      fill="rgba(0,0,0,0.72)" style="pointer-events:none"/>
+    <text x="${mx}" y="${my-4}" text-anchor="middle" font-size="9" font-weight="700"
+      fill="#c8d8ff" style="pointer-events:none;user-select:none">${Math.round(edge.weight)}</text>`;
+  }
+
+  for (const edge of interEdges) {
+    const localId = nodeIds.has(edge.from) ? edge.from : edge.to;
+    const node = nodeMap.get(localId);
+    if (!node) continue;
+    const cx = node.x * S.W, cy = node.y * S.H;
+    edgeBase += `<line x1="${cx}" y1="${cy-14}" x2="${cx}" y2="${cy-30}"
+      stroke="rgba(0,0,0,0.82)" stroke-width="5" stroke-linecap="round" style="pointer-events:none"/>`;
+    edgeTop  += `<line x1="${cx}" y1="${cy-14}" x2="${cx}" y2="${cy-30}"
+      stroke="#f0d060" stroke-width="2.5" stroke-dasharray="5,3"
+      opacity="0.95" style="pointer-events:none"/>
+    <text x="${cx+7}" y="${cy-19}" font-size="9" fill="#f0d060" font-weight="700"
+      opacity="0.95" style="pointer-events:none;user-select:none">↕</text>`;
+  }
+
+  // SVG defs (drop-shadow filter for nodes), then edges, then nodes group
+  let html = `<defs>
+    <filter id="node-shadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="0" stdDeviation="2.5" flood-color="rgba(0,0,0,0.95)"/>
+    </filter>
+  </defs><g id="edges">${edgeBase}${edgeTop}</g><g id="nodes">`;
+
+  // Connect preview line
+  if (S.connectingFrom && S.cursorSVG) {
+    const src = nodeMap.get(S.connectingFrom);
+    if (src && src.floorId === fid) {
+      html += `<line x1="${src.x*S.W}" y1="${src.y*S.H}"
+        x2="${S.cursorSVG.x}" y2="${S.cursorSVG.y}"
+        stroke="#7c6ff7" stroke-width="2" stroke-dasharray="6,3"
+        style="pointer-events:none"/>`;
+    }
+  }
+
+  // Nodes — each shape gets a drop-shadow for contrast against the floor plan
+  const F = 'filter="url(#node-shadow)"';
+  for (const node of floorNodes) {
+    const cx = node.x * S.W, cy = node.y * S.H;
+    const r = NODE_RADIUS[node.type] || 7;
+    const c = NODE_COLORS[node.type] || '#4a9eff';
+    const sel = node.id === S.selectedId || node.id === S.connectingFrom;
+    const stroke = sel ? '#fff' : 'rgba(0,0,0,0.5)';
+    const sw = sel ? 2.5 : 1.5;
+    const opacity = sel ? 1 : 0.92;
+
+    let shape = '';
+    if (node.type === 'stairwell' || node.type === 'elevator') {
+      shape = `<rect class="node" data-id="${node.id}" ${F}
+        x="${cx-r}" y="${cy-r}" width="${r*2}" height="${r*2}" rx="3"
+        fill="${c}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="${sw}" cursor="pointer"/>`;
+    } else if (node.type === 'hallway') {
+      shape = `<polygon class="node" data-id="${node.id}" ${F}
+        points="${cx},${cy-r} ${cx+r},${cy} ${cx},${cy+r} ${cx-r},${cy}"
+        fill="${c}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="${sw}" cursor="pointer"/>`;
+    } else if (node.type === 'door') {
+      shape = `<path class="node" data-id="${node.id}" ${F}
+        d="M${cx-r},${cy} A${r},${r} 0 0,1 ${cx},${cy-r} L${cx-r},${cy-r} Z"
+        fill="${c}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="${sw}" cursor="pointer"/>`;
+    } else {
+      shape = `<circle class="node" data-id="${node.id}" ${F}
+        cx="${cx}" cy="${cy}" r="${r}"
+        fill="${c}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="${sw}" cursor="pointer"/>`;
+    }
+    html += shape;
+
+    if (node.label) {
+      html += `<text x="${cx}" y="${cy + r + 11}" text-anchor="middle"
+        font-size="9.5" font-weight="600" fill="#fff"
+        style="pointer-events:none;user-select:none;paint-order:stroke;stroke:#000;stroke-width:3;stroke-linejoin:round"
+      >${node.label}</text>`;
+    }
+  }
+  html += '</g>';
+
+  svg.innerHTML = html;
+
+  // Event delegation
+  svg.onclick = svgClick;
+  svg.onmousemove = svgMouseMove;
+  svg.ondblclick = svgDoubleClick;
+}
+
+// ────────────────────────────────────────────────────────────
+// INTERACTION
+// ────────────────────────────────────────────────────────────
+function svgCoords(e) {
+  const rect = document.getElementById('graph-svg').getBoundingClientRect();
+  return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+}
+
+function svgMouseMove(e) {
+  if (S.tool === 'connect' && S.connectingFrom) {
+    const {x, y} = svgCoords(e);
+    S.cursorSVG = {x, y};
+    renderGraph();
+  }
+}
+
+function nodeAt(svgX, svgY) {
+  const fid = floorId();
+  const floorNodes = S.nodes.filter(n => n.floorId === fid);
+  for (const n of floorNodes) {
+    const cx = n.x * S.W, cy = n.y * S.H;
+    const r = (NODE_RADIUS[n.type] || 7) + 4; // hit-test with padding
+    const dx = svgX - cx, dy = svgY - cy;
+    if (dx*dx + dy*dy <= r*r) return n;
+  }
+  return null;
+}
+
+function edgeAt(svgX, svgY) {
+  const fid = floorId();
+  const nodeIds = new Set(S.nodes.filter(n => n.floorId === fid).map(n => n.id));
+  const nodeMap = new Map(S.nodes.map(n => [n.id, n]));
+  for (const edge of S.edges) {
+    if (!nodeIds.has(edge.from) || !nodeIds.has(edge.to)) continue;
+    const a = nodeMap.get(edge.from), b = nodeMap.get(edge.to);
+    if (!a || !b) continue;
+    const d = pointToSegDist(svgX, svgY, a.x*S.W, a.y*S.H, b.x*S.W, b.y*S.H);
+    if (d < 6) return edge;
+  }
+  return null;
+}
+
+function pointToSegDist(px, py, ax, ay, bx, by) {
+  const dx = bx-ax, dy = by-ay;
+  const len2 = dx*dx + dy*dy;
+  if (len2 === 0) return Math.hypot(px-ax, py-ay);
+  const t = Math.max(0, Math.min(1, ((px-ax)*dx + (py-ay)*dy) / len2));
+  return Math.hypot(px - (ax+t*dx), py - (ay+t*dy));
+}
+
+function svgClick(e) {
+  // Avoid processing right-clicks
+  if (e.button !== 0) return;
+  const {x, y} = svgCoords(e);
+  const hitNode = nodeAt(x, y);
+  const hitEdge = hitNode ? null : edgeAt(x, y);
+
+  if (S.tool === 'place') {
+    if (hitNode) {
+      // Clicking existing node in place mode → select it
+      S.selectedId = hitNode.id;
+      updateInfoPanel();
+      renderGraph();
+    } else {
+      openNodePopup(x / S.W, y / S.H, e.clientX, e.clientY);
+    }
+  } else if (S.tool === 'connect') {
+    if (hitNode) {
+      if (!S.connectingFrom) {
+        S.connectingFrom = hitNode.id;
+        setStatus(`Connecting from "${hitNode.label || hitNode.id}" — click target node`);
+      } else if (hitNode.id !== S.connectingFrom) {
+        createEdge(S.connectingFrom, hitNode.id);
+        S.connectingFrom = null;
+        S.cursorSVG = null;
+      } else {
+        S.connectingFrom = null;
+        S.cursorSVG = null;
+      }
+      renderGraph();
+    }
+  } else if (S.tool === 'select') {
+    if (hitNode) {
+      S.selectedId = hitNode.id;
+    } else if (hitEdge) {
+      S.selectedId = hitEdge.id;
+    } else {
+      S.selectedId = null;
+    }
+    updateInfoPanel();
+    renderGraph();
+  } else if (S.tool === 'delete') {
+    if (hitNode) deleteNode(hitNode.id);
+    else if (hitEdge) deleteEdge(hitEdge.id);
+  }
+}
+
+function svgDoubleClick(e) {
+  // Double-click a node to rename
+  const {x, y} = svgCoords(e);
+  const hitNode = nodeAt(x, y);
+  if (hitNode) {
+    const label = prompt('New label:', hitNode.label || '');
+    if (label !== null) { hitNode.label = label; renderGraph(); renderFloorList(); }
+  }
+}
+
+// ────────────────────────────────────────────────────────────
+// NODE POPUP
+// ────────────────────────────────────────────────────────────
+let _pendingNX = 0, _pendingNY = 0;
+
+function openNodePopup(nx, ny, screenX, screenY) {
+  _pendingNX = nx; _pendingNY = ny;
+  const pop = document.getElementById('node-popup');
+  const isInterFloor = S.nodeType === 'stairwell' || S.nodeType === 'elevator';
+  document.getElementById('node-popup-group').style.display = isInterFloor ? 'block' : 'none';
+  document.getElementById('popup-title').textContent = `Place ${S.nodeType.charAt(0).toUpperCase() + S.nodeType.slice(1)}`;
+  document.getElementById('popup-label').value = '';
+  document.getElementById('popup-group').value = '';
+
+  // Position popup near click but keep in viewport
+  const pw = 230, ph = isInterFloor ? 160 : 120;
+  let left = screenX + 10, top = screenY - 10;
+  if (left + pw > window.innerWidth - 10) left = screenX - pw - 10;
+  if (top + ph > window.innerHeight - 10) top = window.innerHeight - ph - 10;
+  pop.style.left = left + 'px';
+  pop.style.top  = top + 'px';
+  pop.style.display = 'block';
+  setTimeout(() => document.getElementById('popup-label').focus(), 50);
+
+  // Enter key to confirm
+  document.getElementById('popup-label').onkeydown = e => { if (e.key === 'Enter') confirmPlacement(); if (e.key === 'Escape') cancelPlacement(); };
+  document.getElementById('popup-group').onkeydown = e => { if (e.key === 'Enter') confirmPlacement(); if (e.key === 'Escape') cancelPlacement(); };
+}
+
+function confirmPlacement() {
+  const label   = document.getElementById('popup-label').value.trim();
+  const groupId = document.getElementById('popup-group').value.trim() || null;
+  const node = {
+    id: uid(),
+    floorId: floorId(),
+    x: _pendingNX,
+    y: _pendingNY,
+    label,
+    type: S.nodeType,
+    groupId,
+  };
+  S.nodes.push(node);
+  document.getElementById('node-popup').style.display = 'none';
+  renderGraph();
+  renderFloorList();
+  setStatus(`Added ${node.type}: "${label || node.id}"`);
+}
+
+function cancelPlacement() {
+  document.getElementById('node-popup').style.display = 'none';
+}
+
+// ────────────────────────────────────────────────────────────
+// EDGES
+// ────────────────────────────────────────────────────────────
+function pixelDist(a, b) {
+  const dx = (a.x - b.x) * S.W;
+  const dy = (a.y - b.y) * S.H;
+  return Math.hypot(dx, dy);
+}
+
+function createEdge(fromId, toId, interFloor = false, customWeight = null) {
+  // Avoid duplicate edges
+  if (S.edges.find(e => (e.from === fromId && e.to === toId) || (e.from === toId && e.to === fromId))) {
+    setStatus('Edge already exists between these nodes.');
+    return;
+  }
+  const a = getNode(fromId), b = getNode(toId);
+  if (!a || !b) return;
+  const weight = customWeight !== null ? customWeight : pixelDist(a, b);
+  S.edges.push({ id: uid(), from: fromId, to: toId, weight, interFloor });
+  renderGraph();
+  setStatus(`Edge created (weight: ${Math.round(weight)})`);
+}
+
+function deleteEdge(id) {
+  S.edges = S.edges.filter(e => e.id !== id);
+  if (S.selectedId === id) { S.selectedId = null; updateInfoPanel(); }
+  renderGraph();
+}
+
+function deleteNode(id) {
+  S.nodes = S.nodes.filter(n => n.id !== id);
+  S.edges = S.edges.filter(e => e.from !== id && e.to !== id);
+  if (S.selectedId === id) { S.selectedId = null; updateInfoPanel(); }
+  if (S.connectingFrom === id) S.connectingFrom = null;
+  renderGraph();
+  renderFloorList();
+}
+
+// ────────────────────────────────────────────────────────────
+// INTER-FLOOR LINKING
+// ────────────────────────────────────────────────────────────
+function linkInterFloor() {
+  const interTypes = new Set(['stairwell', 'elevator']);
+  const groupNodes = {};
+  for (const n of S.nodes) {
+    if (!interTypes.has(n.type) || !n.groupId) continue;
+    if (!groupNodes[n.groupId]) groupNodes[n.groupId] = [];
+    groupNodes[n.groupId].push(n);
+  }
+  let created = 0;
+  for (const [, nodes] of Object.entries(groupNodes)) {
+    // Sort by floor index
+    nodes.sort((a, b) => S.floors.findIndex(f => f.id === a.floorId) - S.floors.findIndex(f => f.id === b.floorId));
+    for (let i = 0; i < nodes.length - 1; i++) {
+      const a = nodes[i], b = nodes[i+1];
+      if (!S.edges.find(e => (e.from===a.id&&e.to===b.id)||(e.from===b.id&&e.to===a.id))) {
+        S.edges.push({ id: uid(), from: a.id, to: b.id, weight: 50, interFloor: true });
+        created++;
+      }
+    }
+  }
+  renderGraph();
+  setStatus(`Linked ${created} inter-floor edge(s) across ${Object.keys(groupNodes).length} group(s).`);
+}
+
+// ────────────────────────────────────────────────────────────
+// INFO PANEL
+// ────────────────────────────────────────────────────────────
+function updateInfoPanel() {
+  const panel = document.getElementById('info-panel');
+  const id = S.selectedId;
+  if (!id) { panel.innerHTML = '<div id="info-empty">Click a node or edge to inspect it.</div>'; return; }
+
+  const node = getNode(id);
+  if (node) {
+    const floorName = S.floors.find(f => f.id === node.floorId)?.name || '?';
+    panel.innerHTML = `
+      <div class="info-label">Label</div>
+      <input class="info-input" id="ei-label" value="${escHtml(node.label)}" onchange="updateNode('label', this.value)">
+      <div class="info-label">Type</div>
+      <div class="info-val">${node.type}</div>
+      <div class="info-label">Floor</div>
+      <div class="info-val">${floorName}</div>
+      <div class="info-label">Group ID</div>
+      <input class="info-input" id="ei-group" value="${escHtml(node.groupId||'')}" placeholder="(none)" onchange="updateNode('groupId', this.value||null)">
+      <div class="info-label">Position</div>
+      <div class="info-val">${(node.x*100).toFixed(1)}%, ${(node.y*100).toFixed(1)}%</div>
+      <div class="info-label">Connections</div>
+      <div class="info-val">${S.edges.filter(e => e.from===id||e.to===id).length} edge(s)</div>
+      <button class="info-delete-btn" onclick="deleteNode('${id}'); updateInfoPanel()">Delete Node</button>
+    `;
+    return;
+  }
+  const edge = getEdge(id);
+  if (edge) {
+    const a = getNode(edge.from), b = getNode(edge.to);
+    panel.innerHTML = `
+      <div class="info-label">From</div>
+      <div class="info-val">${a ? (a.label || a.id) : '?'}</div>
+      <div class="info-label">To</div>
+      <div class="info-val">${b ? (b.label || b.id) : '?'}</div>
+      <div class="info-label">Weight (px distance)</div>
+      <input class="info-input" type="number" value="${Math.round(edge.weight)}" onchange="updateEdge('weight', +this.value)">
+      <div class="info-label">Inter-Floor</div>
+      <div class="info-val">${edge.interFloor ? 'Yes' : 'No'}</div>
+      <button class="info-delete-btn" onclick="deleteEdge('${id}'); updateInfoPanel()">Delete Edge</button>
+    `;
+  }
+}
+
+function updateNode(field, val) {
+  const node = getNode(S.selectedId);
+  if (node) { node[field] = val; renderGraph(); renderFloorList(); }
+}
+function updateEdge(field, val) {
+  const edge = getEdge(S.selectedId);
+  if (edge) { edge[field] = val; renderGraph(); }
+}
+
+function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ────────────────────────────────────────────────────────────
+// CLEAR
+// ────────────────────────────────────────────────────────────
+function clearFloor() {
+  if (!confirm('Remove all nodes on this floor?')) return;
+  const fid = floorId();
+  const removed = new Set(S.nodes.filter(n => n.floorId === fid).map(n => n.id));
+  S.nodes = S.nodes.filter(n => n.floorId !== fid);
+  S.edges = S.edges.filter(e => !removed.has(e.from) && !removed.has(e.to));
+  S.selectedId = null; S.connectingFrom = null;
+  renderGraph(); renderFloorList(); updateInfoPanel();
+}
+
+function clearAll() {
+  if (!confirm('Remove all nodes and edges for the entire building?')) return;
+  S.nodes = []; S.edges = []; S.selectedId = null; S.connectingFrom = null;
+  renderGraph(); renderFloorList(); updateInfoPanel();
+}
+
+// ────────────────────────────────────────────────────────────
+// EXPORT / IMPORT
+// ────────────────────────────────────────────────────────────
+function exportJSON() {
+  const data = {
+    buildingName: document.getElementById('building-name').value,
+    floors: S.floors,
+    nodes: S.nodes,
+    edges: S.edges,
+    meta: { exportedAt: new Date().toISOString(), nodeCount: S.nodes.length, edgeCount: S.edges.length },
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${data.buildingName.replace(/\s+/g,'-')}-graph.json`;
+  a.click();
+  setStatus(`Exported ${S.nodes.length} nodes, ${S.edges.length} edges.`);
+}
+
+async function importJSON(file) {
+  const text = await file.text();
+  const data = JSON.parse(text);
+  if (data.buildingName) document.getElementById('building-name').value = data.buildingName;
+  // Only import nodes/edges; floors come from the loaded PDF
+  S.nodes = data.nodes || [];
+  S.edges = data.edges || [];
+  S.selectedId = null;
+  renderGraph(); renderFloorList(); updateInfoPanel();
+  setStatus(`Imported ${S.nodes.length} nodes, ${S.edges.length} edges.`);
+}
+
+// ────────────────────────────────────────────────────────────
+// STATUS
+// ────────────────────────────────────────────────────────────
+function setStatus(msg) {
+  document.getElementById('statusbar').textContent = msg;
+}
+
+// ── Close popup on outside click ──
+document.addEventListener('click', e => {
+  const pop = document.getElementById('node-popup');
+  if (pop.style.display === 'block' && !pop.contains(e.target) && !document.getElementById('graph-svg').contains(e.target)) {
+    cancelPlacement();
+  }
+});
+
+// ── Keyboard shortcuts ──
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  const map = { p:'place', c:'connect', s:'select', d:'delete' };
+  if (map[e.key]) setTool(map[e.key]);
+  if (e.key === 'Escape') { S.connectingFrom = null; S.cursorSVG = null; cancelPlacement(); renderGraph(); }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && S.selectedId) {
+    const n = getNode(S.selectedId);
+    if (n) deleteNode(n.id);
+    else deleteEdge(S.selectedId);
+    updateInfoPanel();
+  }
+});
+</script>
+</body>
+</html>
