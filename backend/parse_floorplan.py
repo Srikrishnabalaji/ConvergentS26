@@ -64,16 +64,15 @@ class Edge:
 # ── Phase 1: Occupancy Grid ──────────────────────────────────────────────────
 
 def render_occupancy_grid(page, scale=3, min_seg_len=1, wall_thickness=7):
-    """Build a binary occupancy grid from vector paths + door erasing.
+    """Build a binary occupancy grid using hybrid raster + vector approach.
 
-    Strategy: draw only structural walls from vector data (not rasterization),
-    treating window rectangles as solid wall, then erase door openings.
-
-    1. Draw vector wall segments with visible thickness
-    2. Fill window rectangles solid (small rects on walls = windows)
-    3. Draw pillars and connect them to nearby walls
-    4. Morphological closing to seal corner/junction gaps
-    5. Erase door sweep areas to create passable openings
+    Strategy:
+    1. Rasterize the PDF page via PyMuPDF (walls, pillars, structural elements
+       are all naturally rendered correctly)
+    2. Threshold to binary grid
+    3. Detect doors from vector data (quarter-circle arcs in paths that also
+       contain straight lines = door leaf)
+    4. Erase door sweep areas to create passable openings
 
     Returns (grid, scale) where grid[y,x] = 255 means passable, 0 means wall.
     """
@@ -86,22 +85,34 @@ def render_occupancy_grid(page, scale=3, min_seg_len=1, wall_thickness=7):
     crop_left = int(w * margin)
     crop_right = int(w * (1.0 - margin))
 
-    grid = np.zeros((h, w), dtype=np.uint8)
-    grid[crop_top:crop_bottom, crop_left:crop_right] = 255
+    # === Step 1: Rasterize PDF page ===
+    pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale))
+    img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+    if pix.n == 4:
+        gray = cv2.cvtColor(img, cv2.COLOR_RGBA2GRAY)
+    elif pix.n == 3:
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    else:
+        gray = img.copy()
 
-    # === Step 1: Collect all wall line segments ===
-    # Filter out annotation/grid lines (>70% of page width/height)
+    # Binary threshold: dark pixels (walls/ink) → 0, light pixels → 255
+    _, grid = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
+
+    # === Step 1b: Overlay vector wall segments ===
+    # The raster catches pillars and structural elements correctly but walls
+    # are broken/dotted due to 0.06pt stroke width. Draw vector line segments
+    # on top to ensure walls are continuous and solid.
     MAX_LINE_FRAC = 0.70
-    wall_segments = []
     for path in page.get_drawings():
-        for item in path.get("items", []):
+        items = path.get("items", [])
+        for item in items:
             if item[0] == "l":
                 x0, y0 = item[1].x * scale, item[1].y * scale
                 x1, y1 = item[2].x * scale, item[2].y * scale
                 seg_len = math.hypot(x1 - x0, y1 - y0) / scale
                 if seg_len < min_seg_len:
                     continue
-                # Skip annotation/grid lines that span most of the page
+                # Skip annotation/grid lines spanning >70% of page
                 dx_pdf = abs(item[2].x - item[1].x)
                 dy_pdf = abs(item[2].y - item[1].y)
                 if dx_pdf > pw * MAX_LINE_FRAC and dy_pdf < 2:
@@ -110,52 +121,34 @@ def render_occupancy_grid(page, scale=3, min_seg_len=1, wall_thickness=7):
                     continue
                 cv2.line(grid, (int(x0), int(y0)), (int(x1), int(y1)),
                          0, wall_thickness)
-                wall_segments.append((int(x0), int(y0), int(x1), int(y1)))
-
-    # === Step 2: Handle rectangles (windows + structural elements) ===
-    # Small rectangles on walls = windows → fill solid
-    # Medium rectangles = structural elements → fill solid
-    # Large rectangles = room outlines → draw as wall outline only
-    for path in page.get_drawings():
-        for item in path.get("items", []):
-            if item[0] == "re":
+            elif item[0] == "re":
                 rect = item[1]
                 rx0, ry0 = int(rect.x0 * scale), int(rect.y0 * scale)
                 rx1, ry1 = int(rect.x1 * scale), int(rect.y1 * scale)
                 rw, rh = abs(rx1 - rx0), abs(ry1 - ry0)
-                rect_len = max(rw, rh) / scale
-                rect_short = min(rw, rh) / scale
-
-                if rect_len < min_seg_len:
-                    continue  # too small, skip
-
+                if max(rw, rh) / scale < min_seg_len:
+                    continue
                 if rw < 80 * scale and rh < 80 * scale:
-                    # Small/medium rect → fill solid (window or structural)
                     cv2.rectangle(grid, (rx0, ry0), (rx1, ry1), 0, -1)
-
-                    # Also extend wall through the rectangle to seal gaps
-                    # on each side. Draw wall lines along the long edges
-                    # extended by wall_thickness beyond the rect corners.
-                    ext = wall_thickness + 2
-                    if rw >= rh:
-                        # Horizontal rect — extend left and right
-                        cv2.line(grid, (rx0 - ext, ry0), (rx1 + ext, ry0),
-                                 0, wall_thickness)
-                        cv2.line(grid, (rx0 - ext, ry1), (rx1 + ext, ry1),
-                                 0, wall_thickness)
-                    else:
-                        # Vertical rect — extend top and bottom
-                        cv2.line(grid, (rx0, ry0 - ext), (rx0, ry1 + ext),
-                                 0, wall_thickness)
-                        cv2.line(grid, (rx1, ry0 - ext), (rx1, ry1 + ext),
-                                 0, wall_thickness)
                 else:
                     cv2.rectangle(grid, (rx0, ry0), (rx1, ry1), 0, wall_thickness)
 
-    # === Step 3: Detect and handle arcs (pillars + doors) ===
-    all_arcs = []
+    # Morphological closing to seal corner/junction gaps
+    wall_mask = cv2.bitwise_not(grid)
+    close_kernel = np.ones((5, 5), np.uint8)
+    wall_mask = cv2.morphologyEx(wall_mask, cv2.MORPH_CLOSE, close_kernel)
+    grid = cv2.bitwise_not(wall_mask)
+
+    # === Step 2: Detect doors from vector data ===
+    # A door is a quarter-circle arc in a path that also contains straight
+    # lines (the door leaf). Pillars/circles have no attached lines.
+    door_arcs = []
     for path in page.get_drawings():
-        for item in path.get("items", []):
+        items = path.get("items", [])
+        has_lines = any(i[0] == "l" for i in items)
+        if not has_lines:
+            continue  # no leaf lines → not a door
+        for item in items:
             if item[0] != "c":
                 continue
             p0 = (item[1].x, item[1].y)
@@ -164,11 +157,11 @@ def render_occupancy_grid(page, scale=3, min_seg_len=1, wall_thickness=7):
             p3 = (item[4].x, item[4].y)
             ok, acx, acy, ar = is_quarter_circle(p0, p1, p2, p3)
             if ok and 4 <= ar <= 70:
-                all_arcs.append((acx, acy, ar, p0, p3))
+                door_arcs.append((acx, acy, ar, p0, p3))
 
-    # Group arcs by center (increased tolerance for inaccurate center detection)
+    # Group arcs by center
     arc_centers = []
-    for (acx, acy, ar, p0, p3) in all_arcs:
+    for (acx, acy, ar, p0, p3) in door_arcs:
         merged = False
         for i, (ecx, ecy, er, cnt, arcs) in enumerate(arc_centers):
             if dist(acx, acy, ecx, ecy) < 8.0 and abs(ar - er) / max(ar, er) < 0.3:
@@ -178,88 +171,11 @@ def render_occupancy_grid(page, scale=3, min_seg_len=1, wall_thickness=7):
         if not merged:
             arc_centers.append((acx, acy, ar, 1, [(p0, p3)]))
 
-    # Classify: pillar vs door
-    # Pillars: 3+ arcs (full circle), OR any arc with small radius (< 12pt)
-    # Doors: arcs with larger radius (door swing radius is typically 24-36pt)
-    PILLAR_MAX_RADIUS = 12  # PDF points — pillar columns are small
-    def _is_pillar(cnt, radius):
-        if cnt >= 3:
-            return True
-        if radius <= PILLAR_MAX_RADIUS:
-            return True  # small radius = pillar, not door swing
-        return False
-
-    # Draw pillars as filled squares slightly larger than the circle.
+    # === Step 3: Erase door sweep areas ===
     for (acx, acy, ar, cnt, arcs) in arc_centers:
-        if _is_pillar(cnt, ar):
-            px_cx, px_cy = int(acx * scale), int(acy * scale)
-            px_r = int(ar * scale)
-            half = px_r + wall_thickness
-            cv2.rectangle(grid,
-                          (px_cx - half, px_cy - half),
-                          (px_cx + half, px_cy + half),
-                          0, -1)
-
-    # === Step 3b: Detect pillars by bounding-box heuristic ===
-    # Some circles/pillars aren't caught by quarter-circle Bezier detection.
-    # Detect by: roughly square bbox (5-10pt), containing ONLY curves (no lines),
-    # and the path must be a simple shape (few items).
-    pillar_centers_set = set()
-    for (acx, acy, ar, cnt, arcs) in arc_centers:
-        if _is_pillar(cnt, ar):
-            pillar_centers_set.add((int(acx), int(acy)))
-
-    for path in page.get_drawings():
-        items = path.get("items", [])
-        n_curves = sum(1 for i in items if i[0] == "c")
-        n_lines = sum(1 for i in items if i[0] == "l")
-        # Pillars are pure curve paths (circles), not mixed line+curve paths
-        # which are typically door assemblies or fixtures
-        if n_curves < 2 or n_lines > 0:
-            continue
-        pts_x, pts_y = [], []
-        for item in items:
-            if item[0] == "c":
-                pts_x.extend([item[1].x, item[2].x, item[3].x, item[4].x])
-                pts_y.extend([item[1].y, item[2].y, item[3].y, item[4].y])
-        if not pts_x:
-            continue
-        bw = max(pts_x) - min(pts_x)
-        bh = max(pts_y) - min(pts_y)
-        # Roughly square, size 5-15pt
-        if not (5 < bw < 15 and 5 < bh < 15):
-            continue
-        aspect = max(bw, bh) / max(min(bw, bh), 0.1)
-        if aspect > 1.5:
-            continue
-        cx_pdf = (max(pts_x) + min(pts_x)) / 2
-        cy_pdf = (max(pts_y) + min(pts_y)) / 2
-        if (int(cx_pdf), int(cy_pdf)) in pillar_centers_set:
-            continue
-        px_cx = int(cx_pdf * scale)
-        px_cy = int(cy_pdf * scale)
-        half = int(max(bw, bh) / 2 * scale) + wall_thickness
-        cv2.rectangle(grid,
-                      (px_cx - half, px_cy - half),
-                      (px_cx + half, px_cy + half),
-                      0, -1)
-        pillar_centers_set.add((int(cx_pdf), int(cy_pdf)))
-
-    # === Step 4: Morphological closing to seal corner/junction gaps ===
-    wall_mask = cv2.bitwise_not(grid)
-    close_kernel = np.ones((5, 5), np.uint8)
-    wall_mask = cv2.morphologyEx(wall_mask, cv2.MORPH_CLOSE, close_kernel)
-    grid = cv2.bitwise_not(wall_mask)
-
-    # === Step 5: Erase door sweep areas (AFTER closing) ===
-    for (acx, acy, ar, cnt, arcs) in arc_centers:
-        if _is_pillar(cnt, ar):
-            continue  # pillar, not door
-
         px_cx = int(acx * scale)
         px_cy = int(acy * scale)
-        # More aggressive radius to punch through walls sealed by short segments
-        px_r = int(ar * scale) + wall_thickness * 2
+        px_r = int(ar * scale) + wall_thickness
 
         for (p0, p3) in arcs:
             ax, ay = int(p0[0] * scale), int(p0[1] * scale)
@@ -282,8 +198,8 @@ def render_occupancy_grid(page, scale=3, min_seg_len=1, wall_thickness=7):
             pts_arr = np.array(poly_pts, dtype=np.int32)
             cv2.fillPoly(grid, [pts_arr], 255)
 
-            # Erase door leaf lines — wider to clear short-segment walls near doors
-            erase_t = wall_thickness + 8
+            # Erase door leaf lines
+            erase_t = wall_thickness + 2
             cv2.line(grid, (px_cx, px_cy), (ax, ay), 255, erase_t)
             cv2.line(grid, (px_cx, px_cy), (bx, by), 255, erase_t)
 
@@ -398,7 +314,9 @@ def has_line_of_sight(grid, ax, ay, bx, by, scale, pw, ph):
 
 def _los_pixels(grid, px1, py1, px2, py2):
     """Check line-of-sight between two pixel coordinates.
-    Checks EVERY pixel along the line (Bresenham) — no sampling gaps."""
+    Checks EVERY pixel along the line (Bresenham) — no sampling gaps.
+    Also checks diagonal neighbors to prevent corner-cutting through
+    1px-wide walls."""
     h, w = grid.shape
     dx = abs(px2 - px1)
     dy = abs(py2 - py1)
@@ -415,10 +333,18 @@ def _los_pixels(grid, px1, py1, px2, py2):
         if x == px2 and y == py2:
             break
         e2 = 2 * err
-        if e2 > -dy:
+        step_x = e2 > -dy
+        step_y = e2 < dx
+        if step_x and step_y:
+            # Diagonal step — check both adjacent pixels to prevent
+            # cutting through a 1px wall corner
+            if (0 <= y + sy < h and 0 <= x < w and grid[y + sy, x] == 0 and
+                0 <= y < h and 0 <= x + sx < w and grid[y, x + sx] == 0):
+                return False
+        if step_x:
             err -= dy
             x += sx
-        if e2 < dx:
+        if step_y:
             err += dx
             y += sy
     return True
@@ -740,7 +666,7 @@ def line_intersect(px, py, dx, dy, qx, qy, ex, ey):
     t = ((qx - px) * (-ey) - (qy - py) * (-ex)) / det
     return px + t * dx, py + t * dy
 
-def is_quarter_circle(p0, p1, p2, p3, tol=0.18):
+def is_quarter_circle(p0, p1, p2, p3, tol=0.25):
     """Check if cubic Bezier approximates a 90 arc (door swing)."""
     t0x, t0y = p1[0]-p0[0], p1[1]-p0[1]
     t3x, t3y = p3[0]-p2[0], p3[1]-p2[1]
