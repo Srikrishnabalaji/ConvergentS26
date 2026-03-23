@@ -1,17 +1,16 @@
 import React from 'react';
-import { StyleSheet } from 'react-native';
-
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
+import { View, Text, SafeAreaView, StyleSheet } from 'react-native';
 
 export default function MapScreen() {
   return (
-    <ThemedView style={styles.container}>
-      <ThemedText type="title">Map</ThemedText>
-    </ThemedView>
+    <SafeAreaView style={styles.safeArea}>
+      <View className="flex-1 items-center justify-center">
+        <Text className="text-[32px] font-bold text-black">Map</Text>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  safeArea: { flex: 1, backgroundColor: '#fff' },
 });
