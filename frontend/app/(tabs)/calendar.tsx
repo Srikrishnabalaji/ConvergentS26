@@ -5,7 +5,7 @@ import {
   View, 
   FlatList, 
   TouchableOpacity, 
-  SafeAreaView,
+  //SafeAreaView,
   Modal,
   TextInput,
   Pressable,
@@ -15,6 +15,7 @@ import {
   ScrollView,
   Switch
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Calendar } from 'react-native-calendars';
 import { useRouter } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -86,7 +87,13 @@ export default function CalendarScreen() {
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [timeValue, setTimeValue] = useState(new Date());
 
-  const [newEvent, setNewEvent] = useState({
+  const [newEvent, setNewEvent] = useState<{
+    title: string;
+    location: string;
+    time: string;
+    notify: boolean;
+    notifyInAdvance: number | null;
+  }>({
     title: '',
     location: '',
     time: '',
@@ -188,14 +195,6 @@ export default function CalendarScreen() {
       );
 
       const triggerDate = new Date(eventTime.getTime() - newEvent.notifyInAdvance * 60000);
-      
-      // const triggerDate = new Date(
-      //   parseInt(year),
-      //   parseInt(month) - 1, 
-      //   parseInt(day),
-      //   timeValue.getHours(),
-      //   timeValue.getMinutes()
-      // );
 
       if (triggerDate > new Date()) {
         await Notifications.scheduleNotificationAsync({
@@ -234,7 +233,7 @@ export default function CalendarScreen() {
       }
     });
 
-    setNewEvent({ title: '', location: '', time: '', notify: false });
+    setNewEvent({ title: '', location: '', time: '', notify: false, notifyInAdvance: null});
     setTimeValue(new Date());
     setEditingEventId(null);
     setShowTimePicker(false);
@@ -377,7 +376,7 @@ export default function CalendarScreen() {
                         style={[styles.chip, isSelected && styles.chipSelected]}
                         onPress={() => setNewEvent(prev => ({ 
                           ...prev, 
-                          notificationOffset: option.value, 
+                          notifyInAdvance: option.value, 
                           notify: option.value !== null 
                         }))}
                       >
