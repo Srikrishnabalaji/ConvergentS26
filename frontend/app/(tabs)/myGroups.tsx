@@ -61,9 +61,9 @@ function GroupCard({
         <View className="w-[52px] h-[52px] rounded-lg bg-gray-300 mr-3.5" />
       )}
       <View className="flex-1">
-        <Text className="text-[17px] font-semibold text-black mb-0.5">{group.name}</Text>
+        <Text className="text-[17px] font-semibold text-primary mb-0.5">{group.name}</Text>
         <View className="flex-row items-center">
-          {showActiveDot && <View className="w-2 h-2 rounded-full bg-green-500 mr-1.5" />}
+          {showActiveDot && <View className="w-2 h-2 rounded-full bg-primary mr-1.5" />}
           <Text className="text-[13px] text-gray-500">{subtitle}</Text>
         </View>
       </View>
@@ -81,29 +81,29 @@ function GroupCard({
       )}
       {isAdmin && onEdit && (
         <TouchableOpacity
-          className="border border-gray-300 px-4 py-2 rounded-lg mr-2"
+          className="w-[76px] h-9 border border-gray-300 rounded-lg mr-2 items-center justify-center"
           onPress={onEdit}
         >
-          <Text className="text-black text-sm font-semibold">Edit</Text>
+          <Text className="text-primary text-sm font-semibold">Edit</Text>
         </TouchableOpacity>
       )}
       {onLeave && (
         <TouchableOpacity
-          className="px-4 py-2 mr-2"
+          className="w-[76px] h-9 bg-red-50 border border-red-200 rounded-lg mr-2 items-center justify-center"
           onPress={onLeave}
           disabled={leaving}
           style={leaving ? { opacity: 0.7 } : undefined}
         >
           {leaving ? (
-            <ActivityIndicator size="small" color="#666" />
+            <ActivityIndicator size="small" color="#ef4444" />
           ) : (
-            <Text className="text-gray-500 text-sm">Leave</Text>
+            <Text className="text-red-500 text-sm font-semibold">Leave</Text>
           )}
         </TouchableOpacity>
       )}
       {isJoinable && onJoin && (
         <TouchableOpacity
-          className="bg-black px-4 py-2 rounded-lg"
+          className="w-[76px] h-9 bg-primary rounded-lg items-center justify-center"
           style={joining ? { opacity: 0.7 } : undefined}
           onPress={onJoin}
           disabled={joining}
@@ -259,14 +259,14 @@ export default function MyGroupsScreen() {
                 ) : (
                   <View className="w-[120px] h-[120px] rounded-xl bg-gray-300 mb-4" />
                 )}
-                <Text className="text-xl font-bold text-black text-center mb-1">
+                <Text className="text-xl font-bold text-primary text-center mb-1">
                   {selectedGroup.name}
                 </Text>
                 <Text className="text-sm text-gray-500 mb-4">
                   {selectedGroup.member_count ?? 0} Members
                 </Text>
                 <TouchableOpacity
-                  className="bg-black px-6 py-3 rounded-xl"
+                  className="bg-primary px-6 py-3 rounded-xl"
                   onPress={() => setSelectedGroup(null)}
                 >
                   <Text className="text-white font-semibold">Close</Text>
@@ -285,13 +285,21 @@ export default function MyGroupsScreen() {
         }
       >
         <View className="flex-row items-center justify-between mt-4 mb-4">
-          <Text className="text-[34px] font-bold text-black">Groups</Text>
-          <TouchableOpacity
-            className="w-11 h-11 rounded-full bg-gray-200 items-center justify-center"
-            onPress={() => router.push('/create-group' as never)}
-          >
-            <MaterialIcons name="add" size={28} color="#000" />
-          </TouchableOpacity>
+          <Text className="text-[34px] font-bold text-primary">Groups</Text>
+          <View className="flex-row items-center">
+            <TouchableOpacity
+              className="w-11 h-11 rounded-full bg-gray-200 items-center justify-center mr-2"
+              onPress={() => router.push('/(tabs)/friends' as never)}
+            >
+              <MaterialIcons name="groups" size={22} color="#007C6E" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              className="w-11 h-11 rounded-full bg-gray-200 items-center justify-center"
+              onPress={() => router.push('/create-group' as never)}
+            >
+              <MaterialIcons name="add" size={28} color="#007C6E" />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View className="flex-row bg-gray-200 rounded-[10px] p-0.5 mb-6">
@@ -300,8 +308,8 @@ export default function MyGroupsScreen() {
             style={activeTab === 'my_groups' ? tabActiveStyle : undefined}
             onPress={() => setActiveTab('my_groups')}
           >
-            <Text className={`text-sm font-medium ${activeTab === 'my_groups' ? 'text-black font-semibold' : 'text-gray-500'}`}>
-              My Groups
+            <Text className={`text-sm font-medium ${activeTab === 'my_groups' ? 'text-primary font-semibold' : 'text-gray-500'}`}>
+              All Groups
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -309,8 +317,8 @@ export default function MyGroupsScreen() {
             style={activeTab === 'friends' ? tabActiveStyle : undefined}
             onPress={() => setActiveTab('friends')}
           >
-            <Text className={`text-sm font-medium ${activeTab === 'friends' ? 'text-black font-semibold' : 'text-gray-500'}`}>
-              Friends
+            <Text className={`text-sm font-medium ${activeTab === 'friends' ? 'text-primary font-semibold' : 'text-gray-500'}`}>
+              Friend Groups
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -318,15 +326,15 @@ export default function MyGroupsScreen() {
             style={activeTab === 'campus_org' ? tabActiveStyle : undefined}
             onPress={() => setActiveTab('campus_org')}
           >
-            <Text className={`text-sm font-medium ${activeTab === 'campus_org' ? 'text-black font-semibold' : 'text-gray-500'}`}>
+            <Text className={`text-sm font-medium ${activeTab === 'campus_org' ? 'text-primary font-semibold' : 'text-gray-500'}`}>
               Campus Orgs
             </Text>
           </TouchableOpacity>
         </View>
 
-        <Text className="text-[13px] font-semibold text-gray-500 tracking-wide mb-3">YOUR GROUPS</Text>
+        <Text className="text-[13px] font-semibold text-black tracking-wide mb-3">YOUR GROUPS</Text>
         {loading && myGroups.length === 0 ? (
-          <ActivityIndicator className="my-6" color="#000" />
+          <ActivityIndicator className="my-6" color="#007C6E" />
         ) : filteredMyGroups.length === 0 ? (
           <Text className="text-sm text-gray-400 mb-4">No groups yet</Text>
         ) : (
@@ -344,7 +352,7 @@ export default function MyGroupsScreen() {
           ))
         )}
 
-        <Text className="text-[13px] font-semibold text-gray-500 tracking-wide mb-3">INVITES</Text>
+        <Text className="text-[13px] font-semibold text-black tracking-wide mb-3">INVITES</Text>
         {filteredDiscover.length === 0 ? (
           <Text className="text-sm text-gray-400 mb-4">No groups to join</Text>
         ) : (

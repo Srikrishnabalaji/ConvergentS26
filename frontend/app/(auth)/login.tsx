@@ -66,7 +66,7 @@ export default function LoginScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View className="mb-9">
-          <Text className="text-[32px] font-bold text-black mb-2">
+          <Text className="text-[32px] font-bold text-primary mb-2">
             {isSignUp ? 'Create Account' : 'Welcome Back'}
           </Text>
           <Text className="text-base text-gray-500">
@@ -115,7 +115,7 @@ export default function LoginScreen() {
           </View>
 
           <TouchableOpacity
-            className="bg-black rounded-[10px] py-4 items-center mt-2"
+            className="bg-primary rounded-[10px] py-4 items-center mt-2"
             onPress={isSignUp ? handleSignUp : handleSignIn}
             disabled={loading}
           >
@@ -134,7 +134,7 @@ export default function LoginScreen() {
             {isSignUp ? 'Already have an account?' : "Don't have an account?"}
           </Text>
           <TouchableOpacity onPress={() => setIsSignUp(!isSignUp)}>
-            <Text className="text-sm font-semibold text-black">
+            <Text className="text-sm font-semibold text-primary">
               {isSignUp ? ' Sign In' : ' Sign Up'}
             </Text>
           </TouchableOpacity>

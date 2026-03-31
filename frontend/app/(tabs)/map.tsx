@@ -26,7 +26,7 @@ export default function MapScreen() {
       <View style={styles.container}>
         {/* Header matching Groups/Calendar screen style */}
         <View className="flex-row items-center justify-between mt-4 mb-4 px-5">
-          <Text className="text-[34px] font-bold text-black">Map</Text>
+          <Text className="text-[34px] font-bold text-primary">Map</Text>
         </View>
 
         <View className="px-5">
@@ -63,7 +63,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#007C6E',
     fontSize: 16,
     marginBottom: 10,
   },
@@ -75,6 +75,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#007C6E',
   }
 });

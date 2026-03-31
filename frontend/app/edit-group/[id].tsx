@@ -156,7 +156,7 @@ export default function EditGroupScreen() {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View className="flex-1 justify-center items-center">
-          <ActivityIndicator size="large" color="#000" />
+          <ActivityIndicator size="large" color="#007C6E" />
         </View>
       </SafeAreaView>
     );
@@ -167,9 +167,9 @@ export default function EditGroupScreen() {
       <View className="flex-1 px-5 pt-2">
         <View className="flex-row items-center justify-between mb-6">
           <TouchableOpacity onPress={() => router.back()} className="p-2 -ml-2">
-            <MaterialIcons name="close" size={28} color="#000" />
+            <MaterialIcons name="close" size={28} color="#007C6E" />
           </TouchableOpacity>
-          <Text className="text-[20px] font-semibold text-black">Edit Group</Text>
+          <Text className="text-[20px] font-semibold text-primary">Edit Group</Text>
           <View className="w-10" />
         </View>
 
@@ -200,13 +200,13 @@ export default function EditGroupScreen() {
           <Switch
             value={isCampusOrg}
             onValueChange={setIsCampusOrg}
-            trackColor={{ false: '#e5e7eb', true: '#d1d5db' }}
-            thumbColor={isCampusOrg ? '#000' : '#f3f4f6'}
+            trackColor={{ false: '#e5e7eb', true: '#66b9af' }}
+            thumbColor={isCampusOrg ? '#007C6E' : '#f3f4f6'}
           />
         </View>
 
         <TouchableOpacity
-          className="bg-black rounded-[10px] py-4 items-center mt-8"
+          className="bg-primary rounded-[10px] py-4 items-center mt-8"
           onPress={handleSave}
           disabled={loading}
           style={loading ? { opacity: 0.7 } : undefined}

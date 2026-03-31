@@ -33,11 +33,11 @@ export default function CalendarScreen() {
       <Calendar
         onDayPress={(day: any) => setSelectedDate(day.dateString)}
         markedDates={{
-          [selectedDate]: { selected: true, selectedColor: '#333' }
+          [selectedDate]: { selected: true, selectedColor: '#007C6E' }
         }}
         theme={{ 
-          todayTextColor: '#00adf5', 
-          arrowColor: 'black' 
+          todayTextColor: '#007C6E', 
+          arrowColor: '#007C6E' 
         }}
       />
       <View style={styles.listContainer}>
@@ -54,7 +54,7 @@ export default function CalendarScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  container: { flex: 1, backgroundColor: '#fff' },
   listContainer: { flex: 1, padding: 20 },
   dateHeader: { fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: '#333' },
   eventCard: { flexDirection: 'row', backgroundColor: 'white', padding: 15, borderRadius: 10, marginBottom: 10, borderWidth: 1, borderColor: '#ddd' },

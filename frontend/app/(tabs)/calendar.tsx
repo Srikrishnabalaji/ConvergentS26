@@ -113,13 +113,13 @@ export default function CalendarScreen() {
   const markedDates = useMemo(() => {
     const marked: Record<string, any> = {};
     Object.keys(events).forEach(date => {
-      marked[date] = { marked: true, dotColor: '#00adf5' };
+      marked[date] = { marked: true, dotColor: '#007C6E' };
     });
     
     marked[selectedDate] = {
       ...(marked[selectedDate] || {}),
       selected: true,
-      selectedColor: '#333',
+      selectedColor: '#007C6E',
     };
     return marked;
   }, [selectedDate, events]);
@@ -272,7 +272,7 @@ export default function CalendarScreen() {
       
       <View style={styles.actionButtonsContainer}>
         <TouchableOpacity onPress={() => handleOpenEditModal(item)} style={styles.actionButton}>
-          <MaterialIcons name="edit" size={22} color="#00adf5" />
+          <MaterialIcons name="edit" size={22} color="#007C6E" />
         </TouchableOpacity>
       </View>
     </View>
@@ -323,7 +323,7 @@ export default function CalendarScreen() {
                   style={styles.timeSelector}
                   onPress={() => setShowTimePicker(true)}
                 >
-                  <MaterialIcons name="access-time" size={20} color="#000" style={{ marginRight: 8 }} />
+                  <MaterialIcons name="access-time" size={20} color="#007C6E" style={{ marginRight: 8 }} />
                   <Text style={[styles.timeSelectorText, !newEvent.time && { color: '#999' }]}>
                     {newEvent.time || 'Tap to select time'}
                   </Text>
@@ -358,7 +358,7 @@ export default function CalendarScreen() {
                   <Switch
                     value={newEvent.notify}
                     onValueChange={(value) => setNewEvent(prev => ({...prev, notify: value}))}
-                    trackColor={{ false: '#d3d3d3', true: '#00adf5' }}
+                    trackColor={{ false: '#d3d3d3', true: '#66b9af' }}
                     thumbColor={Platform.OS === 'ios' ? '#fff' : newEvent.notify ? '#fff' : '#f4f3f4'}
                   />
                 </View>
@@ -389,7 +389,7 @@ export default function CalendarScreen() {
         <View style={styles.headerRow}>
           <Text style={styles.headerTitle}>Calendar</Text>
           <TouchableOpacity style={styles.headerAddButton} onPress={handleOpenAddModal}>
-            <MaterialIcons name="add" size={28} color="#000" />
+            <MaterialIcons name="add" size={28} color="#007C6E" />
           </TouchableOpacity>
         </View>
 
@@ -397,7 +397,7 @@ export default function CalendarScreen() {
           current={TODAY}
           onDayPress={(day: any) => setSelectedDate(day.dateString)}
           markedDates={markedDates}
-          theme={{ todayTextColor: '#00adf5', arrowColor: 'black' }}
+          theme={{ todayTextColor: '#007C6E', arrowColor: '#007C6E' }}
         />
         
         <View style={styles.listContainer}>
@@ -419,7 +419,7 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#ffffff' },
   container: { flex: 1, backgroundColor: '#ffffff' },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 16, marginBottom: 16, paddingHorizontal: 20 },
-  headerTitle: { fontSize: 34, fontWeight: 'bold', color: '#000' },
+  headerTitle: { fontSize: 34, fontWeight: 'bold', color: '#007C6E' },
   headerAddButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center' },
   listContainer: { flex: 1, paddingHorizontal: 20, paddingTop: 10 },
   dateHeader: { fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: '#333' },
@@ -446,7 +446,7 @@ const styles = StyleSheet.create({
   timeSelectorText: { fontSize: 16, color: '#000' },
   iosPickerContainer: { backgroundColor: '#f9f9f9', borderRadius: 12, marginTop: 8, overflow: 'hidden' },
   iosPickerDoneButton: { backgroundColor: '#e0e0e0', padding: 12, alignItems: 'center' },
-  iosPickerDoneText: { fontSize: 16, fontWeight: '600', color: '#00adf5' },
+  iosPickerDoneText: { fontSize: 16, fontWeight: '600', color: '#007C6E' },
   switchContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 24, marginBottom: 20, paddingVertical: 12, paddingHorizontal: 16, backgroundColor: '#f9f9f9', borderRadius: 12, borderWidth: 1, borderColor: '#f0f0f0' },
   switchLabel: { fontSize: 16, fontWeight: '500', color: '#333' },
   deleteFormButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#ffebe9', paddingVertical: 14, borderRadius: 12, marginBottom: 20, borderWidth: 1, borderColor: '#ffc1c0' },
@@ -454,6 +454,6 @@ const styles = StyleSheet.create({
   modalButtons: { flexDirection: 'row', padding: 24, paddingTop: 16, gap: 12, borderTopWidth: 1, borderTopColor: '#f0f0f0' },
   cancelButton: { flex: 1, paddingVertical: 16, borderRadius: 12, backgroundColor: '#f5f5f5', alignItems: 'center' },
   cancelButtonText: { fontSize: 16, fontWeight: '600', color: '#666' },
-  addButton: { flex: 1, paddingVertical: 16, borderRadius: 12, backgroundColor: '#000', alignItems: 'center' },
+  addButton: { flex: 1, paddingVertical: 16, borderRadius: 12, backgroundColor: '#007C6E', alignItems: 'center' },
   addButtonText: { fontSize: 16, fontWeight: '600', color: '#fff' },
 });
