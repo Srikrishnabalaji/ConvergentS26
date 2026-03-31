@@ -91,6 +91,7 @@ export default function CalendarScreen() {
     location: '',
     time: '',
     notify: false,
+    notifyInAdvance: null,
   });
   const router = useRouter();
 
@@ -148,7 +149,7 @@ export default function CalendarScreen() {
 
   const handleOpenAddModal = () => {
     setEditingEventId(null);
-    setNewEvent({ title: '', location: '', time: '', notify: false });
+    setNewEvent({ title: '', location: '', time: '', notify: false, notifyInAdvance: null});
     setTimeValue(new Date());
     setShowAddModal(true);
   };
@@ -160,6 +161,7 @@ export default function CalendarScreen() {
       location: event.location,
       time: event.time,
       notify: event.notify,
+      notifyInAdvance: event.notifyInAdvance ?? null,
     });
     setTimeValue(parseTimeString(event.time));
     setShowAddModal(true);
@@ -175,9 +177,9 @@ export default function CalendarScreen() {
       return;
     }
 
-    if (newEvent.notify) {
+    if (newEvent.notify && newEvent.notifyInAdvance != null) {
       const [year, month, day] = selectedDate.split('-');
-      const triggerDate = new Date(
+      const eventTime = new Date(
         parseInt(year),
         parseInt(month) - 1, 
         parseInt(day),
@@ -185,17 +187,27 @@ export default function CalendarScreen() {
         timeValue.getMinutes()
       );
 
+      const triggerDate = new Date(eventTime.getTime() - newEvent.notifyInAdvance * 60000);
+      
+      // const triggerDate = new Date(
+      //   parseInt(year),
+      //   parseInt(month) - 1, 
+      //   parseInt(day),
+      //   timeValue.getHours(),
+      //   timeValue.getMinutes()
+      // );
+
       if (triggerDate > new Date()) {
         await Notifications.scheduleNotificationAsync({
           content: {
             title: `${newEvent.title}`,
-            body: newEvent.location ? `Head over to ${newEvent.location}` : 'Your event is starting now!',
+            body: newEvent.location ? `Head to ${newEvent.location}` : 'Your event is starting now!',
             sound: true,
           },
           trigger: { type: 'date', date: triggerDate } as Notifications.DateTriggerInput,
         });
       } else {
-        Alert.alert("Note", "The time you selected is in the past, so your phone won't buzz.");
+        Alert.alert("Note", "The time you selected is in the past, so you will not be notified");
       }
     }
 
@@ -266,7 +278,7 @@ export default function CalendarScreen() {
             </View>
             <Text style={styles.eventSubtitle}>{item.location}</Text>
           </View>
-          <MaterialIcons name="chevron-right" size={24} color="#999" />
+          <MaterialIcons name="location-on" size={24} color="#999" />
         </View>
       </TouchableOpacity>
       
@@ -350,18 +362,32 @@ export default function CalendarScreen() {
                   </View>
                 )}
 
-                <View style={styles.switchContainer}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <MaterialIcons name="notifications-none" size={20} color="#333" style={{ marginRight: 8 }} />
-                    <Text style={styles.switchLabel}>Notify me at start time</Text>
-                  </View>
-                  <Switch
-                    value={newEvent.notify}
-                    onValueChange={(value) => setNewEvent(prev => ({...prev, notify: value}))}
-                    trackColor={{ false: '#d3d3d3', true: '#66b9af' }}
-                    thumbColor={Platform.OS === 'ios' ? '#fff' : newEvent.notify ? '#fff' : '#f4f3f4'}
-                  />
-                </View>
+                <Text style={styles.label}>Alert</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+                  {[
+                    { label: 'None', value: null },
+                    { label: 'At start', value: 0 },
+                    { label: '10 min before', value: 10 },
+                    { label: '1 hour before', value: 60 }
+                  ].map((option) => {
+                    const isSelected = newEvent.notifyInAdvance === option.value;
+                    return (
+                      <TouchableOpacity
+                        key={option.label}
+                        style={[styles.chip, isSelected && styles.chipSelected]}
+                        onPress={() => setNewEvent(prev => ({ 
+                          ...prev, 
+                          notificationOffset: option.value, 
+                          notify: option.value !== null 
+                        }))}
+                      >
+                        <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
+                          {option.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
 
                 {editingEventId && (
                   <TouchableOpacity style={styles.deleteFormButton} onPress={handleDeleteEvent}>
@@ -424,7 +450,7 @@ const styles = StyleSheet.create({
   listContainer: { flex: 1, paddingHorizontal: 20, paddingTop: 10 },
   dateHeader: { fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: '#333' },
   eventCardWrapper: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  eventCard: { flexDirection: 'row', backgroundColor: '#fff', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#eaeaea', alignItems: 'center', flex: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 2 },
+  eventCard: { flexDirection: 'row', backgroundColor: '#fff', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#eaeaea', alignItems: 'center', flex: 1},
   actionButtonsContainer: { flexDirection: 'row', alignItems: 'center', marginLeft: 8 },
   actionButton: { padding: 8 },
   eventTimeBox: { justifyContent: 'center', marginRight: 15, minWidth: 70 },
@@ -456,4 +482,10 @@ const styles = StyleSheet.create({
   cancelButtonText: { fontSize: 16, fontWeight: '600', color: '#666' },
   addButton: { flex: 1, paddingVertical: 16, borderRadius: 12, backgroundColor: '#007C6E', alignItems: 'center' },
   addButtonText: { fontSize: 16, fontWeight: '600', color: '#fff' },
+  
+  chipRow: { flexDirection: 'row', marginTop: 8, marginBottom: 20 },
+  chip: { paddingVertical: 10, paddingHorizontal: 16, backgroundColor: '#f0f0f0', borderRadius: 20, marginRight: 10, borderWidth: 1, borderColor: '#e0e0e0' },
+  chipSelected: { backgroundColor: '#007C6E', borderColor: '#007C6E' },
+  chipText: { fontSize: 14, fontWeight: '500', color: '#666' },
+  chipTextSelected: { color: '#fff' },
 });
