@@ -92,7 +92,9 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-/** Fetch a real walking route from OSRM (free, no API key). */
+/** Fetch a real walking route from OSRM (free, no API key).
+ *  Tries foot profile first; falls back to driving profile (always up)
+ *  with walking-speed duration estimate. */
 async function fetchWalkingRoute(
   start: { latitude: number; longitude: number },
   end: { latitude: number; longitude: number },
@@ -101,44 +103,56 @@ async function fetchWalkingRoute(
   distanceKm: number;
   durationMin: number;
 }> {
-  try {
-    const url =
-      `https://router.project-osrm.org/route/v1/foot/` +
-      `${start.longitude},${start.latitude};${end.longitude},${end.latitude}` +
-      `?overview=full&geometries=geojson`;
+  const coordStr = `${start.longitude},${start.latitude};${end.longitude},${end.latitude}`;
+  const qs = 'overview=full&geometries=geojson';
 
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('OSRM request failed');
+  for (const profile of ['foot', 'driving'] as const) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
 
-    const data = await res.json();
-    const route = data.routes?.[0];
-    if (!route) throw new Error('No route found');
+      const res = await fetch(
+        `https://router.project-osrm.org/route/v1/${profile}/${coordStr}?${qs}`,
+        { signal: controller.signal },
+      );
+      clearTimeout(timeout);
 
-    const coords = route.geometry.coordinates.map(
-      ([lng, lat]: [number, number]) => ({ latitude: lat, longitude: lng }),
-    );
+      if (!res.ok) continue;
 
-    return {
-      coords,
-      distanceKm: route.distance / 1000,
-      durationMin: Math.max(1, Math.round(route.duration / 60)),
-    };
-  } catch {
-    // Fallback: straight line if OSRM fails
-    return {
-      coords: [start, end],
-      distanceKm: haversineKm(
-        start.latitude, start.longitude,
-        end.latitude, end.longitude,
-      ),
-      durationMin: Math.max(
-        1,
-        Math.round(
-          (haversineKm(start.latitude, start.longitude, end.latitude, end.longitude) / 5) * 60,
-        ),
-      ),
-    };
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('json')) continue;
+
+      const data = await res.json();
+      if (data.code !== 'Ok') continue;
+
+      const route = data.routes?.[0];
+      if (!route?.geometry?.coordinates?.length) continue;
+
+      const points = route.geometry.coordinates.map(
+        ([lng, lat]: [number, number]) => ({ latitude: lat, longitude: lng }),
+      );
+
+      const distanceKm = route.distance / 1000;
+      // foot profile gives walking duration; driving profile needs conversion
+      const durationMin =
+        profile === 'foot'
+          ? Math.max(1, Math.round(route.duration / 60))
+          : Math.max(1, Math.round((distanceKm / 5) * 60)); // ~5 km/h walking
+
+      return { coords: points, distanceKm, durationMin };
+    } catch {
+      // timeout or network error — try next profile
+      continue;
+    }
   }
+
+  // Both profiles failed — straight-line fallback
+  const d = haversineKm(start.latitude, start.longitude, end.latitude, end.longitude);
+  return {
+    coords: [start, end],
+    distanceKm: d,
+    durationMin: Math.max(1, Math.round((d / 5) * 60)),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -224,34 +238,9 @@ export default function MapScreen() {
     };
   }, [query]);
 
-  // Fetch real walking route when a place is selected
-  useEffect(() => {
-    if (!selectedPlace) {
-      setRouteCoords([]);
-      setRouteDistKm(0);
-      setRouteWalkMin(0);
-      return;
-    }
-
-    let cancelled = false;
-    (async () => {
-      const result = await fetchWalkingRoute(userLocation, {
-        latitude: selectedPlace.latitude,
-        longitude: selectedPlace.longitude,
-      });
-      if (!cancelled) {
-        setRouteCoords(result.coords);
-        setRouteDistKm(result.distanceKm);
-        setRouteWalkMin(result.durationMin);
-      }
-    })();
-
-    return () => { cancelled = true; };
-  }, [selectedPlace, userLocation]);
-
   // Handlers
   const handleSelectPlace = useCallback(
-    (item: SearchItem) => {
+    async (item: SearchItem) => {
       setSelectedPlace(item);
       setQuery(item.name);
       setViewState('navigation');
@@ -266,10 +255,17 @@ export default function MapScreen() {
       });
 
       // Fit map to show both user and destination
+      const dest = { latitude: item.latitude, longitude: item.longitude };
       mapRef.current?.fitToCoordinates(
-        [userLocation, { latitude: item.latitude, longitude: item.longitude }],
+        [userLocation, dest],
         { edgePadding: { top: 140, right: 60, bottom: 280, left: 60 }, animated: true },
       );
+
+      // Fetch real walking route
+      const result = await fetchWalkingRoute(userLocation, dest);
+      setRouteCoords(result.coords);
+      setRouteDistKm(result.distanceKm);
+      setRouteWalkMin(result.durationMin);
     },
     [userLocation],
   );
@@ -284,6 +280,9 @@ export default function MapScreen() {
       setViewState('default');
       setSelectedPlace(null);
       setQuery('');
+      setRouteCoords([]);
+      setRouteDistKm(0);
+      setRouteWalkMin(0);
       mapRef.current?.animateToRegion(UT_CAMPUS_REGION, 400);
     } else if (viewState === 'building') {
       setViewState('navigation');

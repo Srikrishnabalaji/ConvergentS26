@@ -1,3 +1,38 @@
+# Dependencies
+node_modules/
+
+# Environment variables
 .env
-node_modules
-.expo
+.env.local
+.env*.local
+
+# Expo
+.expo/
+dist/
+web-build/
+
+# Native build artifacts
+ios/
+android/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+
+# Logs
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# Build outputs
+*.tsbuildinfo
