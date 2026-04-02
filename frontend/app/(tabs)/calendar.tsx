@@ -13,7 +13,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Switch
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Calendar } from 'react-native-calendars';

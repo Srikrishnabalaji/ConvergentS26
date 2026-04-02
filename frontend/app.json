@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "convergent",
-    "slug": "convergent",
+    "name": "WavePoint",
+    "slug": "wavepoint",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "convergent",
+    "scheme": "wavepoint",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -13,7 +13,7 @@
       "NSLocationAlwaysUsageDescription": "This app uses your location in the background.",
       "NSLocationAlwaysAndWhenInUseUsageDescription": "This app uses your location to provide location-based features.",
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.convergent"
+      "bundleIdentifier": "com.anonymous.wavepoint"
     },
     "android": {
       "adaptiveIcon": {
@@ -28,7 +28,7 @@
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION"
       ],
-      "package": "com.anonymous.convergent"
+      "package": "com.anonymous.wavepoint"
     },
     "web": {
       "output": "static",
@@ -51,7 +51,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Allow Convergent to use your location to show you on the map and provide directions."
+          "locationWhenInUsePermission": "Allow WavePoint to use your location to show you on the map and provide directions."
         }
       ],
       "@maplibre/maplibre-react-native"

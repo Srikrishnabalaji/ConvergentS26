@@ -17,7 +17,6 @@ export default function RootLayout() {
           <Stack.Screen name="index" options={{ headerShown: false }} />
           <Stack.Screen name="(auth)" />
           <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal', headerShown: true }} />
           <Stack.Screen name="create-group" options={{ presentation: 'modal', headerShown: false }} />
           <Stack.Screen name="edit-group/[id]" options={{ presentation: 'modal', headerShown: false }} />
         </Stack>

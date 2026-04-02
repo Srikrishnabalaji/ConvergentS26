@@ -5,9 +5,9 @@ A mobile app that helps you easily navigate inside campus buildings. Search for 
 ## Tech Stack
 
 - **Frontend:** React Native, Expo, TypeScript, NativeWind (Tailwind CSS)
-- **Navigation:** Expo Router (file-based), React Navigation
+- **Navigation:** Expo Router (file-based)
 - **Backend:** Supabase (PostgreSQL, Auth, Storage, RLS)
-- **Maps:** React Native Maps, OpenStreetMap geocoding
+- **Maps:** MapLibre (`@maplibre/maplibre-react-native`), Nominatim geocoding (OpenStreetMap), OSRM pedestrian routing
 - **CV / Pathfinding:** Python (floorplan parsing, grid-based navigation)
 - **Notifications:** Expo Notifications
 
