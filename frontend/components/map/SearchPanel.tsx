@@ -8,14 +8,9 @@ import {
   StyleSheet,
 } from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { type SearchItem } from '@/lib/services/geocoding';
 
-export type SearchItem = {
-  id: string;
-  name: string;
-  address: string;
-  latitude: number;
-  longitude: number;
-};
+export type { SearchItem };
 
 type Props = {
   recentSearches: SearchItem[];

@@ -8,7 +8,6 @@ import {
   Keyboard,
   Alert,
   Platform,
-  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { CameraRef } from '@maplibre/maplibre-react-native';
@@ -16,207 +15,28 @@ import * as Location from 'expo-location';
 import { CampusMapLayer } from '@/components/map/CampusMapLayer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { SearchPanel, type SearchItem } from '@/components/map/SearchPanel';
+import { SearchPanel } from '@/components/map/SearchPanel';
 import { RouteInfoCard } from '@/components/map/RouteInfoCard';
 import { LocationConfirmCard } from '@/components/map/LocationConfirmCard';
+import {
+  UT_CAMPUS_REGION,
+  DEFAULT_USER_LOCATION,
+  RECENTS_STORAGE_KEY,
+  MAX_RECENTS,
+  DEFAULT_BUILDING_FLOORS,
+  REROUTE_THRESHOLD_M,
+  ARRIVAL_THRESHOLD_M,
+  MAP_WINDOW_WIDTH,
+  fitMapToCoordinates,
+  animateMapToRegion,
+} from '@/constants/map';
+import { geocodeSearch, type SearchItem } from '@/lib/services/geocoding';
+import { fetchWalkingRoute, haversineKm } from '@/lib/services/routing';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 type MapViewState = 'default' | 'searching' | 'navigation' | 'walking' | 'building';
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-const UT_CAMPUS_REGION = {
-  latitude: 30.2849,
-  longitude: -97.7341,
-  latitudeDelta: 0.013,
-  longitudeDelta: 0.013,
-};
-
-const DEFAULT_USER_LOCATION = {
-  latitude: 30.2824,
-  longitude: -97.7323,
-};
-
-const RECENTS_STORAGE_KEY = '@convergent_map_recents';
-const MAX_RECENTS = 8;
-const DEFAULT_BUILDING_FLOORS = 3;
-const REROUTE_THRESHOLD_M = 30; // re-fetch route when user drifts >30m from route
-const ARRIVAL_THRESHOLD_M = 25; // consider arrived when within 25m of destination
-
-const MAP_WINDOW_WIDTH = Dimensions.get('window').width;
-
-function fitMapToCoordinates(
-  cameraRef: React.RefObject<CameraRef | null>,
-  coords: { latitude: number; longitude: number }[],
-  edgePadding: { top: number; right: number; bottom: number; left: number },
-  animationDuration = 500,
-) {
-  if (Platform.OS === 'web' || coords.length === 0) return;
-
-  let north = coords[0].latitude;
-  let south = coords[0].latitude;
-  let east = coords[0].longitude;
-  let west = coords[0].longitude;
-  for (const c of coords) {
-    north = Math.max(north, c.latitude);
-    south = Math.min(south, c.latitude);
-    east = Math.max(east, c.longitude);
-    west = Math.min(west, c.longitude);
-  }
-
-  cameraRef.current?.fitBounds(
-    [east, north],
-    [west, south],
-    [edgePadding.top, edgePadding.right, edgePadding.bottom, edgePadding.left],
-    animationDuration,
-  );
-}
-
-function longitudeDeltaToZoom(longitudeDelta: number, mapWidth: number): number {
-  const z = Math.log2((360 * (mapWidth / 256)) / longitudeDelta);
-  return Math.min(20, Math.max(10, Math.round(z)));
-}
-
-function animateMapToRegion(
-  cameraRef: React.RefObject<CameraRef | null>,
-  region: {
-    latitude: number;
-    longitude: number;
-    latitudeDelta: number;
-    longitudeDelta: number;
-  },
-  animationDuration: number,
-) {
-  if (Platform.OS === 'web') return;
-  cameraRef.current?.setCamera({
-    centerCoordinate: [region.longitude, region.latitude],
-    zoomLevel: longitudeDeltaToZoom(region.longitudeDelta, MAP_WINDOW_WIDTH),
-    animationDuration,
-    animationMode: 'easeTo',
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Nominatim geocoding (OpenStreetMap — free, no API key)
-// ---------------------------------------------------------------------------
-async function geocodeSearch(query: string): Promise<SearchItem[]> {
-  // Bias towards Austin, TX area but don't exclude other results
-  const params = new URLSearchParams({
-    q: query,
-    format: 'json',
-    limit: '10',
-    addressdetails: '1',
-    viewbox: '-97.82,30.35,-97.65,30.22',
-    bounded: '0',
-  });
-
-  const res = await fetch(
-    `https://nominatim.openstreetmap.org/search?${params}`,
-    { headers: { 'User-Agent': 'ConvergentApp/1.0 (university-project)' } },
-  );
-
-  if (!res.ok) return [];
-
-  const data: any[] = await res.json();
-
-  return data.map((place) => {
-    const parts = (place.display_name as string).split(',').map((s: string) => s.trim());
-    return {
-      id: String(place.place_id),
-      name: parts[0],
-      address: parts.slice(1, 4).join(', '),
-      latitude: parseFloat(place.lat),
-      longitude: parseFloat(place.lon),
-    };
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-/** Fetch a real walking route using FOSSGIS's pedestrian OSRM server.
- *  This server has a dedicated foot-routing graph built from OpenStreetMap,
- *  so it uses campus walkways, park paths, and pedestrian-only areas. */
-async function fetchWalkingRoute(
-  start: { latitude: number; longitude: number },
-  end: { latitude: number; longitude: number },
-): Promise<{
-  coords: { latitude: number; longitude: number }[];
-  distanceMi: number;
-  durationMin: number;
-}> {
-  const coordStr = `${start.longitude},${start.latitude};${end.longitude},${end.latitude}`;
-  const qs = 'overview=full&geometries=geojson&steps=false';
-
-  // FOSSGIS foot server (dedicated pedestrian graph from OSM data)
-  // Fallback to the main OSRM driving server if foot server is down
-  const endpoints = [
-    `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${coordStr}?${qs}`,
-    `https://router.project-osrm.org/route/v1/driving/${coordStr}?${qs}`,
-  ];
-
-  for (const url of endpoints) {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10_000);
-
-      const res = await fetch(url, {
-        signal: controller.signal,
-        headers: { 'User-Agent': 'ConvergentApp/1.0 (university-project)' },
-      });
-      clearTimeout(timeout);
-
-      if (!res.ok) continue;
-
-      const data = await res.json();
-      if (data.code !== 'Ok') continue;
-
-      const route = data.routes?.[0];
-      if (!route?.geometry?.coordinates?.length) continue;
-
-      const points: { latitude: number; longitude: number }[] =
-        route.geometry.coordinates.map(([lng, lat]: [number, number]) => ({
-          latitude: lat,
-          longitude: lng,
-        }));
-
-      const distanceMi = (route.distance / 1000) * 0.621371;
-      const isFoot = url.includes('routed-foot');
-      // Foot server returns accurate walking duration;
-      // driving fallback needs manual conversion (~3.1 mph walking pace)
-      const durationMin = isFoot
-        ? Math.max(1, Math.round(route.duration / 60))
-        : Math.max(1, Math.round((distanceMi / 3.1) * 60));
-
-      return { coords: points, distanceMi, durationMin };
-    } catch {
-      continue;
-    }
-  }
-
-  // All endpoints failed — straight-line fallback
-  const distanceMi = haversineKm(start.latitude, start.longitude, end.latitude, end.longitude) * 0.621371;
-  return {
-    coords: [start, end],
-    distanceMi,
-    durationMin: Math.max(1, Math.round((distanceMi / 3.1) * 60)),
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Component

@@ -1,4 +1,4 @@
--- Convergent Groups Schema
+-- WavePoint Groups Schema
 -- Run this in Supabase SQL Editor (Dashboard → SQL Editor → New query)
 --
 -- Note: If you have existing auth users, run this after to create their profiles:
