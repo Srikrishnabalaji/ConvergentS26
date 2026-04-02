@@ -28,7 +28,7 @@ export function RouteInfoCard({
       {loading ? (
         <>
           <View style={styles.loadingRow}>
-            <ActivityIndicator size="small" color="#4285F4" />
+            <ActivityIndicator size="small" color="#0B617E" />
             <Text style={styles.loadingText}>Finding walking route…</Text>
           </View>
           <Text style={styles.address}>{address}</Text>

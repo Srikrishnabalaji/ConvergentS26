@@ -121,13 +121,13 @@ export default function CalendarScreen() {
   const markedDates = useMemo(() => {
     const marked: Record<string, any> = {};
     Object.keys(events).forEach(date => {
-      marked[date] = { marked: true, dotColor: '#007C6E' };
+      marked[date] = { marked: true, dotColor: '#0B617E' };
     });
     
     marked[selectedDate] = {
       ...(marked[selectedDate] || {}),
       selected: true,
-      selectedColor: '#007C6E',
+      selectedColor: '#0B617E',
     };
     return marked;
   }, [selectedDate, events]);
@@ -283,7 +283,7 @@ export default function CalendarScreen() {
       
       <View style={styles.actionButtonsContainer}>
         <TouchableOpacity onPress={() => handleOpenEditModal(item)} style={styles.actionButton}>
-          <MaterialIcons name="edit" size={22} color="#007C6E" />
+          <MaterialIcons name="edit" size={22} color="#0B617E" />
         </TouchableOpacity>
       </View>
     </View>
@@ -334,7 +334,7 @@ export default function CalendarScreen() {
                   style={styles.timeSelector}
                   onPress={() => setShowTimePicker(true)}
                 >
-                  <MaterialIcons name="access-time" size={20} color="#007C6E" style={{ marginRight: 8 }} />
+                  <MaterialIcons name="access-time" size={20} color="#0B617E" style={{ marginRight: 8 }} />
                   <Text style={[styles.timeSelectorText, !newEvent.time && { color: '#999' }]}>
                     {newEvent.time || 'Tap to select time'}
                   </Text>
@@ -414,7 +414,7 @@ export default function CalendarScreen() {
         <View style={styles.headerRow}>
           <Text style={styles.headerTitle}>Calendar</Text>
           <TouchableOpacity style={styles.headerAddButton} onPress={handleOpenAddModal}>
-            <MaterialIcons name="add" size={28} color="#007C6E" />
+            <MaterialIcons name="add" size={28} color="#0B617E" />
           </TouchableOpacity>
         </View>
 
@@ -422,7 +422,7 @@ export default function CalendarScreen() {
           current={TODAY}
           onDayPress={(day: any) => setSelectedDate(day.dateString)}
           markedDates={markedDates}
-          theme={{ todayTextColor: '#007C6E', arrowColor: '#007C6E' }}
+          theme={{ todayTextColor: '#0B617E', arrowColor: '#0B617E' }}
         />
         
         <View style={styles.listContainer}>
@@ -444,7 +444,7 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#ffffff' },
   container: { flex: 1, backgroundColor: '#ffffff' },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 16, marginBottom: 16, paddingHorizontal: 20 },
-  headerTitle: { fontSize: 34, fontWeight: 'bold', color: '#007C6E' },
+  headerTitle: { fontSize: 34, fontWeight: 'bold', color: '#0B617E' },
   headerAddButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center' },
   listContainer: { flex: 1, paddingHorizontal: 20, paddingTop: 10 },
   dateHeader: { fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: '#333' },
@@ -471,7 +471,7 @@ const styles = StyleSheet.create({
   timeSelectorText: { fontSize: 16, color: '#000' },
   iosPickerContainer: { backgroundColor: '#f9f9f9', borderRadius: 12, marginTop: 8, overflow: 'hidden' },
   iosPickerDoneButton: { backgroundColor: '#e0e0e0', padding: 12, alignItems: 'center' },
-  iosPickerDoneText: { fontSize: 16, fontWeight: '600', color: '#007C6E' },
+  iosPickerDoneText: { fontSize: 16, fontWeight: '600', color: '#0B617E' },
   switchContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 24, marginBottom: 20, paddingVertical: 12, paddingHorizontal: 16, backgroundColor: '#f9f9f9', borderRadius: 12, borderWidth: 1, borderColor: '#f0f0f0' },
   switchLabel: { fontSize: 16, fontWeight: '500', color: '#333' },
   deleteFormButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#ffebe9', paddingVertical: 14, borderRadius: 12, marginBottom: 20, borderWidth: 1, borderColor: '#ffc1c0' },
@@ -479,12 +479,12 @@ const styles = StyleSheet.create({
   modalButtons: { flexDirection: 'row', padding: 24, paddingTop: 16, gap: 12, borderTopWidth: 1, borderTopColor: '#f0f0f0' },
   cancelButton: { flex: 1, paddingVertical: 16, borderRadius: 12, backgroundColor: '#f5f5f5', alignItems: 'center' },
   cancelButtonText: { fontSize: 16, fontWeight: '600', color: '#666' },
-  addButton: { flex: 1, paddingVertical: 16, borderRadius: 12, backgroundColor: '#007C6E', alignItems: 'center' },
+  addButton: { flex: 1, paddingVertical: 16, borderRadius: 12, backgroundColor: '#0B617E', alignItems: 'center' },
   addButtonText: { fontSize: 16, fontWeight: '600', color: '#fff' },
   
   chipRow: { flexDirection: 'row', marginTop: 8, marginBottom: 20 },
   chip: { paddingVertical: 10, paddingHorizontal: 16, backgroundColor: '#f0f0f0', borderRadius: 20, marginRight: 10, borderWidth: 1, borderColor: '#e0e0e0' },
-  chipSelected: { backgroundColor: '#007C6E', borderColor: '#007C6E' },
+  chipSelected: { backgroundColor: '#0B617E', borderColor: '#0B617E' },
   chipText: { fontSize: 14, fontWeight: '500', color: '#666' },
   chipTextSelected: { color: '#fff' },
 });

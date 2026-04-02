@@ -93,7 +93,7 @@ export default function FriendsScreen() {
         <View style={styles.headerRow}>
           <Text style={styles.headerTitle}>Friends</Text>
           <TouchableOpacity style={styles.backButton} onPress={() => router.push('/(tabs)/myGroups' as never)}>
-            <MaterialIcons name="chevron-right" size={26} color="#007C6E" />
+            <MaterialIcons name="chevron-right" size={26} color="#0B617E" />
           </TouchableOpacity>
         </View>
 
@@ -109,7 +109,7 @@ export default function FriendsScreen() {
         </View>
 
         <View style={styles.inviteBanner}>
-          <MaterialIcons name="mail-outline" size={20} color="#007C6E" />
+          <MaterialIcons name="mail-outline" size={20} color="#0B617E" />
           <Text style={styles.inviteBannerText}>Invite your friends!</Text>
           <TouchableOpacity style={styles.inviteButton}>
             <Text style={styles.inviteButtonText}>Invite</Text>
@@ -245,7 +245,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#f3f4f6',
   },
-  headerTitle: { fontSize: 34, fontWeight: '700', color: '#007C6E' },
+  headerTitle: { fontSize: 34, fontWeight: '700', color: '#0B617E' },
   searchWrap: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -259,7 +259,7 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, marginLeft: 8, fontSize: 16, color: '#111827' },
   inviteBanner: {
-    backgroundColor: '#e6f2f0',
+    backgroundColor: '#CEDFE5',
     borderWidth: 1,
     borderColor: '#c7e3de',
     borderRadius: 12,
@@ -270,7 +270,7 @@ const styles = StyleSheet.create({
   },
   inviteBannerText: { marginLeft: 8, flex: 1, fontSize: 16, fontWeight: '600', color: '#065f57' },
   inviteButton: {
-    backgroundColor: '#007C6E',
+    backgroundColor: '#0B617E',
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 7,
@@ -298,7 +298,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   tabButtonTextActive: {
-    color: '#007C6E',
+    color: '#0B617E',
     fontWeight: '700',
   },
   sectionTitle: {
@@ -326,7 +326,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: '#007C6E',
+    backgroundColor: '#0B617E',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 10,
@@ -346,7 +346,7 @@ const styles = StyleSheet.create({
   friendSubtitle: { fontSize: 13, color: '#6b7280', marginTop: 1 },
   actionsRow: { flexDirection: 'row', alignItems: 'center' },
   acceptButton: {
-    backgroundColor: '#007C6E',
+    backgroundColor: '#0B617E',
     borderRadius: 8,
     width: 68,
     height: 34,
@@ -375,7 +375,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  addButtonText: { color: '#007C6E', fontWeight: '600', fontSize: 13 },
+  addButtonText: { color: '#0B617E', fontWeight: '600', fontSize: 13 },
   addedButton: { backgroundColor: '#f3f4f6' },
   addedButtonText: { color: '#9ca3af' },
   emptyText: { color: '#9ca3af', fontSize: 14, marginBottom: 14, fontStyle: 'italic' },

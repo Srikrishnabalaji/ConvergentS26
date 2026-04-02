@@ -291,13 +291,13 @@ export default function MyGroupsScreen() {
               className="w-11 h-11 rounded-full bg-gray-200 items-center justify-center mr-2"
               onPress={() => router.push('/(tabs)/friends' as never)}
             >
-              <MaterialIcons name="groups" size={22} color="#007C6E" />
+              <MaterialIcons name="groups" size={22} color="#0B617E" />
             </TouchableOpacity>
             <TouchableOpacity
               className="w-11 h-11 rounded-full bg-gray-200 items-center justify-center"
               onPress={() => router.push('/create-group' as never)}
             >
-              <MaterialIcons name="add" size={28} color="#007C6E" />
+              <MaterialIcons name="add" size={28} color="#0B617E" />
             </TouchableOpacity>
           </View>
         </View>
@@ -334,7 +334,7 @@ export default function MyGroupsScreen() {
 
         <Text className="text-[13px] font-semibold text-black tracking-wide mb-3">YOUR GROUPS</Text>
         {loading && myGroups.length === 0 ? (
-          <ActivityIndicator className="my-6" color="#007C6E" />
+          <ActivityIndicator className="my-6" color="#0B617E" />
         ) : filteredMyGroups.length === 0 ? (
           <Text className="text-sm text-gray-400 mb-4">No groups yet</Text>
         ) : (

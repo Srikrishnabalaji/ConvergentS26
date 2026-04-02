@@ -110,7 +110,7 @@ export default function CreateGroupScreen() {
       <View className="flex-1 px-5 pt-2">
         <View className="flex-row items-center justify-between mb-6">
           <TouchableOpacity onPress={() => router.back()} className="p-2 -ml-2">
-            <MaterialIcons name="close" size={28} color="#007C6E" />
+            <MaterialIcons name="close" size={28} color="#0B617E" />
           </TouchableOpacity>
           <Text className="text-[20px] font-semibold text-primary">Create Group</Text>
           <View className="w-10" />
@@ -143,8 +143,8 @@ export default function CreateGroupScreen() {
           <Switch
             value={isCampusOrg}
             onValueChange={setIsCampusOrg}
-            trackColor={{ false: '#6b7280', true: '#66b9af' }}
-            thumbColor={isCampusOrg ? '#007C6E' : '#f3f4f6'}
+            trackColor={{ false: '#6b7280', true: '#4a8fb0' }}
+            thumbColor={isCampusOrg ? '#0B617E' : '#f3f4f6'}
           />
         </View>
 

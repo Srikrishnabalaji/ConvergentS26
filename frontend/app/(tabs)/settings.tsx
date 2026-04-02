@@ -43,7 +43,7 @@ export default function SettingsScreen() {
     return (
       <SafeAreaView className="flex-1 bg-white" style={{ flex: 1, backgroundColor: '#ffffff' }}>
         <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="large" color="#007C6E" />
+          <ActivityIndicator size="large" color="#0B617E" />
         </View>
       </SafeAreaView>
     );
@@ -91,8 +91,8 @@ export default function SettingsScreen() {
               <Switch
                 value={shareLocation}
                 onValueChange={setShareLocation}
-                trackColor={{ false: '#d1d5db', true: '#b8dfd9' }}
-                thumbColor={shareLocation ? '#007C6E' : '#f3f4f6'}
+                trackColor={{ false: '#d1d5db', true: '#c5dde5' }}
+                thumbColor={shareLocation ? '#0B617E' : '#f3f4f6'}
               />
             </View>
           </View>
@@ -103,8 +103,8 @@ export default function SettingsScreen() {
               <Switch
                 value={eventNotifications}
                 onValueChange={setEventNotifications}
-                trackColor={{ false: '#d1d5db', true: '#b8dfd9' }}
-                thumbColor={eventNotifications ? '#007C6E' : '#f3f4f6'}
+                trackColor={{ false: '#d1d5db', true: '#c5dde5' }}
+                thumbColor={eventNotifications ? '#0B617E' : '#f3f4f6'}
               />
             </View>
           </View>
@@ -115,8 +115,8 @@ export default function SettingsScreen() {
               <Switch
                 value={leaveByAlerts}
                 onValueChange={setLeaveByAlerts}
-                trackColor={{ false: '#d1d5db', true: '#b8dfd9' }}
-                thumbColor={leaveByAlerts ? '#007C6E' : '#f3f4f6'}
+                trackColor={{ false: '#d1d5db', true: '#c5dde5' }}
+                thumbColor={leaveByAlerts ? '#0B617E' : '#f3f4f6'}
               />
             </View>
           </View>
