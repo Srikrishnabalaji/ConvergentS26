@@ -53,7 +53,8 @@
         {
           "locationWhenInUsePermission": "Allow Convergent to use your location to show you on the map and provide directions."
         }
-      ]
+      ],
+      "@maplibre/maplibre-react-native"
     ],
     "experiments": {
       "typedRoutes": true,

@@ -1,17 +1,19 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
   TextInput,
-  SafeAreaView,
   StyleSheet,
   TouchableOpacity,
   Keyboard,
   Alert,
   Platform,
+  Dimensions,
 } from 'react-native';
-import MapView, { Marker, Polyline } from 'react-native-maps';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import type { CameraRef } from '@maplibre/maplibre-react-native';
 import * as Location from 'expo-location';
+import { CampusMapLayer } from '@/components/map/CampusMapLayer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { SearchPanel, type SearchItem } from '@/components/map/SearchPanel';
@@ -21,7 +23,7 @@ import { LocationConfirmCard } from '@/components/map/LocationConfirmCard';
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-type MapViewState = 'default' | 'searching' | 'navigation' | 'building';
+type MapViewState = 'default' | 'searching' | 'navigation' | 'walking' | 'building';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -41,6 +43,61 @@ const DEFAULT_USER_LOCATION = {
 const RECENTS_STORAGE_KEY = '@convergent_map_recents';
 const MAX_RECENTS = 8;
 const DEFAULT_BUILDING_FLOORS = 3;
+const REROUTE_THRESHOLD_M = 30; // re-fetch route when user drifts >30m from route
+const ARRIVAL_THRESHOLD_M = 25; // consider arrived when within 25m of destination
+
+const MAP_WINDOW_WIDTH = Dimensions.get('window').width;
+
+function fitMapToCoordinates(
+  cameraRef: React.RefObject<CameraRef | null>,
+  coords: { latitude: number; longitude: number }[],
+  edgePadding: { top: number; right: number; bottom: number; left: number },
+  animationDuration = 500,
+) {
+  if (Platform.OS === 'web' || coords.length === 0) return;
+
+  let north = coords[0].latitude;
+  let south = coords[0].latitude;
+  let east = coords[0].longitude;
+  let west = coords[0].longitude;
+  for (const c of coords) {
+    north = Math.max(north, c.latitude);
+    south = Math.min(south, c.latitude);
+    east = Math.max(east, c.longitude);
+    west = Math.min(west, c.longitude);
+  }
+
+  cameraRef.current?.fitBounds(
+    [east, north],
+    [west, south],
+    [edgePadding.top, edgePadding.right, edgePadding.bottom, edgePadding.left],
+    animationDuration,
+  );
+}
+
+function longitudeDeltaToZoom(longitudeDelta: number, mapWidth: number): number {
+  const z = Math.log2((360 * (mapWidth / 256)) / longitudeDelta);
+  return Math.min(20, Math.max(10, Math.round(z)));
+}
+
+function animateMapToRegion(
+  cameraRef: React.RefObject<CameraRef | null>,
+  region: {
+    latitude: number;
+    longitude: number;
+    latitudeDelta: number;
+    longitudeDelta: number;
+  },
+  animationDuration: number,
+) {
+  if (Platform.OS === 'web') return;
+  cameraRef.current?.setCamera({
+    centerCoordinate: [region.longitude, region.latitude],
+    zoomLevel: longitudeDeltaToZoom(region.longitudeDelta, MAP_WINDOW_WIDTH),
+    animationDuration,
+    animationMode: 'easeTo',
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Nominatim geocoding (OpenStreetMap — free, no API key)
@@ -92,35 +149,39 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-/** Fetch a real walking route from OSRM (free, no API key).
- *  Tries foot profile first; falls back to driving profile (always up)
- *  with walking-speed duration estimate. */
+/** Fetch a real walking route using FOSSGIS's pedestrian OSRM server.
+ *  This server has a dedicated foot-routing graph built from OpenStreetMap,
+ *  so it uses campus walkways, park paths, and pedestrian-only areas. */
 async function fetchWalkingRoute(
   start: { latitude: number; longitude: number },
   end: { latitude: number; longitude: number },
 ): Promise<{
   coords: { latitude: number; longitude: number }[];
-  distanceKm: number;
+  distanceMi: number;
   durationMin: number;
 }> {
   const coordStr = `${start.longitude},${start.latitude};${end.longitude},${end.latitude}`;
-  const qs = 'overview=full&geometries=geojson';
+  const qs = 'overview=full&geometries=geojson&steps=false';
 
-  for (const profile of ['foot', 'driving'] as const) {
+  // FOSSGIS foot server (dedicated pedestrian graph from OSM data)
+  // Fallback to the main OSRM driving server if foot server is down
+  const endpoints = [
+    `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${coordStr}?${qs}`,
+    `https://router.project-osrm.org/route/v1/driving/${coordStr}?${qs}`,
+  ];
+
+  for (const url of endpoints) {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
+      const timeout = setTimeout(() => controller.abort(), 10_000);
 
-      const res = await fetch(
-        `https://router.project-osrm.org/route/v1/${profile}/${coordStr}?${qs}`,
-        { signal: controller.signal },
-      );
+      const res = await fetch(url, {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'ConvergentApp/1.0 (university-project)' },
+      });
       clearTimeout(timeout);
 
       if (!res.ok) continue;
-
-      const contentType = res.headers.get('content-type') || '';
-      if (!contentType.includes('json')) continue;
 
       const data = await res.json();
       if (data.code !== 'Ok') continue;
@@ -128,30 +189,32 @@ async function fetchWalkingRoute(
       const route = data.routes?.[0];
       if (!route?.geometry?.coordinates?.length) continue;
 
-      const points = route.geometry.coordinates.map(
-        ([lng, lat]: [number, number]) => ({ latitude: lat, longitude: lng }),
-      );
+      const points: { latitude: number; longitude: number }[] =
+        route.geometry.coordinates.map(([lng, lat]: [number, number]) => ({
+          latitude: lat,
+          longitude: lng,
+        }));
 
-      const distanceKm = route.distance / 1000;
-      // foot profile gives walking duration; driving profile needs conversion
-      const durationMin =
-        profile === 'foot'
-          ? Math.max(1, Math.round(route.duration / 60))
-          : Math.max(1, Math.round((distanceKm / 5) * 60)); // ~5 km/h walking
+      const distanceMi = (route.distance / 1000) * 0.621371;
+      const isFoot = url.includes('routed-foot');
+      // Foot server returns accurate walking duration;
+      // driving fallback needs manual conversion (~3.1 mph walking pace)
+      const durationMin = isFoot
+        ? Math.max(1, Math.round(route.duration / 60))
+        : Math.max(1, Math.round((distanceMi / 3.1) * 60));
 
-      return { coords: points, distanceKm, durationMin };
+      return { coords: points, distanceMi, durationMin };
     } catch {
-      // timeout or network error — try next profile
       continue;
     }
   }
 
-  // Both profiles failed — straight-line fallback
-  const d = haversineKm(start.latitude, start.longitude, end.latitude, end.longitude);
+  // All endpoints failed — straight-line fallback
+  const distanceMi = haversineKm(start.latitude, start.longitude, end.latitude, end.longitude) * 0.621371;
   return {
     coords: [start, end],
-    distanceKm: d,
-    durationMin: Math.max(1, Math.round((d / 5) * 60)),
+    distanceMi,
+    durationMin: Math.max(1, Math.round((distanceMi / 3.1) * 60)),
   };
 }
 
@@ -172,12 +235,30 @@ export default function MapScreen() {
   const [repositionCoord, setRepositionCoord] = useState<{ latitude: number; longitude: number } | null>(null);
   const [showFloorDropdown, setShowFloorDropdown] = useState(false);
   const [routeCoords, setRouteCoords] = useState<{ latitude: number; longitude: number }[]>([]);
-  const [routeDistKm, setRouteDistKm] = useState(0);
+  const [routeDistMi, setRouteDistMi] = useState(0);
   const [routeWalkMin, setRouteWalkMin] = useState(0);
+  const [routeLoading, setRouteLoading] = useState(false);
 
-  const mapRef = useRef<MapView>(null);
+  const cameraRef = useRef<CameraRef>(null);
   const inputRef = useRef<TextInput>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const locationWatcherRef = useRef<Location.LocationSubscription | null>(null);
+  const lastRouteOriginRef = useRef<{ latitude: number; longitude: number } | null>(null);
+  const isReroutingRef = useRef(false);
+
+  // Clock ticks every minute so the ETA stays accurate as real time passes
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setCurrentTime(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // "Arrives at H:MM AM/PM" — updates whenever walk time or clock changes
+  const etaString = useMemo(() => {
+    if (routeWalkMin <= 0) return '';
+    const arrival = new Date(currentTime + routeWalkMin * 60_000);
+    return arrival.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }, [currentTime, routeWalkMin]);
 
   // Load recents from AsyncStorage on mount
   useEffect(() => {
@@ -238,12 +319,33 @@ export default function MapScreen() {
     };
   }, [query]);
 
+  // Stop location watcher helper
+  const stopLocationWatcher = useCallback(() => {
+    if (locationWatcherRef.current) {
+      locationWatcherRef.current.remove();
+      locationWatcherRef.current = null;
+    }
+    lastRouteOriginRef.current = null;
+    isReroutingRef.current = false;
+  }, []);
+
+  // Cleanup watcher on unmount
+  useEffect(() => {
+    return () => {
+      stopLocationWatcher();
+    };
+  }, [stopLocationWatcher]);
+
   // Handlers
   const handleSelectPlace = useCallback(
     async (item: SearchItem) => {
       setSelectedPlace(item);
       setQuery(item.name);
       setViewState('navigation');
+      setRouteLoading(true);
+      setRouteCoords([]);
+      setRouteDistMi(0);
+      setRouteWalkMin(0);
       Keyboard.dismiss();
 
       // Add to recents (dedup, cap at MAX_RECENTS)
@@ -256,16 +358,31 @@ export default function MapScreen() {
 
       // Fit map to show both user and destination
       const dest = { latitude: item.latitude, longitude: item.longitude };
-      mapRef.current?.fitToCoordinates(
+      fitMapToCoordinates(
+        cameraRef,
         [userLocation, dest],
-        { edgePadding: { top: 140, right: 60, bottom: 280, left: 60 }, animated: true },
+        { top: 140, right: 60, bottom: 280, left: 60 },
       );
 
       // Fetch real walking route
-      const result = await fetchWalkingRoute(userLocation, dest);
-      setRouteCoords(result.coords);
-      setRouteDistKm(result.distanceKm);
-      setRouteWalkMin(result.durationMin);
+      try {
+        const result = await fetchWalkingRoute(userLocation, dest);
+        setRouteCoords(result.coords);
+        setRouteDistMi(result.distanceMi);
+        setRouteWalkMin(result.durationMin);
+
+        // Re-fit map to the actual route bounds
+        if (result.coords.length > 1) {
+          fitMapToCoordinates(cameraRef, result.coords, {
+            top: 140,
+            right: 60,
+            bottom: 280,
+            left: 60,
+          });
+        }
+      } finally {
+        setRouteLoading(false);
+      }
     },
     [userLocation],
   );
@@ -277,41 +394,154 @@ export default function MapScreen() {
       setSearchResults([]);
       Keyboard.dismiss();
     } else if (viewState === 'navigation') {
+      stopLocationWatcher();
       setViewState('default');
       setSelectedPlace(null);
       setQuery('');
       setRouteCoords([]);
-      setRouteDistKm(0);
+      setRouteDistMi(0);
       setRouteWalkMin(0);
-      mapRef.current?.animateToRegion(UT_CAMPUS_REGION, 400);
+      setRouteLoading(false);
+      animateMapToRegion(cameraRef, UT_CAMPUS_REGION, 400);
+    } else if (viewState === 'walking') {
+      // Chevron while walking → full exit, no route shown
+      stopLocationWatcher();
+      setViewState('default');
+      setSelectedPlace(null);
+      setQuery('');
+      setRouteCoords([]);
+      setRouteDistMi(0);
+      setRouteWalkMin(0);
+      setRouteLoading(false);
+      // Defer so Camera re-renders with followUserLocation=false first
+      setTimeout(() => animateMapToRegion(cameraRef, UT_CAMPUS_REGION, 400), 50);
     } else if (viewState === 'building') {
       setViewState('navigation');
+      stopLocationWatcher();
       setIsRepositioning(false);
       setRepositionCoord(null);
       setShowFloorDropdown(false);
       if (selectedPlace) {
-        mapRef.current?.fitToCoordinates(
-          [userLocation, { latitude: selectedPlace.latitude, longitude: selectedPlace.longitude }],
-          { edgePadding: { top: 140, right: 60, bottom: 280, left: 60 }, animated: true },
-        );
+        fitMapToCoordinates(cameraRef, [
+          userLocation,
+          { latitude: selectedPlace.latitude, longitude: selectedPlace.longitude },
+        ], { top: 140, right: 60, bottom: 280, left: 60 });
       }
     }
-  }, [viewState, userLocation, selectedPlace]);
+  }, [viewState, userLocation, selectedPlace, stopLocationWatcher]);
 
-  const handleStartNavigation = useCallback(() => {
+  // "Exit Navigation" button: stop walking, return to route overview
+  const handleExitNavigation = useCallback(() => {
+    stopLocationWatcher();
+    setViewState('navigation');
+    // Defer so Camera re-renders with followUserLocation=false before we refit
+    const coords = routeCoords;
+    const place = selectedPlace;
+    const userLoc = userLocation;
+    setTimeout(() => {
+      if (coords.length > 1) {
+        fitMapToCoordinates(cameraRef, coords, { top: 140, right: 60, bottom: 280, left: 60 });
+      } else if (place) {
+        fitMapToCoordinates(cameraRef, [
+          userLoc,
+          { latitude: place.latitude, longitude: place.longitude },
+        ], { top: 140, right: 60, bottom: 280, left: 60 });
+      }
+    }, 50);
+  }, [stopLocationWatcher, routeCoords, selectedPlace, userLocation]);
+
+  const handleStartNavigation = useCallback(async () => {
     if (!selectedPlace) return;
-    setViewState('building');
-    setSelectedFloor(1);
-    mapRef.current?.animateToRegion(
+
+    // Get fresh current location (B)
+    setRouteLoading(true);
+    let currentLoc = userLocation;
+    try {
+      const loc = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+      currentLoc = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+      setUserLocation(currentLoc);
+    } catch {}
+
+    const dest = { latitude: selectedPlace.latitude, longitude: selectedPlace.longitude };
+
+    // Fetch fresh route from B → C
+    try {
+      const result = await fetchWalkingRoute(currentLoc, dest);
+      setRouteCoords(result.coords);
+      setRouteDistMi(result.distanceMi);
+      setRouteWalkMin(result.durationMin);
+      lastRouteOriginRef.current = currentLoc;
+
+      if (result.coords.length > 1) {
+        fitMapToCoordinates(cameraRef, result.coords, {
+          top: 140,
+          right: 60,
+          bottom: 280,
+          left: 60,
+        });
+      }
+    } finally {
+      setRouteLoading(false);
+    }
+
+    // Transition to walking state
+    setViewState('walking');
+
+    // Start live location watcher
+    stopLocationWatcher();
+    const watcher = await Location.watchPositionAsync(
       {
-        latitude: selectedPlace.latitude - 0.001,
-        longitude: selectedPlace.longitude,
-        latitudeDelta: 0.005,
-        longitudeDelta: 0.005,
+        accuracy: Location.Accuracy.High,
+        distanceInterval: 5, // fire every ~5m of movement
+        timeInterval: 3000,  // or at least every 3s
       },
-      500,
+      (loc) => {
+        const pos = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+        setUserLocation(pos);
+
+        // Check arrival
+        const distToDest = haversineKm(pos.latitude, pos.longitude, dest.latitude, dest.longitude) * 1000;
+        if (distToDest < ARRIVAL_THRESHOLD_M) {
+          stopLocationWatcher();
+          setViewState('building');
+          setSelectedFloor(1);
+          animateMapToRegion(
+            cameraRef,
+            {
+              latitude: dest.latitude - 0.001,
+              longitude: dest.longitude,
+              latitudeDelta: 0.005,
+              longitudeDelta: 0.005,
+            },
+            500,
+          );
+          return;
+        }
+
+        // Check if we need to re-route (user drifted from route origin)
+        const lastOrigin = lastRouteOriginRef.current;
+        if (lastOrigin && !isReroutingRef.current) {
+          const drift = haversineKm(pos.latitude, pos.longitude, lastOrigin.latitude, lastOrigin.longitude) * 1000;
+          if (drift > REROUTE_THRESHOLD_M) {
+            isReroutingRef.current = true;
+            fetchWalkingRoute(pos, dest)
+              .then((result) => {
+                setRouteCoords(result.coords);
+                setRouteDistMi(result.distanceMi);
+                setRouteWalkMin(result.durationMin);
+                lastRouteOriginRef.current = pos;
+              })
+              .finally(() => {
+                isReroutingRef.current = false;
+              });
+          }
+        }
+      },
     );
-  }, [selectedPlace]);
+    locationWatcherRef.current = watcher;
+  }, [selectedPlace, userLocation, stopLocationWatcher]);
 
   const handleConfirmLocation = useCallback(() => {
     Alert.alert(
@@ -326,15 +556,6 @@ export default function MapScreen() {
     setRepositionCoord(userLocation);
   }, [userLocation]);
 
-  const handleSteps = useCallback(() => {
-    if (!selectedPlace) return;
-    Alert.alert(
-      'Walking Directions',
-      `1. Head towards ${selectedPlace.name}\n2. Follow the suggested route\n3. Arrive at ${selectedPlace.name}\n   ${selectedPlace.address}\n\nEstimated: ${routeWalkMin} min (${routeDistKm.toFixed(1)} km)`,
-      [{ text: 'Got it' }],
-    );
-  }, [selectedPlace, routeWalkMin, routeDistKm]);
-
   const handleClearRecents = useCallback(() => {
     saveRecents([]);
   }, [saveRecents]);
@@ -348,7 +569,7 @@ export default function MapScreen() {
     return (
       <SafeAreaView style={styles.searchOverlay}>
         {/* Search bar */}
-        <View style={styles.searchBarRow}>
+        <View style={styles.searchOverlayBar}>
           <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
             <MaterialIcons name="chevron-left" size={28} color="#000" />
           </TouchableOpacity>
@@ -397,50 +618,41 @@ export default function MapScreen() {
   return (
     <View style={styles.container}>
       {/* Map */}
-      <MapView
-        ref={mapRef}
-        style={StyleSheet.absoluteFillObject}
-        initialRegion={UT_CAMPUS_REGION}
+      <CampusMapLayer
+        cameraRef={cameraRef}
+        initialCenter={{
+          latitude: UT_CAMPUS_REGION.latitude,
+          longitude: UT_CAMPUS_REGION.longitude,
+        }}
+        initialLongitudeDelta={UT_CAMPUS_REGION.longitudeDelta}
+        mapWidth={MAP_WINDOW_WIDTH}
         showsUserLocation={!isRepositioning}
-        showsMyLocationButton={false}
-        showsCompass={false}
-      >
-        {/* Destination pin */}
-        {selectedPlace && (viewState === 'navigation' || viewState === 'building') && (
-          <Marker
-            coordinate={{
-              latitude: selectedPlace.latitude,
-              longitude: selectedPlace.longitude,
-            }}
-            title={selectedPlace.name}
-            description={selectedPlace.address}
-          />
-        )}
-
-        {/* Route polyline */}
-        {(viewState === 'navigation' || viewState === 'building') && routeCoords.length > 1 && (
-          <Polyline
-            coordinates={routeCoords}
-            strokeColor="#4A90D9"
-            strokeWidth={4}
-            lineDashPattern={viewState === 'building' ? undefined : [0, 10]}
-            lineCap="round"
-          />
-        )}
-
-        {/* Draggable user marker when repositioning */}
-        {isRepositioning && repositionCoord && (
-          <Marker
-            coordinate={repositionCoord}
-            draggable
-            onDragEnd={(e) => setRepositionCoord(e.nativeEvent.coordinate)}
-          >
-            <View style={styles.userDotOuter}>
-              <View style={styles.userDotInner} />
-            </View>
-          </Marker>
-        )}
-      </MapView>
+        followUserLocation={viewState === 'walking'}
+        destination={
+          selectedPlace &&
+          (viewState === 'navigation' || viewState === 'walking' || viewState === 'building')
+            ? {
+                latitude: selectedPlace.latitude,
+                longitude: selectedPlace.longitude,
+                title: selectedPlace.name,
+                subtitle: selectedPlace.address,
+              }
+            : null
+        }
+        routeCoordinates={routeCoords}
+        showRoute={
+          (viewState === 'navigation' || viewState === 'walking' || viewState === 'building') &&
+          routeCoords.length > 1
+        }
+        repositionMarker={
+          isRepositioning && repositionCoord
+            ? {
+                coordinate: repositionCoord,
+                onDragEnd: setRepositionCoord,
+              }
+            : null
+        }
+      />
 
       {/* Floating search bar */}
       <SafeAreaView style={styles.floatingBar} pointerEvents="box-none">
@@ -521,10 +733,23 @@ export default function MapScreen() {
       {viewState === 'navigation' && selectedPlace && (
         <RouteInfoCard
           duration={`${routeWalkMin} min`}
-          distance={`${routeDistKm.toFixed(1)} km`}
+          distance={`${routeDistMi.toFixed(1)} mi`}
+          eta={etaString}
           address={selectedPlace.address}
+          loading={routeLoading}
           onStart={handleStartNavigation}
-          onSteps={handleSteps}
+        />
+      )}
+      {viewState === 'walking' && selectedPlace && (
+        <RouteInfoCard
+          duration={`${routeWalkMin} min`}
+          distance={`${routeDistMi.toFixed(1)} mi`}
+          eta={etaString}
+          address={selectedPlace.address}
+          loading={routeLoading}
+          onStart={handleStartNavigation}
+          onExit={handleExitNavigation}
+          isWalking
         />
       )}
       {viewState === 'building' && (
@@ -557,6 +782,17 @@ const styles = StyleSheet.create({
   searchOverlay: {
     flex: 1,
     backgroundColor: '#fff',
+  },
+
+  // Search bar container inside the overlay — adds a bottom border to separate from results
+  searchOverlayBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    paddingHorizontal: 10,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#d0d0d0',
   },
 
   // Floating search bar (over map)
@@ -646,21 +882,4 @@ const styles = StyleSheet.create({
     color: '#000',
   },
 
-  // Draggable user dot
-  userDotOuter: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: 'rgba(74, 144, 217, 0.25)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  userDotInner: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: '#4A90D9',
-    borderWidth: 2.5,
-    borderColor: '#fff',
-  },
 });
