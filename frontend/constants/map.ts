@@ -19,6 +19,7 @@ export const MAX_RECENTS = 8;
 export const DEFAULT_BUILDING_FLOORS = 3;
 export const REROUTE_THRESHOLD_M = 30;
 export const ARRIVAL_THRESHOLD_M = 25;
+export const PREVIEW_REROUTE_THRESHOLD_M = 100;
 
 export const MAP_WINDOW_WIDTH = Dimensions.get('window').width;
 

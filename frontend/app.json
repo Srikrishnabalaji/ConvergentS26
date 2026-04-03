@@ -54,7 +54,14 @@
           "locationWhenInUsePermission": "Allow WavePoint to use your location to show you on the map and provide directions."
         }
       ],
-      "@maplibre/maplibre-react-native"
+      "@maplibre/maplibre-react-native",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Allow WavePoint to access the microphone for voice search.",
+          "speechRecognitionPermission": "Allow WavePoint to use speech recognition for voice search."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

@@ -9,8 +9,10 @@ type Props = {
   address: string;
   loading?: boolean;
   isWalking?: boolean;
+  showingOverview?: boolean;
   onStart: () => void;
   onExit?: () => void;
+  onOverview?: () => void;
 };
 
 export function RouteInfoCard({
@@ -20,8 +22,10 @@ export function RouteInfoCard({
   address,
   loading,
   isWalking,
+  showingOverview,
   onStart,
   onExit,
+  onOverview,
 }: Props) {
   return (
     <View style={styles.container}>
@@ -64,14 +68,30 @@ export function RouteInfoCard({
             <Text style={styles.startText}>Start</Text>
           </TouchableOpacity>
         ) : (
-          <TouchableOpacity
-            style={styles.exitButton}
-            onPress={onExit}
-            activeOpacity={0.8}
-          >
-            <MaterialIcons name="close" size={20} color="#fff" />
-            <Text style={styles.exitText}>Exit Navigation</Text>
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity
+              style={styles.overviewButton}
+              onPress={onOverview}
+              activeOpacity={0.8}
+            >
+              <MaterialIcons
+                name={showingOverview ? 'navigation' : 'zoom-out-map'}
+                size={18}
+                color="#333"
+              />
+              <Text style={styles.overviewText}>
+                {showingOverview ? 'Resume' : 'Overview'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.exitButton}
+              onPress={onExit}
+              activeOpacity={0.8}
+            >
+              <MaterialIcons name="close" size={20} color="#fff" />
+              <Text style={styles.exitText}>Exit</Text>
+            </TouchableOpacity>
+          </>
         )}
       </View>
     </View>
@@ -123,6 +143,7 @@ const styles = StyleSheet.create({
   },
   buttons: {
     flexDirection: 'row',
+    gap: 10,
   },
   startButton: {
     flex: 1,
@@ -138,6 +159,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+  overviewButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f0f0f0',
+    borderRadius: 12,
+    paddingVertical: 14,
+    gap: 6,
+  },
+  overviewText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#333',
   },
   exitButton: {
     flex: 1,

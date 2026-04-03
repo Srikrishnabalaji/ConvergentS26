@@ -9,6 +9,7 @@ export type CampusMapLayerProps = {
   mapWidth: number;
   showsUserLocation: boolean;
   followUserLocation: boolean;
+  followUserHeading: boolean;
   destination: (LatLng & { title: string; subtitle: string }) | null;
   routeCoordinates: LatLng[];
   showRoute: boolean;
