@@ -1,6 +1,11 @@
 -- WavePoint Groups Schema
 -- Run this in Supabase SQL Editor (Dashboard → SQL Editor → New query)
 --
+-- IMPORTANT: Only run this file on a NEW / EMPTY database (fresh project).
+-- If your project already has tables (profiles, groups, etc.), do NOT run this file.
+-- Use instead: supabase/run-on-existing-database.sql (or add-group-description-editor.sql
+-- then add-profiles-groupmates-read.sql).
+--
 -- Note: If you have existing auth users, run this after to create their profiles:
 --   insert into public.profiles (id, full_name)
 --   select id, coalesce(raw_user_meta_data->>'full_name', split_part(email, '@', 1))
@@ -25,6 +30,7 @@ create table public.profiles (
 create table public.groups (
   id uuid primary key default gen_random_uuid(),
   name text not null,
+  description text,
   image_url text,
   type text not null default 'friends' check (type in ('friends', 'campus_org')),
   created_at timestamptz default now(),
@@ -36,7 +42,7 @@ create table public.group_members (
   id uuid primary key default gen_random_uuid(),
   group_id uuid not null references public.groups(id) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,
-  role text not null default 'member' check (role in ('admin', 'member')),
+  role text not null default 'member' check (role in ('admin', 'editor', 'member')),
   joined_at timestamptz default now(),
   unique(group_id, user_id)
 );
@@ -94,6 +100,18 @@ create policy "Users can update own profile"
   on public.profiles for update
   using (auth.uid() = id);
 
+create policy "Members can view profiles of users in shared groups"
+  on public.profiles for select
+  using (
+    exists (
+      select 1 from public.group_members gm_self
+      inner join public.group_members gm_other
+        on gm_self.group_id = gm_other.group_id
+        and gm_other.user_id = profiles.id
+      where gm_self.user_id = auth.uid()
+    )
+  );
+
 -- Groups: members can read; admins can update
 create policy "Members can view groups they belong to"
   on public.groups for select
@@ -120,14 +138,33 @@ create policy "Authenticated users can create groups"
   on public.groups for insert
   with check (auth.uid() is not null);
 
-create policy "Admins can update their groups"
+create policy "Admins or editors can update their groups"
   on public.groups for update
   using (
     exists (
       select 1 from public.group_members
       where group_members.group_id = groups.id
         and group_members.user_id = auth.uid()
-        and group_members.role = 'admin'
+        and group_members.role in ('admin', 'editor')
+    )
+  );
+
+create policy "Admins can update group member roles"
+  on public.group_members for update
+  using (
+    exists (
+      select 1 from public.group_members gm
+      where gm.group_id = group_members.group_id
+        and gm.user_id = auth.uid()
+        and gm.role = 'admin'
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.group_members gm
+      where gm.group_id = group_members.group_id
+        and gm.user_id = auth.uid()
+        and gm.role = 'admin'
     )
   );
 

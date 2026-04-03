@@ -15,10 +15,14 @@ import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { supabase } from '@/lib/supabase';
+import { switchTrackColors, switchThumbColor } from '@/lib/switchTheme';
+
+const PRIMARY_HEX = '#0B617E';
 
 export default function CreateGroupScreen() {
   const router = useRouter();
   const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
   const [isCampusOrg, setIsCampusOrg] = useState(false);
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
@@ -78,7 +82,12 @@ export default function CreateGroupScreen() {
       const type = isCampusOrg ? 'campus_org' : 'friends';
       const { data: group, error: groupError } = await supabase
         .from('groups')
-        .insert({ name: name.trim(), image_url: imageUrl, type })
+        .insert({
+          name: name.trim(),
+          description: description.trim() || null,
+          image_url: imageUrl,
+          type,
+        })
         .select('id')
         .single();
 
@@ -138,14 +147,30 @@ export default function CreateGroupScreen() {
           />
         </View>
 
+        <View className="gap-1.5 mb-4">
+          <Text className="text-sm font-semibold text-gray-700">Description (optional)</Text>
+          <TextInput
+            className="border border-gray-200 rounded-[10px] px-4 py-3.5 text-base text-black bg-gray-50 min-h-[100px]"
+            placeholder="What is this group about?"
+            placeholderTextColor="#999"
+            value={description}
+            onChangeText={setDescription}
+            multiline
+            textAlignVertical="top"
+          />
+        </View>
+
         <View className="flex-row items-center justify-between py-3 border-b border-gray-100">
           <Text className="text-base font-medium text-gray-800">This is a campus org</Text>
-          <Switch
-            value={isCampusOrg}
-            onValueChange={setIsCampusOrg}
-            trackColor={{ false: '#6b7280', true: '#4a8fb0' }}
-            thumbColor={isCampusOrg ? '#0B617E' : '#f3f4f6'}
-          />
+          <View className="w-[52] items-center justify-center">
+            <Switch
+              value={isCampusOrg}
+              onValueChange={setIsCampusOrg}
+              trackColor={switchTrackColors}
+              thumbColor={switchThumbColor(isCampusOrg, PRIMARY_HEX)}
+              ios_backgroundColor={switchTrackColors.false}
+            />
+          </View>
         </View>
 
         <TouchableOpacity
