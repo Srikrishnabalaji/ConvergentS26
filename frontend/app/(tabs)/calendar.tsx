@@ -20,6 +20,7 @@ import { useRouter } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Notifications from 'expo-notifications'; 
+import { supabase } from '../../lib/supabase';
 
 const getTodayString = () => {
   const today = new Date();
@@ -79,7 +80,8 @@ const DUMMY_EVENTS: Record<string, any[]> = {
 
 export default function CalendarScreen() {
   const [selectedDate, setSelectedDate] = useState(TODAY);
-  const [events, setEvents] = useState<Record<string, any[]>>(DUMMY_EVENTS);
+  const [events, setEvents] = useState<Record<string, any[]>>({});
+  const [groups, setGroups] = useState<{id: any, name: string}[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
 
@@ -92,30 +94,83 @@ export default function CalendarScreen() {
     time: string;
     notify: boolean;
     notifyInAdvance: number | null;
+    groupId: any | null;
   }>({
     title: '',
     location: '',
     time: '',
     notify: false,
     notifyInAdvance: null,
+    groupId: null,
   });
   const router = useRouter();
 
+  const fetchEvents = async () => {
+    //groups
+    const { data: groupData } = await supabase.from('groups').select('id, name');
+    if (groupData) setGroups(groupData);
+
+    //events
+    const { data: eventData, error } = await supabase.from('events').select('*');
+    if (error) {
+      console.error('Error fetching events:', error);
+      return;
+    }
+
+    if (eventData) {
+      const formattedEvents: Record<string, any[]> = {};
+      eventData.forEach((event:any) => {
+        if (!formattedEvents[event.event_date]) {
+          formattedEvents[event.event_date] = [];
+        }
+        formattedEvents[event.event_date].push({
+          id: event.id,
+          title: event.title,
+          location: event.location,
+          time: event.time,
+          notify: event.notify,
+          notifyInAdvance: event.notify_in_advance,
+          groupId: event.group_id
+        });
+      });
+      setEvents(formattedEvents);
+    }
+  };
+
+
+  // useEffect(() => {
+  //   (async () => {
+  //     const { status: existingStatus } = await Notifications.getPermissionsAsync();
+  //     let finalStatus = existingStatus;
+      
+  //     if (existingStatus !== 'granted') {
+  //       const { status } = await Notifications.requestPermissionsAsync();
+  //       finalStatus = status;
+  //     }
+      
+  //     if (finalStatus !== 'granted') {
+  //       console.log('Notification permissions not granted!');
+  //     }
+  //   })();
+  // }, []);
+
   useEffect(() => {
+    fetchEvents();
+
+
+
+
     (async () => {
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
-      
       if (existingStatus !== 'granted') {
         const { status } = await Notifications.requestPermissionsAsync();
         finalStatus = status;
       }
-      
-      if (finalStatus !== 'granted') {
-        console.log('Notification permissions not granted!');
-      }
+      if (finalStatus !== 'granted') console.log('Notification permissions not granted!');
     })();
   }, []);
+
 
   const markedDates = useMemo(() => {
     const marked: Record<string, any> = {};
@@ -155,7 +210,7 @@ export default function CalendarScreen() {
 
   const handleOpenAddModal = () => {
     setEditingEventId(null);
-    setNewEvent({ title: '', location: '', time: '', notify: false, notifyInAdvance: null});
+    setNewEvent({ title: '', location: '', time: '', notify: false, notifyInAdvance: null, groupId: null});
     setTimeValue(new Date());
     setShowAddModal(true);
   };
@@ -168,6 +223,7 @@ export default function CalendarScreen() {
       time: event.time,
       notify: event.notify,
       notifyInAdvance: event.notifyInAdvance ?? null,
+      groupId: event.groupId ?? null,
     });
     setTimeValue(parseTimeString(event.time));
     setShowAddModal(true);
@@ -209,12 +265,34 @@ export default function CalendarScreen() {
       }
     }
 
-    const eventData = {
-      id: editingEventId ? editingEventId : Date.now().toString(), 
+    const eventId = editingEventId ? editingEventId : Date.now().toString();
+    const dbEventData = {
+      id: eventId,
+      event_date: selectedDate,
       title: newEvent.title,
       location: newEvent.location,
       time: newEvent.time,
       notify: newEvent.notify,
+      notify_in_advance: newEvent.notifyInAdvance,
+      group_id: newEvent.groupId
+    };
+
+    const { error } = await supabase.from('events').upsert(dbEventData);
+
+    if (error) {
+      Alert.alert('Database Error', 'Could not save event.');
+      console.error('Supabase error:', error);
+      return;
+    }
+
+    const localEventData = {
+      id: eventId,
+      title: newEvent.title,
+      location: newEvent.location,
+      time: newEvent.time,
+      notify: newEvent.notify,
+      notifyInAdvance: newEvent.notifyInAdvance,
+      group_id: newEvent.groupId
     };
 
     setEvents(prev => {
@@ -222,22 +300,71 @@ export default function CalendarScreen() {
       if (editingEventId) {
         return {
           ...prev,
-          [selectedDate]: currentDayEvents.map(e => e.id === editingEventId ? eventData : e)
+          [selectedDate]: currentDayEvents.map(e => e.id === editingEventId ? localEventData : e)
         };
       } else {
         return {
           ...prev,
-          [selectedDate]: [...currentDayEvents, eventData]
+          [selectedDate]: [...currentDayEvents, localEventData]
         };
       }
     });
 
-    setNewEvent({ title: '', location: '', time: '', notify: false, notifyInAdvance: null});
+    setNewEvent({ title: '', location: '', time: '', notify: false, notifyInAdvance: null, groupId: null});
     setTimeValue(new Date());
     setEditingEventId(null);
     setShowTimePicker(false);
     setShowAddModal(false);
+
+    // const eventData = {
+    //   id: editingEventId ? editingEventId : Date.now().toString(), 
+    //   title: newEvent.title,
+    //   location: newEvent.location,
+    //   time: newEvent.time,
+    //   notify: newEvent.notify,
+    // };
+
+    // setEvents(prev => {
+    //   const currentDayEvents = prev[selectedDate] || [];
+    //   if (editingEventId) {
+    //     return {
+    //       ...prev,
+    //       [selectedDate]: currentDayEvents.map(e => e.id === editingEventId ? eventData : e)
+    //     };
+    //   } else {
+    //     return {
+    //       ...prev,
+    //       [selectedDate]: [...currentDayEvents, eventData]
+    //     };
+    //   }
+    // });
+
+    // setNewEvent({ title: '', location: '', time: '', notify: false, notifyInAdvance: null, groupId: null});
+    // setTimeValue(new Date());
+    // setEditingEventId(null);
+    // setShowTimePicker(false);
+    // setShowAddModal(false);
   };
+
+  // const handleDeleteEvent = () => {
+  //   if (!editingEventId) return;
+
+  //   Alert.alert('Delete Event', 'Are you sure you want to delete this event?', [
+  //     { text: 'Cancel', style: 'cancel' },
+  //     {
+  //       text: 'Delete',
+  //       style: 'destructive',
+  //       onPress: async () => {
+  //         setEvents(prev => ({
+  //           ...prev,
+  //           [selectedDate]: prev[selectedDate].filter(e => e.id !== editingEventId)
+  //         }));
+  //         setShowAddModal(false); 
+  //         setEditingEventId(null); 
+  //       }
+  //     }
+  //   ]);
+  // };
 
   const handleDeleteEvent = () => {
     if (!editingEventId) return;
@@ -247,17 +374,30 @@ export default function CalendarScreen() {
       {
         text: 'Delete',
         style: 'destructive',
-        onPress: () => {
+        onPress: async () => {
+        
+          const { error } = await supabase
+            .from('events')
+            .delete()
+            .eq('id', editingEventId);
+
+          if (error) {
+            Alert.alert('Error', 'Could not delete event from database');
+            console.error('Supabase delete error:', error);
+            return;
+          }
+
           setEvents(prev => ({
             ...prev,
             [selectedDate]: prev[selectedDate].filter(e => e.id !== editingEventId)
           }));
-          setShowAddModal(false); 
-          setEditingEventId(null); 
+          setShowAddModal(false);
+          setEditingEventId(null);
         }
       }
     ]);
   };
+
 
   const renderEventCard = ({ item }: { item: any }) => (
     <View style={styles.eventCardWrapper}>
@@ -386,7 +526,38 @@ export default function CalendarScreen() {
                     );
                   })}
                 </ScrollView>
+{/*hjsfbvsjhfbvjhsfbvhjsbvhkjsdbvjhsbdvjhsbjvsvjhsdbvjhsbvjh*/}
+                
+                <Text style={styles.label}>Group</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+                  <TouchableOpacity
+                    style={[styles.chip, !newEvent.groupId && styles.chipSelected]}
+                    onPress={() => setNewEvent(prev => ({ ...prev, groupId: null }))}
+                  >
+                    <Text style={[styles.chipText, !newEvent.groupId && styles.chipTextSelected]}>
+                      None
+                    </Text>
+                  </TouchableOpacity>
+                
+                  {groups.map((group) => {
+                    const isSelected = newEvent.groupId === group.id;
+                    return (
+                      <TouchableOpacity
+                        key={group.id}
+                        style={[styles.chip, isSelected && styles.chipSelected]}
+                        onPress={() => setNewEvent(prev => ({ ...prev, groupId: group.id }))}
+                      >
+                        <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
+                          {group.name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
 
+                {/*group chips^^*/}
+                
+                
                 {editingEventId && (
                   <TouchableOpacity style={styles.deleteFormButton} onPress={handleDeleteEvent}>
                     <Text style={styles.deleteFormText}>Delete Event</Text>
