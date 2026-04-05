@@ -175,7 +175,7 @@ def render_occupancy_grid(page, scale=3, min_seg_len=1, wall_thickness=7):
     for (acx, acy, ar, cnt, arcs) in arc_centers:
         px_cx = int(acx * scale)
         px_cy = int(acy * scale)
-        px_r = int(ar * scale) + wall_thickness
+        px_r = int(ar * scale) + 2  # small margin; wall_thickness was too aggressive
 
         for (p0, p3) in arcs:
             ax, ay = int(p0[0] * scale), int(p0[1] * scale)
@@ -1232,17 +1232,15 @@ def _los_subsample(grid, path_px):
     result = [path_px[0]]
     i = 0
     while i < len(path_px) - 1:
-        # Binary search for farthest point visible from current
-        lo, hi = i + 1, len(path_px) - 1
+        # Linear scan from farthest point back to find the farthest visible.
+        # Binary search is incorrect here because LOS visibility along a
+        # corridor path is NOT monotonic (e.g. L-shaped corridors, doorways).
         best = i + 1
-        while lo <= hi:
-            mid = (lo + hi) // 2
+        for j in range(len(path_px) - 1, i, -1):
             if _los_pixels(grid, result[-1][0], result[-1][1],
-                           path_px[mid][0], path_px[mid][1]):
-                best = mid
-                lo = mid + 1
-            else:
-                hi = mid - 1
+                           path_px[j][0], path_px[j][1]):
+                best = j
+                break
         result.append(path_px[best])
         i = best
     return result

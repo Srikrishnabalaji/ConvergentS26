@@ -37,3 +37,6 @@ yarn-error.*
 
 # Build outputs
 *.tsbuildinfo
+
+# Debug visualization images
+frontend/assets/debug_viz/
