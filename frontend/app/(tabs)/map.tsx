@@ -6,7 +6,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   Keyboard,
-  Alert,
   Platform,
   Animated as RNAnimated,
 } from 'react-native';
@@ -25,6 +24,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SearchPanel } from '@/components/map/SearchPanel';
 import { RouteInfoCard } from '@/components/map/RouteInfoCard';
 import { LocationConfirmCard } from '@/components/map/LocationConfirmCard';
+import { IndoorMapView } from '@/components/map/IndoorMapView';
+import type { BuildingGraph } from '@/lib/services/indoor-navigation';
+import gdcGraphData from '@/assets/gdc_graph.json';
 import {
   UT_CAMPUS_REGION,
   DEFAULT_USER_LOCATION,
@@ -51,14 +53,14 @@ import { useLocalSearchParams } from 'expo-router';
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-type MapViewState = 'default' | 'searching' | 'navigation' | 'walking' | 'building';
+type MapViewState = 'default' | 'searching' | 'navigation' | 'walking' | 'building' | 'indoor';
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 export default function MapScreen() {
   // State
-  const [viewState, setViewState] = useState<MapViewState>('default');
+  const [viewState, setViewState] = useState<MapViewState>('indoor'); // TODO: change back to 'default' after testing
   const [query, setQuery] = useState('');
   const [selectedPlace, setSelectedPlace] = useState<SearchItem | null>(null);
   const [userLocation, setUserLocation] = useState(DEFAULT_USER_LOCATION);
@@ -438,6 +440,8 @@ export default function MapScreen() {
           { latitude: selectedPlace.latitude, longitude: selectedPlace.longitude },
         ], { top: 140, right: 60, bottom: 280, left: 60 });
       }
+    } else if (viewState === 'indoor') {
+      setViewState('building');
     }
   }, [viewState, userLocation, selectedPlace, stopLocationWatcher, transitionFromSearch, resetToDefault]);
 
@@ -606,11 +610,7 @@ export default function MapScreen() {
   }, [selectedPlace, userLocation, stopLocationWatcher]);
 
   const handleConfirmLocation = useCallback(() => {
-    Alert.alert(
-      'Location Confirmed',
-      'Indoor navigation will be available once the CV model is integrated. The floor plan for this building will appear here.',
-      [{ text: 'OK' }],
-    );
+    setViewState('indoor');
   }, []);
 
   const handleReposition = useCallback(() => {
@@ -706,6 +706,18 @@ export default function MapScreen() {
           />
         </SafeAreaView>
       </RNAnimated.View>
+    );
+  }
+
+  // Indoor navigation full-screen view
+  if (viewState === 'indoor') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <IndoorMapView
+          graph={gdcGraphData as BuildingGraph}
+          onExit={handleBack}
+        />
+      </SafeAreaView>
     );
   }
 
