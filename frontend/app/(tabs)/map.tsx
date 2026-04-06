@@ -7,13 +7,20 @@ import {
   TouchableOpacity,
   Keyboard,
   Platform,
+  Animated as RNAnimated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { CameraRef } from '@maplibre/maplibre-react-native';
 import * as Location from 'expo-location';
+import * as Haptics from 'expo-haptics';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import {
+  ExpoSpeechRecognitionModule,
+  useSpeechRecognitionEvent,
+} from 'expo-speech-recognition';
+
 import { CampusMapLayer } from '@/components/map/CampusMapLayer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { SearchPanel } from '@/components/map/SearchPanel';
 import { RouteInfoCard } from '@/components/map/RouteInfoCard';
 import { LocationConfirmCard } from '@/components/map/LocationConfirmCard';
@@ -28,12 +35,19 @@ import {
   DEFAULT_BUILDING_FLOORS,
   REROUTE_THRESHOLD_M,
   ARRIVAL_THRESHOLD_M,
+  PREVIEW_REROUTE_THRESHOLD_M,
   MAP_WINDOW_WIDTH,
   fitMapToCoordinates,
   animateMapToRegion,
 } from '@/constants/map';
-import { geocodeSearch, type SearchItem } from '@/lib/services/geocoding';
-import { fetchWalkingRoute, haversineKm } from '@/lib/services/routing';
+import { geocodeSearch, GeocodingNetworkError, type SearchItem } from '@/lib/services/geocoding';
+import {
+  fetchWalkingRoute,
+  haversineKm,
+  distanceToPolylineM,
+  trimRouteToPosition,
+  polylineDistanceKm,
+} from '@/lib/services/routing';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -60,13 +74,23 @@ export default function MapScreen() {
   const [routeDistMi, setRouteDistMi] = useState(0);
   const [routeWalkMin, setRouteWalkMin] = useState(0);
   const [routeLoading, setRouteLoading] = useState(false);
+  const [showOverview, setShowOverview] = useState(false);
+
+  // Voice search
+  const [isListening, setIsListening] = useState(false);
+  const [voicePartial, setVoicePartial] = useState('');
+  const pulseAnim = useRef(new RNAnimated.Value(1)).current;
+
+  // Search overlay fade animation
+  const searchFade = useRef(new RNAnimated.Value(0)).current;
 
   const cameraRef = useRef<CameraRef>(null);
   const inputRef = useRef<TextInput>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const locationWatcherRef = useRef<Location.LocationSubscription | null>(null);
-  const lastRouteOriginRef = useRef<{ latitude: number; longitude: number } | null>(null);
   const isReroutingRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const previewRouteCalcPosRef = useRef<{ latitude: number; longitude: number } | null>(null);
 
   // Clock ticks every minute so the ETA stays accurate as real time passes
   const [currentTime, setCurrentTime] = useState(() => Date.now());
@@ -75,12 +99,70 @@ export default function MapScreen() {
     return () => clearInterval(id);
   }, []);
 
-  // "Arrives at H:MM AM/PM" — updates whenever walk time or clock changes
+  // "Arrives at H:MM AM/PM"
   const etaString = useMemo(() => {
     if (routeWalkMin <= 0) return '';
     const arrival = new Date(currentTime + routeWalkMin * 60_000);
     return arrival.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   }, [currentTime, routeWalkMin]);
+
+  // -----------------------------------------------------------------------
+  // Voice search event handlers
+  // -----------------------------------------------------------------------
+  useSpeechRecognitionEvent('start', () => setIsListening(true));
+  useSpeechRecognitionEvent('end', () => {
+    setIsListening(false);
+    setVoicePartial('');
+    pulseAnim.stopAnimation();
+    RNAnimated.spring(pulseAnim, { toValue: 1, useNativeDriver: true }).start();
+  });
+  useSpeechRecognitionEvent('result', (ev) => {
+    const transcript = ev.results?.[0]?.transcript ?? '';
+    if (ev.isFinal && transcript.length > 0) {
+      setQuery(transcript);
+      setIsListening(false);
+      ExpoSpeechRecognitionModule.stop();
+    } else {
+      setVoicePartial(transcript);
+    }
+  });
+  useSpeechRecognitionEvent('error', () => {
+    setIsListening(false);
+    setVoicePartial('');
+  });
+
+  // Pulsing animation while listening
+  useEffect(() => {
+    if (!isListening) return;
+    const loop = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(pulseAnim, { toValue: 1.35, duration: 600, useNativeDriver: true }),
+        RNAnimated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [isListening, pulseAnim]);
+
+  const startVoiceSearch = useCallback(async () => {
+    try {
+      const { granted } = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (!granted) {
+        Alert.alert('Permission Required', 'Microphone and speech recognition permissions are needed for voice search.');
+        return;
+      }
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      ExpoSpeechRecognitionModule.start({ lang: 'en-US', interimResults: true });
+    } catch {
+      Alert.alert('Voice Search', 'Speech recognition is not available on this device.');
+    }
+  }, []);
+
+  const stopVoiceSearch = useCallback(() => {
+    ExpoSpeechRecognitionModule.stop();
+    setIsListening(false);
+    setVoicePartial('');
+  }, []);
 
   // Load recents from AsyncStorage on mount
   useEffect(() => {
@@ -114,7 +196,7 @@ export default function MapScreen() {
     })();
   }, []);
 
-  // Debounced geocoding search
+  // Debounced geocoding search (now proximity-aware)
   useEffect(() => {
     if (query.length === 0) {
       setSearchResults([]);
@@ -126,20 +208,29 @@ export default function MapScreen() {
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
       try {
-        const results = await geocodeSearch(query);
-        setSearchResults(results);
-      } catch {
-        setSearchResults([]);
+        const results = await geocodeSearch(query, userLocation, controller.signal);
+        if (!controller.signal.aborted) setSearchResults(results);
+      } catch (e) {
+        if (!controller.signal.aborted) {
+          if (e instanceof GeocodingNetworkError) {
+            Alert.alert('Search Unavailable', e.message);
+          }
+          setSearchResults([]);
+        }
       } finally {
-        setSearchLoading(false);
+        if (!controller.signal.aborted) setSearchLoading(false);
       }
-    }, 400);
+    }, 700);
 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [query]);
+  }, [query, userLocation]);
 
   // Stop location watcher helper
   const stopLocationWatcher = useCallback(() => {
@@ -147,7 +238,6 @@ export default function MapScreen() {
       locationWatcherRef.current.remove();
       locationWatcherRef.current = null;
     }
-    lastRouteOriginRef.current = null;
     isReroutingRef.current = false;
   }, []);
 
@@ -158,17 +248,89 @@ export default function MapScreen() {
     };
   }, [stopLocationWatcher]);
 
+  const startPreviewWatcher = useCallback(
+    async (dest: { latitude: number; longitude: number }) => {
+      stopLocationWatcher();
+      previewRouteCalcPosRef.current = userLocation;
+
+      const watcher = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.Balanced, distanceInterval: 30, timeInterval: 10_000 },
+        async (loc) => {
+          const pos = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+          setUserLocation(pos);
+
+          const prev = previewRouteCalcPosRef.current;
+          if (prev && !isReroutingRef.current) {
+            const moved =
+              haversineKm(pos.latitude, pos.longitude, prev.latitude, prev.longitude) * 1000;
+            if (moved > PREVIEW_REROUTE_THRESHOLD_M) {
+              isReroutingRef.current = true;
+              previewRouteCalcPosRef.current = pos;
+              try {
+                const result = await fetchWalkingRoute(pos, dest);
+                setRouteCoords(result.coords);
+                setRouteDistMi(result.distanceMi);
+                setRouteWalkMin(result.durationMin);
+              } finally {
+                isReroutingRef.current = false;
+              }
+            }
+          }
+        },
+      );
+      locationWatcherRef.current = watcher;
+    },
+    [userLocation, stopLocationWatcher],
+  );
+
+  // -----------------------------------------------------------------------
+  // View state transitions with animation
+  // -----------------------------------------------------------------------
+  const transitionToSearch = useCallback(() => {
+    searchFade.setValue(0);
+    setViewState('searching');
+    RNAnimated.timing(searchFade, {
+      toValue: 1,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+  }, [searchFade]);
+
+  const transitionFromSearch = useCallback(() => {
+    RNAnimated.timing(searchFade, {
+      toValue: 0,
+      duration: 150,
+      useNativeDriver: true,
+    }).start(() => {
+      setViewState('default');
+      setQuery('');
+      setSearchResults([]);
+    });
+    Keyboard.dismiss();
+  }, [searchFade]);
+
+  // -----------------------------------------------------------------------
   // Handlers
+  // -----------------------------------------------------------------------
   const handleSelectPlace = useCallback(
     async (item: SearchItem) => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       setSelectedPlace(item);
       setQuery(item.name);
-      setViewState('navigation');
       setRouteLoading(true);
       setRouteCoords([]);
       setRouteDistMi(0);
       setRouteWalkMin(0);
       Keyboard.dismiss();
+
+      // Animate out of search overlay then into navigation
+      RNAnimated.timing(searchFade, {
+        toValue: 0,
+        duration: 150,
+        useNativeDriver: true,
+      }).start(() => {
+        setViewState('navigation');
+      });
 
       // Add to recents (dedup, cap at MAX_RECENTS)
       setRecentSearches((prev) => {
@@ -193,7 +355,6 @@ export default function MapScreen() {
         setRouteDistMi(result.distanceMi);
         setRouteWalkMin(result.durationMin);
 
-        // Re-fit map to the actual route bounds
         if (result.coords.length > 1) {
           fitMapToCoordinates(cameraRef, result.coords, {
             top: 140,
@@ -202,41 +363,44 @@ export default function MapScreen() {
             left: 60,
           });
         }
+
+        if (result.isFallback) {
+          Alert.alert(
+            'Route Unavailable',
+            'Showing an estimated route. Check your connection for accurate directions.',
+          );
+        }
+
+        startPreviewWatcher(dest);
       } finally {
         setRouteLoading(false);
       }
     },
-    [userLocation],
+    [userLocation, searchFade, startPreviewWatcher],
   );
+
+  const resetToDefault = useCallback(() => {
+    stopLocationWatcher();
+    setShowOverview(false);
+    setViewState('default');
+    setQuery('');
+    setRouteCoords([]);
+    setRouteDistMi(0);
+    setRouteWalkMin(0);
+    setRouteLoading(false);
+    // Delay clearing selectedPlace so PointAnnotation doesn't unmount mid-frame
+    setTimeout(() => setSelectedPlace(null), 50);
+  }, [stopLocationWatcher]);
 
   const handleBack = useCallback(() => {
     if (viewState === 'searching') {
-      setViewState('default');
-      setQuery('');
-      setSearchResults([]);
-      Keyboard.dismiss();
+      transitionFromSearch();
     } else if (viewState === 'navigation') {
-      stopLocationWatcher();
-      setViewState('default');
-      setSelectedPlace(null);
-      setQuery('');
-      setRouteCoords([]);
-      setRouteDistMi(0);
-      setRouteWalkMin(0);
-      setRouteLoading(false);
+      resetToDefault();
       animateMapToRegion(cameraRef, UT_CAMPUS_REGION, 400);
     } else if (viewState === 'walking') {
-      // Chevron while walking → full exit, no route shown
-      stopLocationWatcher();
-      setViewState('default');
-      setSelectedPlace(null);
-      setQuery('');
-      setRouteCoords([]);
-      setRouteDistMi(0);
-      setRouteWalkMin(0);
-      setRouteLoading(false);
-      // Defer so Camera re-renders with followUserLocation=false first
-      setTimeout(() => animateMapToRegion(cameraRef, UT_CAMPUS_REGION, 400), 50);
+      resetToDefault();
+      setTimeout(() => animateMapToRegion(cameraRef, UT_CAMPUS_REGION, 400), 100);
     } else if (viewState === 'building') {
       setViewState('navigation');
       stopLocationWatcher();
@@ -252,33 +416,80 @@ export default function MapScreen() {
     } else if (viewState === 'indoor') {
       setViewState('building');
     }
-  }, [viewState, userLocation, selectedPlace, stopLocationWatcher]);
+  }, [viewState, userLocation, selectedPlace, stopLocationWatcher, transitionFromSearch, resetToDefault]);
 
-  // "Exit Navigation" button: stop walking, return to route overview
-  const handleExitNavigation = useCallback(() => {
+  const handleExitNavigation = useCallback(async () => {
     stopLocationWatcher();
+    setShowOverview(false);
     setViewState('navigation');
-    // Defer so Camera re-renders with followUserLocation=false before we refit
-    const coords = routeCoords;
-    const place = selectedPlace;
-    const userLoc = userLocation;
-    setTimeout(() => {
-      if (coords.length > 1) {
-        fitMapToCoordinates(cameraRef, coords, { top: 140, right: 60, bottom: 280, left: 60 });
-      } else if (place) {
-        fitMapToCoordinates(cameraRef, [
-          userLoc,
-          { latitude: place.latitude, longitude: place.longitude },
-        ], { top: 140, right: 60, bottom: 280, left: 60 });
+
+    if (!selectedPlace) return;
+
+    const dest = { latitude: selectedPlace.latitude, longitude: selectedPlace.longitude };
+
+    setRouteLoading(true);
+    let currentLoc = userLocation;
+    try {
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      currentLoc = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+      setUserLocation(currentLoc);
+    } catch {}
+
+    try {
+      const result = await fetchWalkingRoute(currentLoc, dest);
+      setRouteCoords(result.coords);
+      setRouteDistMi(result.distanceMi);
+      setRouteWalkMin(result.durationMin);
+
+      if (result.coords.length > 1) {
+        fitMapToCoordinates(cameraRef, result.coords, {
+          top: 140,
+          right: 60,
+          bottom: 280,
+          left: 60,
+        });
       }
-    }, 50);
-  }, [stopLocationWatcher, routeCoords, selectedPlace, userLocation]);
+
+      if (result.isFallback) {
+        Alert.alert(
+          'Route Unavailable',
+          'Showing an estimated route. Check your connection for accurate directions.',
+        );
+      }
+
+      startPreviewWatcher(dest);
+    } finally {
+      setRouteLoading(false);
+    }
+  }, [stopLocationWatcher, selectedPlace, userLocation, startPreviewWatcher]);
+
+  // Route overview: toggle between overview and follow-me
+  const handleRouteOverview = useCallback(() => {
+    if (showOverview) {
+      // Resume following
+      setShowOverview(false);
+    } else {
+      // Show overview: disable follow, fit route
+      setShowOverview(true);
+      setTimeout(() => {
+        if (routeCoords.length > 1) {
+          fitMapToCoordinates(cameraRef, routeCoords, {
+            top: 140,
+            right: 60,
+            bottom: 280,
+            left: 60,
+          });
+        }
+      }, 50);
+    }
+  }, [showOverview, routeCoords]);
 
   const handleStartNavigation = useCallback(async () => {
     if (!selectedPlace) return;
 
-    // Get fresh current location (B)
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setRouteLoading(true);
+    setShowOverview(false);
     let currentLoc = userLocation;
     try {
       const loc = await Location.getCurrentPositionAsync({
@@ -290,36 +501,30 @@ export default function MapScreen() {
 
     const dest = { latitude: selectedPlace.latitude, longitude: selectedPlace.longitude };
 
-    // Fetch fresh route from B → C
     try {
       const result = await fetchWalkingRoute(currentLoc, dest);
       setRouteCoords(result.coords);
       setRouteDistMi(result.distanceMi);
       setRouteWalkMin(result.durationMin);
-      lastRouteOriginRef.current = currentLoc;
 
-      if (result.coords.length > 1) {
-        fitMapToCoordinates(cameraRef, result.coords, {
-          top: 140,
-          right: 60,
-          bottom: 280,
-          left: 60,
-        });
+      if (result.isFallback) {
+        Alert.alert(
+          'Route Unavailable',
+          'Showing an estimated route. Directions will update when connection improves.',
+        );
       }
     } finally {
       setRouteLoading(false);
     }
 
-    // Transition to walking state
     setViewState('walking');
 
-    // Start live location watcher
     stopLocationWatcher();
     const watcher = await Location.watchPositionAsync(
       {
         accuracy: Location.Accuracy.High,
-        distanceInterval: 5, // fire every ~5m of movement
-        timeInterval: 3000,  // or at least every 3s
+        distanceInterval: 5,
+        timeInterval: 3000,
       },
       (loc) => {
         const pos = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
@@ -328,9 +533,11 @@ export default function MapScreen() {
         // Check arrival
         const distToDest = haversineKm(pos.latitude, pos.longitude, dest.latitude, dest.longitude) * 1000;
         if (distToDest < ARRIVAL_THRESHOLD_M) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           stopLocationWatcher();
           setViewState('building');
           setSelectedFloor(1);
+          setShowOverview(false);
           animateMapToRegion(
             cameraRef,
             {
@@ -344,24 +551,32 @@ export default function MapScreen() {
           return;
         }
 
-        // Check if we need to re-route (user drifted from route origin)
-        const lastOrigin = lastRouteOriginRef.current;
-        if (lastOrigin && !isReroutingRef.current) {
-          const drift = haversineKm(pos.latitude, pos.longitude, lastOrigin.latitude, lastOrigin.longitude) * 1000;
-          if (drift > REROUTE_THRESHOLD_M) {
+        // Trim completed portion behind user and check rerouting
+        setRouteCoords((currentRouteCoords) => {
+          if (currentRouteCoords.length < 2 || isReroutingRef.current) return currentRouteCoords;
+
+          const trimmed = trimRouteToPosition(pos, currentRouteCoords);
+          const remainingKm = polylineDistanceKm(trimmed);
+          const remainingMi = remainingKm * 0.621371;
+          setRouteDistMi(remainingMi);
+          setRouteWalkMin(Math.max(1, Math.round((remainingMi / 3.1) * 60)));
+
+          const offRouteDist = distanceToPolylineM(pos, trimmed);
+          if (offRouteDist > REROUTE_THRESHOLD_M) {
             isReroutingRef.current = true;
             fetchWalkingRoute(pos, dest)
               .then((result) => {
                 setRouteCoords(result.coords);
                 setRouteDistMi(result.distanceMi);
                 setRouteWalkMin(result.durationMin);
-                lastRouteOriginRef.current = pos;
               })
               .finally(() => {
                 isReroutingRef.current = false;
               });
           }
-        }
+
+          return trimmed;
+        });
       },
     );
     locationWatcherRef.current = watcher;
@@ -380,57 +595,90 @@ export default function MapScreen() {
     saveRecents([]);
   }, [saveRecents]);
 
+  const handleRecenter = useCallback(async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setShowOverview(false);
+
+    let coord = userLocation;
+    try {
+      const fresh = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      coord = { latitude: fresh.coords.latitude, longitude: fresh.coords.longitude };
+      setUserLocation(coord);
+    } catch {}
+
+    cameraRef.current?.setCamera({
+      centerCoordinate: [coord.longitude, coord.latitude],
+      zoomLevel: viewState === 'walking' ? 17 : 16,
+      animationDuration: 500,
+      animationMode: 'easeTo',
+    });
+  }, [viewState, userLocation]);
+
   // -----------------------------------------------------------------------
   // Render
   // -----------------------------------------------------------------------
 
-  // Search overlay (full-screen white panel)
+  // Search overlay (animated fade-in)
   if (viewState === 'searching') {
     return (
-      <SafeAreaView style={styles.searchOverlay}>
-        {/* Search bar */}
-        <View style={styles.searchOverlayBar}>
-          <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
-            <MaterialIcons name="chevron-left" size={28} color="#000" />
-          </TouchableOpacity>
-          <View style={styles.searchInputWrap}>
-            <TextInput
-              ref={inputRef}
-              style={styles.searchInput}
-              value={query}
-              onChangeText={setQuery}
-              placeholder="Search here"
-              placeholderTextColor="#999"
-              autoFocus
-              returnKeyType="search"
-            />
+      <RNAnimated.View style={[styles.searchOverlayWrap, { opacity: searchFade }]}>
+        <SafeAreaView style={styles.searchOverlay}>
+          {/* Search bar */}
+          <View style={styles.searchOverlayBar}>
+            <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
+              <MaterialIcons name="chevron-left" size={28} color="#000" />
+            </TouchableOpacity>
+            <View style={styles.searchInputWrap}>
+              <TextInput
+                ref={inputRef}
+                style={styles.searchInput}
+                value={isListening ? voicePartial || 'Listening…' : query}
+                onChangeText={setQuery}
+                placeholder="Search here"
+                placeholderTextColor="#999"
+                autoFocus
+                returnKeyType="search"
+                editable={!isListening}
+              />
+            </View>
+            {isListening ? (
+              <TouchableOpacity style={styles.micBtn} onPress={stopVoiceSearch}>
+                <RNAnimated.View
+                  style={[
+                    styles.listeningDot,
+                    { transform: [{ scale: pulseAnim }] },
+                  ]}
+                />
+              </TouchableOpacity>
+            ) : query.length > 0 ? (
+              <TouchableOpacity
+                style={styles.micBtn}
+                onPress={() => {
+                  setQuery('');
+                  setSearchResults([]);
+                }}
+              >
+                <MaterialIcons name="close" size={20} color="#666" />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity style={styles.micBtn} onPress={startVoiceSearch}>
+                <MaterialIcons name="mic" size={22} color="#666" />
+              </TouchableOpacity>
+            )}
           </View>
-          {query.length > 0 ? (
-            <TouchableOpacity
-              style={styles.micBtn}
-              onPress={() => {
-                setQuery('');
-                setSearchResults([]);
-              }}
-            >
-              <MaterialIcons name="close" size={20} color="#666" />
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity style={styles.micBtn}>
-              <MaterialIcons name="mic" size={22} color="#666" />
-            </TouchableOpacity>
-          )}
-        </View>
-        {/* Results */}
-        <SearchPanel
-          recentSearches={recentSearches}
-          searchResults={searchResults}
-          query={query}
-          loading={searchLoading}
-          onSelect={handleSelectPlace}
-          onClearRecents={handleClearRecents}
-        />
-      </SafeAreaView>
+          {/* Results */}
+          <SearchPanel
+            recentSearches={recentSearches}
+            searchResults={searchResults}
+            query={query}
+            loading={searchLoading}
+            onSelect={handleSelectPlace}
+            onClearRecents={handleClearRecents}
+          />
+        </SafeAreaView>
+      </RNAnimated.View>
     );
   }
 
@@ -446,7 +694,7 @@ export default function MapScreen() {
     );
   }
 
-  // Map-based views (default, navigation, building)
+  // Map-based views (default, navigation, walking, building)
   return (
     <View style={styles.container}>
       {/* Map */}
@@ -459,7 +707,8 @@ export default function MapScreen() {
         initialLongitudeDelta={UT_CAMPUS_REGION.longitudeDelta}
         mapWidth={MAP_WINDOW_WIDTH}
         showsUserLocation={!isRepositioning}
-        followUserLocation={viewState === 'walking'}
+        followUserLocation={viewState === 'walking' && !showOverview}
+        followUserHeading={viewState === 'walking' && !showOverview}
         destination={
           selectedPlace &&
           (viewState === 'navigation' || viewState === 'walking' || viewState === 'building')
@@ -497,7 +746,7 @@ export default function MapScreen() {
           <TouchableOpacity
             style={styles.searchInputWrap}
             activeOpacity={0.9}
-            onPress={() => setViewState('searching')}
+            onPress={transitionToSearch}
           >
             <Text
               style={[styles.searchInput, { color: query ? '#000' : '#999' }]}
@@ -508,10 +757,6 @@ export default function MapScreen() {
           </TouchableOpacity>
           {viewState === 'building' ? (
             <View style={styles.buildingBarIcons}>
-              <TouchableOpacity style={styles.iconBtn}>
-                <MaterialIcons name="person" size={22} color="#333" />
-              </TouchableOpacity>
-              {/* Floor selector */}
               <TouchableOpacity
                 style={styles.floorSelector}
                 onPress={() => setShowFloorDropdown((v) => !v)}
@@ -523,7 +768,10 @@ export default function MapScreen() {
           ) : (
             <TouchableOpacity
               style={styles.micBtn}
-              onPress={() => setViewState('searching')}
+              onPress={() => {
+                transitionToSearch();
+                setTimeout(startVoiceSearch, 400);
+              }}
             >
               <MaterialIcons name="mic" size={22} color="#666" />
             </TouchableOpacity>
@@ -561,6 +809,15 @@ export default function MapScreen() {
         )}
       </SafeAreaView>
 
+      {/* Recenter button */}
+      <TouchableOpacity
+        style={[styles.recenterBtn, { bottom: viewState === 'default' ? 16 : 210 }]}
+        onPress={handleRecenter}
+        activeOpacity={0.8}
+      >
+        <MaterialIcons name="my-location" size={22} color="#333" />
+      </TouchableOpacity>
+
       {/* Bottom cards */}
       {viewState === 'navigation' && selectedPlace && (
         <RouteInfoCard
@@ -581,6 +838,8 @@ export default function MapScreen() {
           loading={routeLoading}
           onStart={handleStartNavigation}
           onExit={handleExitNavigation}
+          onOverview={handleRouteOverview}
+          showingOverview={showOverview}
           isWalking
         />
       )}
@@ -610,13 +869,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // Full-screen search overlay
+  searchOverlayWrap: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 100,
+  },
   searchOverlay: {
     flex: 1,
     backgroundColor: '#fff',
   },
 
-  // Search bar container inside the overlay — adds a bottom border to separate from results
   searchOverlayBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -627,7 +888,6 @@ const styles = StyleSheet.create({
     borderBottomColor: '#d0d0d0',
   },
 
-  // Floating search bar (over map)
   floatingBar: {
     position: 'absolute',
     top: 0,
@@ -636,7 +896,6 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
 
-  // Search bar row
   searchBarRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -662,16 +921,20 @@ const styles = StyleSheet.create({
   },
   micBtn: {
     paddingHorizontal: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  listeningDot: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#EA4335',
   },
 
-  // Building mode icons
   buildingBarIcons: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-  },
-  iconBtn: {
-    padding: 6,
   },
   floorSelector: {
     flexDirection: 'row',
@@ -687,7 +950,6 @@ const styles = StyleSheet.create({
     color: '#333',
   },
 
-  // Floor dropdown
   floorDropdown: {
     position: 'absolute',
     top: Platform.OS === 'ios' ? 64 : 72,
@@ -713,5 +975,16 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#000',
   },
-
+  recenterBtn: {
+    position: 'absolute',
+    right: 16,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+    ...SEARCH_BAR_SHADOW,
+  },
 });

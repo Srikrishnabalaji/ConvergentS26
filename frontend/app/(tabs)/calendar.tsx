@@ -1,11 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { 
-  StyleSheet, 
-  Text, 
-  View, 
-  FlatList, 
-  TouchableOpacity, 
-  //SafeAreaView,
+import {
+  StyleSheet,
+  Text,
+  View,
+  TouchableOpacity,
   Modal,
   TextInput,
   Pressable,
@@ -13,13 +11,16 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Calendar } from 'react-native-calendars';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Notifications from 'expo-notifications'; 
+import { supabase } from '../../lib/supabase';
+import { switchTrackColors, switchThumbColor } from '@/lib/switchTheme';
 
 const getTodayString = () => {
   const today = new Date();
@@ -55,6 +56,7 @@ const parseTimeString = (timeStr: string) => {
 };
 
 const TODAY = getTodayString();
+const PRIMARY = '#0B617E';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -79,7 +81,8 @@ const DUMMY_EVENTS: Record<string, any[]> = {
 
 export default function CalendarScreen() {
   const [selectedDate, setSelectedDate] = useState(TODAY);
-  const [events, setEvents] = useState<Record<string, any[]>>(DUMMY_EVENTS);
+  const [events, setEvents] = useState<Record<string, any[]>>({});
+  const [groups, setGroups] = useState<{id: any, name: string}[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
 
@@ -92,44 +95,133 @@ export default function CalendarScreen() {
     time: string;
     notify: boolean;
     notifyInAdvance: number | null;
+    groupId: any | null;
   }>({
     title: '',
     location: '',
     time: '',
     notify: false,
     notifyInAdvance: null,
+    groupId: null,
   });
   const router = useRouter();
+  const { groupId: paramGroupId, groupName } = useLocalSearchParams<{
+    groupId?: string;
+    groupName?: string;
+  }>();
+  const groupNameDisplay = Array.isArray(groupName) ? groupName[0] : groupName;
+  const paramGroupIdSingle = Array.isArray(paramGroupId) ? paramGroupId[0] : paramGroupId;
+
+  const [groupEventsOnly, setGroupEventsOnly] = useState(false);
+  const [selectedGroupFilterId, setSelectedGroupFilterId] = useState<string | null>(null);
+
+  const fetchEvents = async () => {
+    //groups
+    const { data: groupData } = await supabase.from('groups').select('id, name');
+    if (groupData) setGroups(groupData);
+
+    //events
+    const { data: eventData, error } = await supabase.from('events').select('*');
+    if (error) {
+      console.error('Error fetching events:', error);
+      return;
+    }
+
+    if (eventData) {
+      const formattedEvents: Record<string, any[]> = {};
+      eventData.forEach((event:any) => {
+        if (!formattedEvents[event.event_date]) {
+          formattedEvents[event.event_date] = [];
+        }
+        formattedEvents[event.event_date].push({
+          id: event.id,
+          title: event.title,
+          location: event.location,
+          time: event.time,
+          notify: event.notify,
+          notifyInAdvance: event.notify_in_advance,
+          groupId: event.group_id
+        });
+      });
+      setEvents(formattedEvents);
+    }
+  };
+
+
+  // useEffect(() => {
+  //   (async () => {
+  //     const { status: existingStatus } = await Notifications.getPermissionsAsync();
+  //     let finalStatus = existingStatus;
+      
+  //     if (existingStatus !== 'granted') {
+  //       const { status } = await Notifications.requestPermissionsAsync();
+  //       finalStatus = status;
+  //     }
+      
+  //     if (finalStatus !== 'granted') {
+  //       console.log('Notification permissions not granted!');
+  //     }
+  //   })();
+  // }, []);
 
   useEffect(() => {
+    fetchEvents();
     (async () => {
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
-      
       if (existingStatus !== 'granted') {
         const { status } = await Notifications.requestPermissionsAsync();
         finalStatus = status;
       }
-      
-      if (finalStatus !== 'granted') {
-        console.log('Notification permissions not granted!');
-      }
+      if (finalStatus !== 'granted') console.log('Notification permissions not granted!');
     })();
   }, []);
 
+  useEffect(() => {
+    if (paramGroupIdSingle) {
+      setGroupEventsOnly(true);
+      setSelectedGroupFilterId(paramGroupIdSingle);
+    }
+  }, [paramGroupIdSingle]);
+
+
+  function eventGroupId(e: { groupId?: unknown; group_id?: unknown }): string | null {
+    const g = e.groupId ?? e.group_id;
+    if (g == null || g === '') return null;
+    return String(g);
+  }
+
+  const eventsVisibleByFilter = useMemo(() => {
+    if (!groupEventsOnly) {
+      return events;
+    }
+    if (!selectedGroupFilterId) {
+      return {};
+    }
+    const out: Record<string, any[]> = {};
+    Object.keys(events).forEach((date) => {
+      const list = events[date] ?? [];
+      const filtered = list.filter(
+        (e) => eventGroupId(e) === selectedGroupFilterId
+      );
+      if (filtered.length) out[date] = filtered;
+    });
+    return out;
+  }, [events, groupEventsOnly, selectedGroupFilterId]);
+
   const markedDates = useMemo(() => {
     const marked: Record<string, any> = {};
-    Object.keys(events).forEach(date => {
-      marked[date] = { marked: true, dotColor: '#0B617E' };
+    Object.keys(eventsVisibleByFilter).forEach((date) => {
+      marked[date] = { marked: true, dotColor: PRIMARY };
     });
-    
+
     marked[selectedDate] = {
       ...(marked[selectedDate] || {}),
       selected: true,
-      selectedColor: '#0B617E',
+      selectedColor: PRIMARY,
     };
     return marked;
-  }, [selectedDate, events]);
+  }, [selectedDate, eventsVisibleByFilter]);
 
   const handleEventPress = (location: string) => {
     router.push({
@@ -155,7 +247,7 @@ export default function CalendarScreen() {
 
   const handleOpenAddModal = () => {
     setEditingEventId(null);
-    setNewEvent({ title: '', location: '', time: '', notify: false, notifyInAdvance: null});
+    setNewEvent({ title: '', location: '', time: '', notify: false, notifyInAdvance: null, groupId: null});
     setTimeValue(new Date());
     setShowAddModal(true);
   };
@@ -168,6 +260,7 @@ export default function CalendarScreen() {
       time: event.time,
       notify: event.notify,
       notifyInAdvance: event.notifyInAdvance ?? null,
+      groupId: event.groupId ?? event.group_id ?? null,
     });
     setTimeValue(parseTimeString(event.time));
     setShowAddModal(true);
@@ -209,12 +302,35 @@ export default function CalendarScreen() {
       }
     }
 
-    const eventData = {
-      id: editingEventId ? editingEventId : Date.now().toString(), 
+    const eventId = editingEventId ? editingEventId : Date.now().toString();
+    const dbEventData = {
+      id: eventId,
+      event_date: selectedDate,
       title: newEvent.title,
       location: newEvent.location,
       time: newEvent.time,
       notify: newEvent.notify,
+      notify_in_advance: newEvent.notifyInAdvance,
+      group_id: newEvent.groupId
+    };
+
+    const { error } = await supabase.from('events').upsert(dbEventData);
+
+    if (error) {
+      Alert.alert('Database Error', 'Could not save event.');
+      console.error('Supabase error:', error);
+      return;
+    }
+
+    const localEventData = {
+      id: eventId,
+      title: newEvent.title,
+      location: newEvent.location,
+      time: newEvent.time,
+      notify: newEvent.notify,
+      notifyInAdvance: newEvent.notifyInAdvance,
+      groupId: newEvent.groupId,
+      group_id: newEvent.groupId,
     };
 
     setEvents(prev => {
@@ -222,22 +338,71 @@ export default function CalendarScreen() {
       if (editingEventId) {
         return {
           ...prev,
-          [selectedDate]: currentDayEvents.map(e => e.id === editingEventId ? eventData : e)
+          [selectedDate]: currentDayEvents.map(e => e.id === editingEventId ? localEventData : e)
         };
       } else {
         return {
           ...prev,
-          [selectedDate]: [...currentDayEvents, eventData]
+          [selectedDate]: [...currentDayEvents, localEventData]
         };
       }
     });
 
-    setNewEvent({ title: '', location: '', time: '', notify: false, notifyInAdvance: null});
+    setNewEvent({ title: '', location: '', time: '', notify: false, notifyInAdvance: null, groupId: null});
     setTimeValue(new Date());
     setEditingEventId(null);
     setShowTimePicker(false);
     setShowAddModal(false);
+
+    // const eventData = {
+    //   id: editingEventId ? editingEventId : Date.now().toString(), 
+    //   title: newEvent.title,
+    //   location: newEvent.location,
+    //   time: newEvent.time,
+    //   notify: newEvent.notify,
+    // };
+
+    // setEvents(prev => {
+    //   const currentDayEvents = prev[selectedDate] || [];
+    //   if (editingEventId) {
+    //     return {
+    //       ...prev,
+    //       [selectedDate]: currentDayEvents.map(e => e.id === editingEventId ? eventData : e)
+    //     };
+    //   } else {
+    //     return {
+    //       ...prev,
+    //       [selectedDate]: [...currentDayEvents, eventData]
+    //     };
+    //   }
+    // });
+
+    // setNewEvent({ title: '', location: '', time: '', notify: false, notifyInAdvance: null, groupId: null});
+    // setTimeValue(new Date());
+    // setEditingEventId(null);
+    // setShowTimePicker(false);
+    // setShowAddModal(false);
   };
+
+  // const handleDeleteEvent = () => {
+  //   if (!editingEventId) return;
+
+  //   Alert.alert('Delete Event', 'Are you sure you want to delete this event?', [
+  //     { text: 'Cancel', style: 'cancel' },
+  //     {
+  //       text: 'Delete',
+  //       style: 'destructive',
+  //       onPress: async () => {
+  //         setEvents(prev => ({
+  //           ...prev,
+  //           [selectedDate]: prev[selectedDate].filter(e => e.id !== editingEventId)
+  //         }));
+  //         setShowAddModal(false); 
+  //         setEditingEventId(null); 
+  //       }
+  //     }
+  //   ]);
+  // };
 
   const handleDeleteEvent = () => {
     if (!editingEventId) return;
@@ -247,55 +412,78 @@ export default function CalendarScreen() {
       {
         text: 'Delete',
         style: 'destructive',
-        onPress: () => {
+        onPress: async () => {
+        
+          const { error } = await supabase
+            .from('events')
+            .delete()
+            .eq('id', editingEventId);
+
+          if (error) {
+            Alert.alert('Error', 'Could not delete event from database');
+            console.error('Supabase delete error:', error);
+            return;
+          }
+
           setEvents(prev => ({
             ...prev,
             [selectedDate]: prev[selectedDate].filter(e => e.id !== editingEventId)
           }));
-          setShowAddModal(false); 
-          setEditingEventId(null); 
+          setShowAddModal(false);
+          setEditingEventId(null);
         }
       }
     ]);
   };
 
+
   const renderEventCard = ({ item }: { item: any }) => (
-    <View style={styles.eventCardWrapper}>
-      <TouchableOpacity 
+    <View style={styles.eventCardWrap}>
+      <TouchableOpacity
+        style={styles.eventCardTouchable}
         onPress={() => handleEventPress(item.location)}
-        activeOpacity={0.7}
-        style={{ flex: 1 }}
+        activeOpacity={0.72}
       >
-        <View style={styles.eventCard}>
-          <View style={styles.eventTimeBox}>
-            <Text style={styles.eventTime}>{item.time}</Text>
-          </View>
-          <View style={styles.eventDetails}>
-            <View style={styles.titleRow}>
-              <Text style={styles.eventTitle}>{item.title}</Text>
-            </View>
-            <Text style={styles.eventSubtitle}>{item.location}</Text>
-          </View>
-          <MaterialIcons name="location-on" size={24} color="#999" />
+        <View style={styles.eventTimeCol}>
+          <Text style={styles.eventTime}>{item.time}</Text>
+        </View>
+        <View style={styles.eventTextCol}>
+          <Text style={styles.eventTitle} numberOfLines={2}>
+            {item.title}
+          </Text>
+          {item.location ? (
+            <Text style={styles.eventSubtitle} numberOfLines={1}>
+              {item.location}
+            </Text>
+          ) : null}
         </View>
       </TouchableOpacity>
-      
-      <View style={styles.actionButtonsContainer}>
-        <TouchableOpacity onPress={() => handleOpenEditModal(item)} style={styles.actionButton}>
-          <MaterialIcons name="edit" size={22} color="#0B617E" />
-        </TouchableOpacity>
-      </View>
+      <TouchableOpacity
+        style={styles.eventEditBtn}
+        onPress={() => handleOpenEditModal(item)}
+        accessibilityRole="button"
+        accessibilityLabel="Edit event"
+      >
+        <MaterialIcons name="edit" size={15} color={PRIMARY} style={{ marginRight: 3 }} />
+        <Text style={styles.eventEditBtnText}>Edit</Text>
+      </TouchableOpacity>
     </View>
   );
 
   const sortedEvents = useMemo(() => {
     const dayEvents = events[selectedDate] || [];
-    return [...dayEvents].sort((a, b) => {
+    let list = dayEvents;
+    if (groupEventsOnly && selectedGroupFilterId) {
+      list = dayEvents.filter((e) => eventGroupId(e) === selectedGroupFilterId);
+    } else if (groupEventsOnly && !selectedGroupFilterId) {
+      list = [];
+    }
+    return [...list].sort((a, b) => {
       const timeA = parseTimeString(a.time).getTime();
       const timeB = parseTimeString(b.time).getTime();
       return timeA - timeB;
     });
-  }, [events, selectedDate]);
+  }, [events, selectedDate, groupEventsOnly, selectedGroupFilterId]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -333,7 +521,7 @@ export default function CalendarScreen() {
                   style={styles.timeSelector}
                   onPress={() => setShowTimePicker(true)}
                 >
-                  <MaterialIcons name="access-time" size={20} color="#0B617E" style={{ marginRight: 8 }} />
+                  <MaterialIcons name="access-time" size={20} color={PRIMARY} style={{ marginRight: 8 }} />
                   <Text style={[styles.timeSelectorText, !newEvent.time && { color: '#999' }]}>
                     {newEvent.time || 'Tap to select time'}
                   </Text>
@@ -386,6 +574,32 @@ export default function CalendarScreen() {
                     );
                   })}
                 </ScrollView>
+                <Text style={styles.label}>Group</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+                  <TouchableOpacity
+                    style={[styles.chip, !newEvent.groupId && styles.chipSelected]}
+                    onPress={() => setNewEvent(prev => ({ ...prev, groupId: null }))}
+                  >
+                    <Text style={[styles.chipText, !newEvent.groupId && styles.chipTextSelected]}>
+                      None
+                    </Text>
+                  </TouchableOpacity>
+                
+                  {groups.map((group) => {
+                    const isSelected = newEvent.groupId === group.id;
+                    return (
+                      <TouchableOpacity
+                        key={group.id}
+                        style={[styles.chip, isSelected && styles.chipSelected]}
+                        onPress={() => setNewEvent(prev => ({ ...prev, groupId: group.id }))}
+                      >
+                        <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
+                          {group.name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
 
                 {editingEventId && (
                   <TouchableOpacity style={styles.deleteFormButton} onPress={handleDeleteEvent}>
@@ -409,81 +623,586 @@ export default function CalendarScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      <View style={styles.container}>
-        <View style={styles.headerRow}>
-          <Text style={styles.headerTitle}>Calendar</Text>
-          <TouchableOpacity style={styles.headerAddButton} onPress={handleOpenAddModal}>
-            <MaterialIcons name="add" size={28} color="#0B617E" />
+      <ScrollView
+        style={styles.scrollPage}
+        contentContainerStyle={styles.scrollPageContent}
+        showsVerticalScrollIndicator
+        keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled
+      >
+        <View style={styles.headerBlock}>
+          <View>
+            <Text style={styles.pageTitle}>Calendar</Text>
+            <Text style={styles.pageSubtitle}>Plan your week and group meetups</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.headerIconBtnPrimary}
+            onPress={handleOpenAddModal}
+            accessibilityRole="button"
+            accessibilityLabel="Add event"
+          >
+            <MaterialIcons name="add" size={26} color="#fff" />
           </TouchableOpacity>
         </View>
 
-        <Calendar
-          current={TODAY}
-          onDayPress={(day: any) => setSelectedDate(day.dateString)}
-          markedDates={markedDates}
-          theme={{ todayTextColor: '#0B617E', arrowColor: '#0B617E' }}
-        />
-        
-        <View style={styles.listContainer}>
-          <Text style={styles.dateHeader}>Events for {selectedDate}</Text>
-          <FlatList
-            data={sortedEvents}
-            keyExtractor={(item) => item.id}
-            renderItem={renderEventCard}
-            ListEmptyComponent={<Text style={styles.emptyText}>No events scheduled.</Text>}
-            showsVerticalScrollIndicator={false}
+        {groupNameDisplay ? (
+          <View style={styles.groupContextRow}>
+            <MaterialIcons name="groups" size={20} color={PRIMARY} style={{ marginRight: 8 }} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.groupContextLabel}>Opened from group</Text>
+              <Text style={styles.groupContextName} numberOfLines={2}>
+                {groupNameDisplay}
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
+        <View style={styles.filterCard}>
+          <View style={styles.filterRow}>
+            <View style={styles.filterLabelCol}>
+              <Text style={styles.filterTitle}>Group events only</Text>
+              <Text style={styles.filterHint}>
+                Show calendar and list for one group
+              </Text>
+            </View>
+            <View style={styles.switchSlot}>
+              <Switch
+                value={groupEventsOnly}
+                onValueChange={(on) => {
+                  setGroupEventsOnly(on);
+                  if (!on) setSelectedGroupFilterId(null);
+                  else if (groups.length === 1) setSelectedGroupFilterId(String(groups[0].id));
+                }}
+                trackColor={switchTrackColors}
+                thumbColor={switchThumbColor(groupEventsOnly, PRIMARY)}
+                ios_backgroundColor={switchTrackColors.false}
+              />
+            </View>
+          </View>
+          {groupEventsOnly ? (
+            <ScrollView
+              horizontal
+              nestedScrollEnabled
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.groupChipScroll}
+            >
+              {groups.length === 0 ? (
+                <Text style={styles.filterNoGroups}>No groups available</Text>
+              ) : (
+                groups.map((g) => {
+                  const id = String(g.id);
+                  const selected = selectedGroupFilterId === id;
+                  return (
+                    <TouchableOpacity
+                      key={id}
+                      style={[styles.filterChip, selected && styles.filterChipSelected]}
+                      onPress={() => setSelectedGroupFilterId(id)}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={[styles.filterChipText, selected && styles.filterChipTextSelected]}>
+                        {g.name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </ScrollView>
+          ) : null}
+        </View>
+
+        <View style={styles.calendarCard}>
+          <Calendar
+            current={TODAY}
+            onDayPress={(day: any) => setSelectedDate(day.dateString)}
+            markedDates={markedDates}
+            theme={{
+              todayTextColor: PRIMARY,
+              arrowColor: PRIMARY,
+              selectedDayBackgroundColor: PRIMARY,
+              selectedDayTextColor: '#ffffff',
+              dotColor: PRIMARY,
+              monthTextColor: '#334155',
+              textDayFontWeight: '500',
+              textMonthFontWeight: '700',
+              textDayHeaderFontWeight: '600',
+            }}
           />
         </View>
-      </View>
+
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Events</Text>
+          {sortedEvents.length > 0 ? (
+            <View style={styles.countPill}>
+              <Text style={styles.countPillText}>{sortedEvents.length}</Text>
+            </View>
+          ) : null}
+        </View>
+        <Text style={styles.dateSubline}>{selectedDate}</Text>
+
+        {groupEventsOnly && !selectedGroupFilterId ? (
+          <View style={styles.emptyCard}>
+            <View style={styles.emptyIconCircle}>
+              <MaterialIcons name="groups" size={30} color="#cbd5e1" />
+            </View>
+            <Text style={styles.emptyTitle}>Select a group</Text>
+            <Text style={styles.emptySubtitle}>
+              Choose which group&apos;s events to show using the chips above.
+            </Text>
+          </View>
+        ) : sortedEvents.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <View style={styles.emptyIconCircle}>
+              <MaterialIcons name="event-available" size={30} color="#cbd5e1" />
+            </View>
+            <Text style={styles.emptyTitle}>No events this day</Text>
+            <Text style={styles.emptySubtitle}>
+              Tap + to add one, or choose another date on the calendar.
+            </Text>
+          </View>
+        ) : (
+          sortedEvents.map((item) => (
+            <View key={String(item.id)}>{renderEventCard({ item })}</View>
+          ))
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#ffffff' },
-  container: { flex: 1, backgroundColor: '#ffffff' },
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 16, marginBottom: 16, paddingHorizontal: 20 },
-  headerTitle: { fontSize: 34, fontWeight: 'bold', color: '#0B617E' },
-  headerAddButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center' },
-  listContainer: { flex: 1, paddingHorizontal: 20, paddingTop: 10 },
-  dateHeader: { fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: '#333' },
-  eventCardWrapper: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  eventCard: { flexDirection: 'row', backgroundColor: '#fff', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#eaeaea', alignItems: 'center', flex: 1},
-  actionButtonsContainer: { flexDirection: 'row', alignItems: 'center', marginLeft: 8 },
-  actionButton: { padding: 8 },
-  eventTimeBox: { justifyContent: 'center', marginRight: 15, minWidth: 70 },
-  eventTime: { fontWeight: '700', fontSize: 14, color: '#000' },
-  eventDetails: { flex: 1, justifyContent: 'center' },
-  titleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
-  eventTitle: { fontSize: 16, fontWeight: '600', color: '#000' },
-  eventSubtitle: { fontSize: 14, color: '#666' },
-  emptyText: { fontStyle: 'italic', color: '#888', textAlign: 'center', marginTop: 20 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.4)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: 'white', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 20, maxHeight: '85%' },
-  modalHeader: { paddingHorizontal: 24, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
-  modalTitle: { fontSize: 24, fontWeight: 'bold', color: '#000', marginBottom: 4 },
-  modalDate: { fontSize: 15, color: '#666', fontWeight: '500' },
-  formContainer: { paddingHorizontal: 24, paddingTop: 16 },
-  label: { fontSize: 14, fontWeight: '600', color: '#333', marginBottom: 8, marginTop: 16 },
-  input: { borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 12, padding: 14, fontSize: 16, backgroundColor: '#fafafa', color: '#000' },
-  timeSelector: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 12, padding: 14, backgroundColor: '#fafafa' },
-  timeSelectorText: { fontSize: 16, color: '#000' },
-  iosPickerContainer: { backgroundColor: '#f9f9f9', borderRadius: 12, marginTop: 8, overflow: 'hidden' },
-  iosPickerDoneButton: { backgroundColor: '#e0e0e0', padding: 12, alignItems: 'center' },
-  iosPickerDoneText: { fontSize: 16, fontWeight: '600', color: '#0B617E' },
-  switchContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 24, marginBottom: 20, paddingVertical: 12, paddingHorizontal: 16, backgroundColor: '#f9f9f9', borderRadius: 12, borderWidth: 1, borderColor: '#f0f0f0' },
-  switchLabel: { fontSize: 16, fontWeight: '500', color: '#333' },
-  deleteFormButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#ffebe9', paddingVertical: 14, borderRadius: 12, marginBottom: 20, borderWidth: 1, borderColor: '#ffc1c0' },
-  deleteFormText: { fontSize: 16, fontWeight: '600', color: '#ff3b30' },
-  modalButtons: { flexDirection: 'row', padding: 24, paddingTop: 16, gap: 12, borderTopWidth: 1, borderTopColor: '#f0f0f0' },
-  cancelButton: { flex: 1, paddingVertical: 16, borderRadius: 12, backgroundColor: '#f5f5f5', alignItems: 'center' },
-  cancelButtonText: { fontSize: 16, fontWeight: '600', color: '#666' },
-  addButton: { flex: 1, paddingVertical: 16, borderRadius: 12, backgroundColor: '#0B617E', alignItems: 'center' },
-  addButtonText: { fontSize: 16, fontWeight: '600', color: '#fff' },
-  
-  chipRow: { flexDirection: 'row', marginTop: 8, marginBottom: 20 },
-  chip: { paddingVertical: 10, paddingHorizontal: 16, backgroundColor: '#f0f0f0', borderRadius: 20, marginRight: 10, borderWidth: 1, borderColor: '#e0e0e0' },
-  chipSelected: { backgroundColor: '#0B617E', borderColor: '#0B617E' },
-  chipText: { fontSize: 14, fontWeight: '500', color: '#666' },
-  chipTextSelected: { color: '#fff' },
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#f4f7f9',
+  },
+  scrollPage: {
+    flex: 1,
+    backgroundColor: '#f4f7f9',
+  },
+  scrollPageContent: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 48,
+  },
+  filterCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e8eef2',
+    padding: 14,
+    marginBottom: 16,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  filterLabelCol: {
+    flex: 1,
+    marginRight: 12,
+  },
+  switchSlot: {
+    width: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#334155',
+  },
+  filterHint: {
+    fontSize: 12,
+    color: '#94a3b8',
+    marginTop: 2,
+  },
+  groupChipScroll: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: 10,
+    paddingBottom: 2,
+  },
+  filterChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    backgroundColor: '#f1f5f9',
+    borderRadius: 10,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  filterChipSelected: {
+    backgroundColor: PRIMARY,
+    borderColor: PRIMARY,
+  },
+  filterChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  filterChipTextSelected: {
+    color: '#fff',
+  },
+  filterNoGroups: {
+    fontSize: 13,
+    color: '#94a3b8',
+    paddingVertical: 8,
+  },
+  headerBlock: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  pageTitle: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: PRIMARY,
+    letterSpacing: -0.5,
+  },
+  pageSubtitle: {
+    marginTop: 4,
+    fontSize: 14,
+    color: '#64748b',
+    maxWidth: 240,
+  },
+  headerIconBtnPrimary: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: PRIMARY,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: PRIMARY,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  groupContextRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    backgroundColor: '#f0f7f9',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#cfe4ea',
+  },
+  groupContextLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: PRIMARY,
+    marginBottom: 2,
+  },
+  groupContextName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1a1a1a',
+  },
+  calendarCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e8eef2',
+    paddingBottom: 8,
+    marginBottom: 20,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
+    overflow: 'hidden',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#475569',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
+  countPill: {
+    marginLeft: 8,
+    backgroundColor: 'rgba(11, 97, 126, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  countPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: PRIMARY,
+  },
+  dateSubline: {
+    fontSize: 14,
+    color: '#94a3b8',
+    marginBottom: 12,
+    fontWeight: '500',
+  },
+  eventCardWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e8eef2',
+    marginBottom: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
+  },
+  eventCardTouchable: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    minWidth: 0,
+    marginRight: 8,
+  },
+  eventTimeCol: {
+    minWidth: 64,
+    marginRight: 12,
+  },
+  eventTime: {
+    fontWeight: '700',
+    fontSize: 13,
+    color: PRIMARY,
+  },
+  eventTextCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  eventTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: PRIMARY,
+    marginBottom: 2,
+  },
+  eventSubtitle: {
+    fontSize: 13,
+    color: '#94a3b8',
+  },
+  eventEditBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 5,
+    paddingHorizontal: 9,
+    borderRadius: 8,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    flexShrink: 0,
+  },
+  eventEditBtnText: {
+    color: PRIMARY,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  emptyCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#e8eef2',
+    borderStyle: 'dashed',
+    paddingVertical: 28,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  emptyIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#f8fafc',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#334155',
+    marginBottom: 6,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: '#94a3b8',
+    textAlign: 'center',
+    lineHeight: 20,
+    maxWidth: 260,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 12,
+    maxHeight: '88%',
+    borderWidth: 1,
+    borderColor: '#e8eef2',
+  },
+  modalHeader: {
+    paddingHorizontal: 20,
+    paddingBottom: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e8eef2',
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: PRIMARY,
+    marginBottom: 4,
+  },
+  modalDate: {
+    fontSize: 14,
+    color: '#64748b',
+    fontWeight: '500',
+  },
+  formContainer: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+  },
+  label: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#64748b',
+    marginBottom: 8,
+    marginTop: 14,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 16,
+    backgroundColor: '#f8fafc',
+    color: '#0f172a',
+  },
+  timeSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    padding: 14,
+    backgroundColor: '#f8fafc',
+  },
+  timeSelectorText: {
+    fontSize: 16,
+    color: '#0f172a',
+  },
+  iosPickerContainer: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    marginTop: 8,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  iosPickerDoneButton: {
+    backgroundColor: '#e2e8f0',
+    padding: 12,
+    alignItems: 'center',
+  },
+  iosPickerDoneText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: PRIMARY,
+  },
+  deleteFormButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff1f2',
+    paddingVertical: 14,
+    borderRadius: 12,
+    marginBottom: 16,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#fecdd3',
+  },
+  deleteFormText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#dc2626',
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    padding: 20,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+  },
+  cancelButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#f1f5f9',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  addButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: PRIMARY,
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  addButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  chipRow: {
+    flexDirection: 'row',
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  chip: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    backgroundColor: '#f1f5f9',
+    borderRadius: 10,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  chipSelected: {
+    backgroundColor: PRIMARY,
+    borderColor: PRIMARY,
+  },
+  chipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  chipTextSelected: {
+    color: '#fff',
+  },
 });

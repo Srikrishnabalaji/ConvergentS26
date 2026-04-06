@@ -1,4 +1,4 @@
-type Coordinate = { latitude: number; longitude: number };
+export type Coordinate = { latitude: number; longitude: number };
 
 export function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371;
@@ -13,13 +13,109 @@ export function haversineKm(lat1: number, lon1: number, lat2: number, lon2: numb
 }
 
 /**
+ * Shortest distance in metres from a point to the nearest segment of a polyline.
+ * Used to decide whether the user has drifted off-route.
+ */
+export function distanceToPolylineM(
+  point: Coordinate,
+  polyline: Coordinate[],
+): number {
+  if (polyline.length === 0) return Infinity;
+  if (polyline.length === 1) {
+    return haversineKm(point.latitude, point.longitude, polyline[0].latitude, polyline[0].longitude) * 1000;
+  }
+
+  let minDist = Infinity;
+
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const a = polyline[i];
+    const b = polyline[i + 1];
+
+    // Project point onto segment a→b in flat-earth approximation (fine for short distances)
+    const dx = b.longitude - a.longitude;
+    const dy = b.latitude - a.latitude;
+    const lenSq = dx * dx + dy * dy;
+
+    let t = 0;
+    if (lenSq > 0) {
+      t = ((point.longitude - a.longitude) * dx + (point.latitude - a.latitude) * dy) / lenSq;
+      t = Math.max(0, Math.min(1, t));
+    }
+
+    const projLat = a.latitude + t * dy;
+    const projLng = a.longitude + t * dx;
+
+    const d = haversineKm(point.latitude, point.longitude, projLat, projLng) * 1000;
+    if (d < minDist) minDist = d;
+  }
+
+  return minDist;
+}
+
+export function trimRouteToPosition(
+  position: Coordinate,
+  route: Coordinate[],
+): Coordinate[] {
+  if (route.length < 2) return route;
+
+  let minDist = Infinity;
+  let bestIndex = 0;
+  let bestProjection: Coordinate = route[0];
+
+  for (let i = 0; i < route.length - 1; i++) {
+    const a = route[i];
+    const b = route[i + 1];
+
+    const dx = b.longitude - a.longitude;
+    const dy = b.latitude - a.latitude;
+    const lenSq = dx * dx + dy * dy;
+
+    let t = 0;
+    if (lenSq > 0) {
+      t =
+        ((position.longitude - a.longitude) * dx +
+          (position.latitude - a.latitude) * dy) /
+        lenSq;
+      t = Math.max(0, Math.min(1, t));
+    }
+
+    const projLat = a.latitude + t * dy;
+    const projLng = a.longitude + t * dx;
+
+    const d =
+      haversineKm(position.latitude, position.longitude, projLat, projLng) *
+      1000;
+    if (d < minDist) {
+      minDist = d;
+      bestIndex = i;
+      bestProjection = { latitude: projLat, longitude: projLng };
+    }
+  }
+
+  return [bestProjection, ...route.slice(bestIndex + 1)];
+}
+
+export function polylineDistanceKm(route: Coordinate[]): number {
+  let total = 0;
+  for (let i = 0; i < route.length - 1; i++) {
+    total += haversineKm(
+      route[i].latitude,
+      route[i].longitude,
+      route[i + 1].latitude,
+      route[i + 1].longitude,
+    );
+  }
+  return total;
+}
+
+/**
  * Fetch a real walking route via the FOSSGIS pedestrian OSRM server (OSM data).
  * Falls back to the main OSRM driving server, then to a straight-line estimate.
  */
 export async function fetchWalkingRoute(
   start: Coordinate,
   end: Coordinate,
-): Promise<{ coords: Coordinate[]; distanceMi: number; durationMin: number }> {
+): Promise<{ coords: Coordinate[]; distanceMi: number; durationMin: number; isFallback: boolean }> {
   const coordStr = `${start.longitude},${start.latitude};${end.longitude},${end.latitude}`;
   const qs = 'overview=full&geometries=geojson&steps=false';
 
@@ -57,7 +153,7 @@ export async function fetchWalkingRoute(
         ? Math.max(1, Math.round(route.duration / 60))
         : Math.max(1, Math.round((distanceMi / 3.1) * 60));
 
-      return { coords, distanceMi, durationMin };
+      return { coords, distanceMi, durationMin, isFallback: false };
     } catch {
       continue;
     }
@@ -69,5 +165,6 @@ export async function fetchWalkingRoute(
     coords: [start, end],
     distanceMi,
     durationMin: Math.max(1, Math.round((distanceMi / 3.1) * 60)),
+    isFallback: true,
   };
 }
