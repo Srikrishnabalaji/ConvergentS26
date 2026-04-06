@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   Text,
@@ -12,6 +12,7 @@ import {
   Platform,
   ScrollView,
   Switch,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Calendar } from 'react-native-calendars';
@@ -21,6 +22,8 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Notifications from 'expo-notifications'; 
 import { supabase } from '../../lib/supabase';
 import { switchTrackColors, switchThumbColor } from '@/lib/switchTheme';
+import { geocodeSearch, type SearchItem, GeocodingNetworkError } from '@/lib/services/geocoding';
+import { DEFAULT_USER_LOCATION } from '@/constants/map';
 
 const getTodayString = () => {
   const today = new Date();
@@ -52,6 +55,26 @@ const parseTimeString = (timeStr: string) => {
 
   } catch (e) {
     return new Date(); 
+  }
+};
+
+const extractBuilding = (location: string): string => {
+  return location
+    .replace(/[-–]\s*(room|rm|suite|ste|floor|fl|#)\s*[\w.]+/gi, '')
+    .replace(/\s+(room|rm|suite|ste|floor|fl|#)\s*[\w.]+/gi, '')
+    .trim();
+};
+
+const validateBuilding = async (location: string): Promise<boolean> => {
+  if (!location.trim()) return true; // location is optional, blank is fine
+  const building = extractBuilding(location);
+  if (!building) return true;
+  try {
+    const results = await geocodeSearch(building, DEFAULT_USER_LOCATION);
+    return results.length > 0;
+  } catch (e) {
+    if (e instanceof GeocodingNetworkError) return true; // don't block save if offline
+    return false;
   }
 };
 
@@ -88,6 +111,10 @@ export default function CalendarScreen() {
 
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [timeValue, setTimeValue] = useState(new Date());
+
+  const [locationSuggestions, setLocationSuggestions] = useState<SearchItem[]>([]);
+  const [locationSearching, setLocationSearching] = useState(false);
+  const locationDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [newEvent, setNewEvent] = useState<{
     title: string;
@@ -148,22 +175,6 @@ export default function CalendarScreen() {
   };
 
 
-  // useEffect(() => {
-  //   (async () => {
-  //     const { status: existingStatus } = await Notifications.getPermissionsAsync();
-  //     let finalStatus = existingStatus;
-      
-  //     if (existingStatus !== 'granted') {
-  //       const { status } = await Notifications.requestPermissionsAsync();
-  //       finalStatus = status;
-  //     }
-      
-  //     if (finalStatus !== 'granted') {
-  //       console.log('Notification permissions not granted!');
-  //     }
-  //   })();
-  // }, []);
-
   useEffect(() => {
     fetchEvents();
     (async () => {
@@ -212,7 +223,9 @@ export default function CalendarScreen() {
   const markedDates = useMemo(() => {
     const marked: Record<string, any> = {};
     Object.keys(eventsVisibleByFilter).forEach((date) => {
-      marked[date] = { marked: true, dotColor: PRIMARY };
+      if(events[date] && events[date].length > 0) {
+        marked[date] = { marked: true, dotColor: PRIMARY };
+      }
     });
 
     marked[selectedDate] = {
@@ -250,6 +263,8 @@ export default function CalendarScreen() {
     setNewEvent({ title: '', location: '', time: '', notify: false, notifyInAdvance: null, groupId: null});
     setTimeValue(new Date());
     setShowAddModal(true);
+    setLocationSuggestions([]);
+    setLocationSearching(false);
   };
 
   const handleOpenEditModal = (event: any) => {
@@ -264,6 +279,34 @@ export default function CalendarScreen() {
     });
     setTimeValue(parseTimeString(event.time));
     setShowAddModal(true);
+    setLocationSuggestions([]);
+    setLocationSearching(false);
+  };
+
+  const handleLocationChange = (text: string) => {
+    setNewEvent(prev => ({ ...prev, location: text }));
+    setLocationSuggestions([]);
+
+    if (locationDebounceRef.current) clearTimeout(locationDebounceRef.current);
+    if (!text.trim()) { setLocationSearching(false); return; }
+
+    setLocationSearching(true);
+    locationDebounceRef.current = setTimeout(async () => {
+      try {
+        const results = await geocodeSearch(text, DEFAULT_USER_LOCATION);
+        setLocationSuggestions(results);
+      } catch {
+        setLocationSuggestions([]);
+      } finally {
+        setLocationSearching(false);
+      }
+    }, 400);
+  };
+
+  const handleSelectLocationSuggestion = (item: SearchItem) => {
+    setNewEvent(prev => ({ ...prev, location: item.name }));
+    setLocationSuggestions([]);
+    Keyboard.dismiss();
   };
 
   const handleSaveEvent = async () => { 
@@ -274,6 +317,18 @@ export default function CalendarScreen() {
     if (!newEvent.time) {
       Alert.alert('Error', 'Please select a time');
       return;
+    }
+
+    if (newEvent.location.trim()) {
+      const isValid = await validateBuilding(newEvent.location);
+      if (!isValid) {
+        Alert.alert(
+          'Unknown Building',
+          `"${extractBuilding(newEvent.location)}" wasn't found on campus. Please check the building name.`,
+          [{ text: 'OK' }]
+        );
+        return;
+      }
     }
 
     if (newEvent.notify && newEvent.notifyInAdvance != null) {
@@ -353,56 +408,8 @@ export default function CalendarScreen() {
     setEditingEventId(null);
     setShowTimePicker(false);
     setShowAddModal(false);
-
-    // const eventData = {
-    //   id: editingEventId ? editingEventId : Date.now().toString(), 
-    //   title: newEvent.title,
-    //   location: newEvent.location,
-    //   time: newEvent.time,
-    //   notify: newEvent.notify,
-    // };
-
-    // setEvents(prev => {
-    //   const currentDayEvents = prev[selectedDate] || [];
-    //   if (editingEventId) {
-    //     return {
-    //       ...prev,
-    //       [selectedDate]: currentDayEvents.map(e => e.id === editingEventId ? eventData : e)
-    //     };
-    //   } else {
-    //     return {
-    //       ...prev,
-    //       [selectedDate]: [...currentDayEvents, eventData]
-    //     };
-    //   }
-    // });
-
-    // setNewEvent({ title: '', location: '', time: '', notify: false, notifyInAdvance: null, groupId: null});
-    // setTimeValue(new Date());
-    // setEditingEventId(null);
-    // setShowTimePicker(false);
-    // setShowAddModal(false);
   };
 
-  // const handleDeleteEvent = () => {
-  //   if (!editingEventId) return;
-
-  //   Alert.alert('Delete Event', 'Are you sure you want to delete this event?', [
-  //     { text: 'Cancel', style: 'cancel' },
-  //     {
-  //       text: 'Delete',
-  //       style: 'destructive',
-  //       onPress: async () => {
-  //         setEvents(prev => ({
-  //           ...prev,
-  //           [selectedDate]: prev[selectedDate].filter(e => e.id !== editingEventId)
-  //         }));
-  //         setShowAddModal(false); 
-  //         setEditingEventId(null); 
-  //       }
-  //     }
-  //   ]);
-  // };
 
   const handleDeleteEvent = () => {
     if (!editingEventId) return;
@@ -510,11 +517,33 @@ export default function CalendarScreen() {
                 <Text style={styles.label}>Location</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="e.g., ECJ - Room 0132"
+                  placeholder="e.g., ECJ, GDC, PCL..."
                   value={newEvent.location}
-                  onChangeText={(text) => setNewEvent(prev => ({...prev, location: text }))}
+                  onChangeText={handleLocationChange}
                   placeholderTextColor="#999"
                 />
+                {locationSearching && (
+                  <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: 4 }}>Searching...</Text>
+                )}
+                {locationSuggestions.length > 0 && (
+                  <View style={styles.suggestionsContainer}>
+                    {locationSuggestions.map((item) => (
+                      <TouchableOpacity
+                        key={item.id}
+                        style={styles.suggestionRow}
+                        onPress={() => handleSelectLocationSuggestion(item)}
+                      >
+                        <MaterialIcons name="location-on" size={16} color={PRIMARY} style={{ marginRight: 8 }} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.suggestionName} numberOfLines={1}>{item.name}</Text>
+                          {item.address ? (
+                            <Text style={styles.suggestionAddress} numberOfLines={1}>{item.address}</Text>
+                          ) : null}
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
 
                 <Text style={styles.label}>Time *</Text>
                 <TouchableOpacity 
@@ -1204,5 +1233,32 @@ const styles = StyleSheet.create({
   },
   chipTextSelected: {
     color: '#fff',
+  },
+
+  suggestionsContainer: {
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    overflow: 'hidden',
+  },
+  suggestionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e2e8f0',
+  },
+  suggestionName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0f172a',
+  },
+  suggestionAddress: {
+    fontSize: 12,
+    color: '#94a3b8',
+    marginTop: 1,
   },
 });

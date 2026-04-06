@@ -46,6 +46,7 @@ import {
   trimRouteToPosition,
   polylineDistanceKm,
 } from '@/lib/services/routing';
+import { useLocalSearchParams } from 'expo-router';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -103,6 +104,32 @@ export default function MapScreen() {
     const arrival = new Date(currentTime + routeWalkMin * 60_000);
     return arrival.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   }, [currentTime, routeWalkMin]);
+
+  // Read searchQuery param passed from the calendar
+  const { searchQuery } = useLocalSearchParams<{ searchQuery?: string }>();
+
+  useEffect(() => {
+    if (!searchQuery) return;
+    const q = Array.isArray(searchQuery) ? searchQuery[0] : searchQuery;
+    if (!q.trim()) return;
+
+    setQuery(q);
+
+    // Geocode immediately and auto-select the top result
+    (async () => {
+      try {
+        const results = await geocodeSearch(q, userLocation);
+        if (results.length > 0) {
+          handleSelectPlace(results[0]);
+        } else {
+          // No match found — at least open the search panel with the text pre-filled
+          transitionToSearch();
+        }
+      } catch {
+        transitionToSearch();
+      }
+    })();
+  }, [searchQuery]);
 
   // -----------------------------------------------------------------------
   // Voice search event handlers
