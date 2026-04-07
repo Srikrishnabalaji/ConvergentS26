@@ -17,4 +17,6 @@ export type CampusMapLayerProps = {
     coordinate: LatLng;
     onDragEnd: (coord: LatLng) => void;
   } | null;
+  /** Fires when the user taps the destination pin / label (GDC indoor entry, etc.). */
+  onDestinationPress?: () => void;
 };

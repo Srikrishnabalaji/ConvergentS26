@@ -283,6 +283,71 @@ export function searchRooms(graph: BuildingGraph, query: string): GraphNode[] {
     .slice(0, 20);
 }
 
+/** Strip calendar-style prefixes so "Room 4.302" and "4.302" behave the same. */
+export function normalizeRoomSearchQuery(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^(?:room|rm|ste|suite|#)\s*/i, '')
+    .trim()
+    .replace(/\s*\.\s*/g, '.');
+}
+
+/**
+ * Resolve a calendar / deep-link room string to a graph node. Uses substring
+ * search first, then compact alphanumeric equality, then fuzzy N.NNN matching
+ * (GDC-style labels) so slightly wrong or missing numbers still land near the
+ * intended room.
+ */
+export function resolveRoomFromQuery(graph: BuildingGraph, rawQuery: string): GraphNode | null {
+  const q0 = normalizeRoomSearchQuery(rawQuery);
+  if (!q0) return null;
+
+  const substringHits = searchRooms(graph, q0);
+  if (substringHits.length > 0) return substringHits[0];
+
+  const rooms = graph.nodes.filter((n) => n.type === 'room');
+  const qLower = q0.toLowerCase();
+  const qCompact = qLower.replace(/[^a-z0-9]/g, '');
+  if (qCompact.length >= 2) {
+    for (const n of rooms) {
+      const c = n.label.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (c === qCompact) return n;
+    }
+  }
+
+  const dotted = q0.match(/^(\d+)\.(\d+)([a-z]?)$/i);
+  if (dotted) {
+    const floorPart = String(parseInt(dotted[1], 10));
+    const roomPart = parseInt(dotted[2], 10);
+    const suffix = (dotted[3] || '').toLowerCase();
+    const prefix = `${floorPart}.`;
+    const onFloor = rooms.filter((n) => n.label.toLowerCase().startsWith(prefix.toLowerCase()));
+    if (onFloor.length > 0) {
+      const exactLbl = `${floorPart}.${roomPart}${dotted[3] || ''}`;
+      const exact = onFloor.find((n) => n.label.toLowerCase() === exactLbl.toLowerCase());
+      if (exact) return exact;
+
+      let best: GraphNode | null = null;
+      let bestD = Infinity;
+      for (const n of onFloor) {
+        const rm = n.label.match(/^(\d+)\.(\d+)([a-z]?)$/i);
+        if (!rm) continue;
+        const sfx = (rm[3] || '').toLowerCase();
+        if (suffix && sfx !== suffix) continue;
+        const num = parseInt(rm[2], 10);
+        const d = Math.abs(num - roomPart);
+        if (d < bestD) {
+          bestD = d;
+          best = n;
+        }
+      }
+      if (best && bestD <= 12) return best;
+    }
+  }
+
+  return null;
+}
+
 /**
  * Find the best starting node on a given floor.
  * Picks the most-connected node (highest edge count) so A* can actually

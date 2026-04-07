@@ -9,6 +9,7 @@ import {
   Alert,
   Platform,
   Animated as RNAnimated,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { CameraRef } from '@maplibre/maplibre-react-native';
@@ -41,7 +42,12 @@ import {
   fitMapToCoordinates,
   animateMapToRegion,
 } from '@/constants/map';
-import { geocodeSearch, GeocodingNetworkError, type SearchItem } from '@/lib/services/geocoding';
+import {
+  geocodeSearch,
+  GeocodingNetworkError,
+  localCampusSearchItem,
+  type SearchItem,
+} from '@/lib/services/geocoding';
 import {
   fetchWalkingRoute,
   haversineKm,
@@ -56,12 +62,25 @@ import { useLocalSearchParams } from 'expo-router';
 // ---------------------------------------------------------------------------
 type MapViewState = 'default' | 'searching' | 'navigation' | 'walking' | 'building' | 'indoor';
 
+type IndoorExitTarget = 'navigation' | 'walking' | 'building';
+
+function destinationHasIndoorMap(place: SearchItem): boolean {
+  const blob = `${place.name} ${place.address}`.toLowerCase();
+  return (
+    blob.includes('gdc') ||
+    blob.includes('gates dell') ||
+    blob.includes('gates computer science') ||
+    blob.includes('melinda gates') ||
+    blob.includes('bill and melinda gates')
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 export default function MapScreen() {
   // State
-  const [viewState, setViewState] = useState<MapViewState>('indoor'); // TODO: change back to 'default' after testing
+  const [viewState, setViewState] = useState<MapViewState>('default');
   const [query, setQuery] = useState('');
   const [selectedPlace, setSelectedPlace] = useState<SearchItem | null>(null);
   const [userLocation, setUserLocation] = useState(DEFAULT_USER_LOCATION);
@@ -78,6 +97,9 @@ export default function MapScreen() {
   const [routeLoading, setRouteLoading] = useState(false);
   const [showOverview, setShowOverview] = useState(false);
   const [initialRoom, setInitialRoom] = useState<string | undefined>(undefined);
+  /** Calendar deep link: show overlay and avoid setting search query until resolved (prevents Nominatim races). */
+  const [calendarNavBusy, setCalendarNavBusy] = useState(false);
+  const [calendarNavLabel, setCalendarNavLabel] = useState<string | null>(null);
 
   // Voice search
   const [isListening, setIsListening] = useState(false);
@@ -94,6 +116,7 @@ export default function MapScreen() {
   const isReroutingRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const previewRouteCalcPosRef = useRef<{ latitude: number; longitude: number } | null>(null);
+  const indoorExitTargetRef = useRef<IndoorExitTarget>('navigation');
 
   // Clock ticks every minute so the ETA stays accurate as real time passes
   const [currentTime, setCurrentTime] = useState(() => Date.now());
@@ -109,8 +132,25 @@ export default function MapScreen() {
     return arrival.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   }, [currentTime, routeWalkMin]);
 
-  // Read searchQuery param passed from the calendar
-  const { searchQuery, roomQuery } = useLocalSearchParams<{ searchQuery?: string; roomQuery?: string }>();
+  // Read searchQuery / roomQuery from calendar; calNav forces effect on repeated taps.
+  const { searchQuery, roomQuery, calNav } = useLocalSearchParams<{
+    searchQuery?: string;
+    roomQuery?: string;
+    calNav?: string;
+  }>();
+
+  const roomQuerySingle = useMemo(() => {
+    if (roomQuery == null) return undefined;
+    const r = Array.isArray(roomQuery) ? roomQuery[0] : roomQuery;
+    const t = typeof r === 'string' ? r.trim() : '';
+    return t || undefined;
+  }, [roomQuery]);
+
+  /** Prefer in-memory initialRoom; else calendar URL (survives resetToDefault). */
+  const indoorDestinationRoom = useMemo(
+    () => (initialRoom && initialRoom.trim() ? initialRoom.trim() : undefined) ?? roomQuerySingle,
+    [initialRoom, roomQuerySingle],
+  );
 
   useEffect(() => {
     if (!searchQuery) return;
@@ -118,22 +158,111 @@ export default function MapScreen() {
     const r = Array.isArray(roomQuery) ? roomQuery[0] : roomQuery;
     if (!q.trim()) return;
 
-    setQuery(q);
-    if (r) setInitialRoom(r);
+    setCalendarNavLabel(q);
+    setCalendarNavBusy(true);
+    const roomTrim = r && r.trim() ? r.trim() : undefined;
+    setInitialRoom(roomTrim);
+    // Do not setQuery(q) yet — that triggers the debounced search and competes
+    // with this flow for Nominatim rate limits.
+
+    let cancelled = false;
+
+    const resolveOrigin = async () => {
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const loc = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+          return {
+            latitude: loc.coords.latitude,
+            longitude: loc.coords.longitude,
+          };
+        }
+      } catch {
+        /* default below */
+      }
+      return DEFAULT_USER_LOCATION;
+    };
 
     (async () => {
       try {
-        const results = await geocodeSearch(q, userLocation);
-        if (results.length > 0) {
-          handleSelectPlace(results[0]);
-        } else {
-          transitionToSearch();
+        const [firstResults, origin] = await Promise.all([
+          geocodeSearch(q, DEFAULT_USER_LOCATION),
+          resolveOrigin(),
+        ]);
+        if (cancelled) return;
+        setUserLocation(origin);
+
+        let place = firstResults[0];
+        if (!place) {
+          const second = await geocodeSearch(q, origin);
+          if (cancelled) return;
+          place = second[0];
         }
-      } catch {
-        transitionToSearch();
+
+        if (cancelled) return;
+        if (place) {
+          await handleSelectPlace(place, origin);
+        } else {
+          const local = localCampusSearchItem(q);
+          if (local) {
+            await handleSelectPlace(local, origin);
+          } else {
+            setQuery(q);
+            transitionToSearch();
+            Alert.alert(
+              'Location not found',
+              `Could not find "${q}". Try typing the building in search.`,
+            );
+          }
+        }
+      } catch (e) {
+        if (cancelled) return;
+        let origin = DEFAULT_USER_LOCATION;
+        try {
+          const { status } = await Location.getForegroundPermissionsAsync();
+          if (status === 'granted') {
+            const loc = await Location.getCurrentPositionAsync({
+              accuracy: Location.Accuracy.Balanced,
+            });
+            origin = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+          }
+        } catch {
+          /* */
+        }
+        const local = localCampusSearchItem(q);
+        if (local) {
+          setUserLocation(origin);
+          try {
+            await handleSelectPlace(local, origin);
+          } catch {
+            setQuery(q);
+            transitionToSearch();
+          }
+        } else {
+          setQuery(q);
+          transitionToSearch();
+          if (e instanceof GeocodingNetworkError) {
+            Alert.alert('Search Unavailable', e.message);
+          }
+        }
+      } finally {
+        if (!cancelled) {
+          setCalendarNavBusy(false);
+          setCalendarNavLabel(null);
+        }
       }
     })();
-  }, [searchQuery, roomQuery]);
+
+    return () => {
+      cancelled = true;
+      setCalendarNavBusy(false);
+      setCalendarNavLabel(null);
+    };
+    // Intentionally only react to router params — avoid re-running when userLocation updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, roomQuery, calNav]);
 
   // -----------------------------------------------------------------------
   // Voice search event handlers
@@ -246,10 +375,15 @@ export default function MapScreen() {
         if (!controller.signal.aborted) setSearchResults(results);
       } catch (e) {
         if (!controller.signal.aborted) {
-          if (e instanceof GeocodingNetworkError) {
-            Alert.alert('Search Unavailable', e.message);
+          const local = localCampusSearchItem(query);
+          if (local) {
+            setSearchResults([local]);
+          } else {
+            if (e instanceof GeocodingNetworkError) {
+              Alert.alert('Search Unavailable', e.message);
+            }
+            setSearchResults([]);
           }
-          setSearchResults([]);
         }
       } finally {
         if (!controller.signal.aborted) setSearchLoading(false);
@@ -278,9 +412,13 @@ export default function MapScreen() {
   }, [stopLocationWatcher]);
 
   const startPreviewWatcher = useCallback(
-    async (dest: { latitude: number; longitude: number }) => {
+    async (
+      dest: { latitude: number; longitude: number },
+      /** When starting preview from a known fix (e.g. calendar deep link), avoids stale React state. */
+      routePreviewFrom?: { latitude: number; longitude: number },
+    ) => {
       stopLocationWatcher();
-      previewRouteCalcPosRef.current = userLocation;
+      previewRouteCalcPosRef.current = routePreviewFrom ?? userLocation;
 
       const watcher = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.Balanced, distanceInterval: 30, timeInterval: 10_000 },
@@ -342,8 +480,13 @@ export default function MapScreen() {
   // Handlers
   // -----------------------------------------------------------------------
   const handleSelectPlace = useCallback(
-    async (item: SearchItem) => {
+    async (
+      item: SearchItem,
+      /** Origin for the walking route when React state has not caught up (calendar deep link). */
+      routeFromOverride?: { latitude: number; longitude: number },
+    ) => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      const origin = routeFromOverride ?? userLocation;
       setSelectedPlace(item);
       setQuery(item.name);
       setRouteLoading(true);
@@ -373,13 +516,13 @@ export default function MapScreen() {
       const dest = { latitude: item.latitude, longitude: item.longitude };
       fitMapToCoordinates(
         cameraRef,
-        [userLocation, dest],
+        [origin, dest],
         { top: 140, right: 60, bottom: 280, left: 60 },
       );
 
       // Fetch real walking route
       try {
-        const result = await fetchWalkingRoute(userLocation, dest);
+        const result = await fetchWalkingRoute(origin, dest);
         setRouteCoords(result.coords);
         setRouteDistMi(result.distanceMi);
         setRouteWalkMin(result.durationMin);
@@ -400,7 +543,7 @@ export default function MapScreen() {
           );
         }
 
-        startPreviewWatcher(dest);
+        startPreviewWatcher(dest, routeFromOverride ?? origin);
       } finally {
         setRouteLoading(false);
       }
@@ -417,6 +560,7 @@ export default function MapScreen() {
     setRouteDistMi(0);
     setRouteWalkMin(0);
     setRouteLoading(false);
+    setInitialRoom(undefined);
     // Delay clearing selectedPlace so PointAnnotation doesn't unmount mid-frame
     setTimeout(() => setSelectedPlace(null), 50);
   }, [stopLocationWatcher]);
@@ -443,9 +587,36 @@ export default function MapScreen() {
         ], { top: 140, right: 60, bottom: 280, left: 60 });
       }
     } else if (viewState === 'indoor') {
-      setViewState('building');
+      const target = indoorExitTargetRef.current;
+      if (target === 'building') {
+        setViewState('building');
+      } else if (target === 'walking') {
+        setViewState('walking');
+      } else {
+        setViewState('navigation');
+      }
     }
   }, [viewState, userLocation, selectedPlace, stopLocationWatcher, transitionFromSearch, resetToDefault]);
+
+  const handleDestinationPinPress = useCallback(() => {
+    if (!selectedPlace) return;
+    if (!destinationHasIndoorMap(selectedPlace)) {
+      Alert.alert(
+        'Indoor map',
+        'Floor plans and indoor directions are only available for Gates Dell Complex (GDC) right now.',
+      );
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (viewState === 'walking' || viewState === 'navigation' || viewState === 'building') {
+      indoorExitTargetRef.current = viewState;
+    } else {
+      indoorExitTargetRef.current = 'navigation';
+    }
+    const room = roomQuerySingle ?? initialRoom?.trim();
+    if (room) setInitialRoom(room);
+    setViewState('indoor');
+  }, [selectedPlace, viewState, roomQuerySingle, initialRoom]);
 
   const handleExitNavigation = useCallback(async () => {
     stopLocationWatcher();
@@ -486,7 +657,7 @@ export default function MapScreen() {
         );
       }
 
-      startPreviewWatcher(dest);
+      startPreviewWatcher(dest, currentLoc);
     } finally {
       setRouteLoading(false);
     }
@@ -564,19 +735,27 @@ export default function MapScreen() {
         if (distToDest < ARRIVAL_THRESHOLD_M) {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           stopLocationWatcher();
-          setViewState('building');
           setSelectedFloor(1);
           setShowOverview(false);
-          animateMapToRegion(
-            cameraRef,
-            {
-              latitude: dest.latitude - 0.001,
-              longitude: dest.longitude,
-              latitudeDelta: 0.005,
-              longitudeDelta: 0.005,
-            },
-            500,
-          );
+          // If a calendar event queued an indoor room, skip the outdoor
+          // "is this your exact location?" card and jump straight into the
+          // building so the user can drop a pin or use the main entrance.
+          if (initialRoom) {
+            indoorExitTargetRef.current = 'navigation';
+            setViewState('indoor');
+          } else {
+            setViewState('building');
+            animateMapToRegion(
+              cameraRef,
+              {
+                latitude: dest.latitude - 0.001,
+                longitude: dest.longitude,
+                latitudeDelta: 0.005,
+                longitudeDelta: 0.005,
+              },
+              500,
+            );
+          }
           return;
         }
 
@@ -609,9 +788,10 @@ export default function MapScreen() {
       },
     );
     locationWatcherRef.current = watcher;
-  }, [selectedPlace, userLocation, stopLocationWatcher]);
+  }, [selectedPlace, userLocation, stopLocationWatcher, initialRoom]);
 
   const handleConfirmLocation = useCallback(() => {
+    indoorExitTargetRef.current = 'building';
     setViewState('indoor');
   }, []);
 
@@ -718,7 +898,7 @@ export default function MapScreen() {
         <IndoorMapView
           graph={gdcGraphData as BuildingGraph}
           onExit={handleBack}
-          initialDestination={initialRoom}
+          initialDestination={indoorDestinationRoom}
         />
       </SafeAreaView>
     );
@@ -763,6 +943,7 @@ export default function MapScreen() {
               }
             : null
         }
+        onDestinationPress={handleDestinationPinPress}
       />
 
       {/* Floating search bar */}
@@ -779,10 +960,15 @@ export default function MapScreen() {
             onPress={transitionToSearch}
           >
             <Text
-              style={[styles.searchInput, { color: query ? '#000' : '#999' }]}
+              style={[
+                styles.searchInput,
+                { color: query || calendarNavBusy ? '#000' : '#999' },
+              ]}
               numberOfLines={1}
             >
-              {query || 'Search here'}
+              {calendarNavBusy && calendarNavLabel
+                ? `Finding route to ${calendarNavLabel}…`
+                : query || 'Search here'}
             </Text>
           </TouchableOpacity>
           {viewState === 'building' ? (
@@ -879,6 +1065,18 @@ export default function MapScreen() {
           onReposition={handleReposition}
         />
       )}
+
+      {calendarNavBusy ? (
+        <View style={styles.calendarLoadingOverlay} pointerEvents="auto">
+          <View style={styles.calendarLoadingCard}>
+            <ActivityIndicator size="large" color="#0B617E" />
+            <Text style={styles.calendarLoadingTitle}>Getting directions</Text>
+            <Text style={styles.calendarLoadingSub} numberOfLines={2}>
+              {calendarNavLabel ? `To ${calendarNavLabel}` : 'Finding location…'}
+            </Text>
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -1016,5 +1214,39 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 10,
     ...SEARCH_BAR_SHADOW,
+  },
+  calendarLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(255, 255, 255, 0.82)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 50,
+    paddingHorizontal: 24,
+  },
+  calendarLoadingCard: {
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    paddingVertical: 28,
+    paddingHorizontal: 28,
+    maxWidth: 320,
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#e8eef2',
+    ...SEARCH_BAR_SHADOW,
+  },
+  calendarLoadingTitle: {
+    marginTop: 16,
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0f172a',
+    textAlign: 'center',
+  },
+  calendarLoadingSub: {
+    marginTop: 8,
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#64748b',
+    textAlign: 'center',
   },
 });

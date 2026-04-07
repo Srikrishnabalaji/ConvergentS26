@@ -1,3 +1,9 @@
+import {
+  expandBuildingQuery,
+  findBuilding,
+  UT_BUILDING_ENTRANCES,
+} from '@/lib/data/utBuildings';
+
 export type SearchItem = {
   id: string;
   name: string;
@@ -55,6 +61,27 @@ function parseResults(data: any[]): SearchItem[] {
 }
 
 /**
+ * Offline / fallback pin for known UT buildings (same data as geocode fast path).
+ * Use when Nominatim errors or is rate-limited.
+ */
+export function localCampusSearchItem(query: string): SearchItem | null {
+  const trimmed = query.trim();
+  if (!trimmed) return null;
+  const firstToken = trimmed.split(/\s+/)[0] ?? '';
+  const matchedBuilding = findBuilding(trimmed) ?? findBuilding(firstToken);
+  if (!matchedBuilding) return null;
+  const ent = UT_BUILDING_ENTRANCES[matchedBuilding.code];
+  if (!ent) return null;
+  return {
+    id: `ut-local-${matchedBuilding.code}`,
+    name: matchedBuilding.displayName,
+    address: 'The University of Texas at Austin',
+    latitude: ent.latitude,
+    longitude: ent.longitude,
+  };
+}
+
+/**
  * Geocode a free-text query via Nominatim (OpenStreetMap).
  *
  * Searches in expanding rings around the user's location so nearby results
@@ -67,16 +94,38 @@ export async function geocodeSearch(
   userLocation?: LatLng,
   signal?: AbortSignal,
 ): Promise<SearchItem[]> {
+  const trimmed = query.trim();
+  const firstToken = trimmed.split(/\s+/)[0] ?? '';
+  const matchedBuilding = findBuilding(trimmed) ?? findBuilding(firstToken);
+
+  // Instant path: known campus building → skip Nominatim (avoids 1 req/s limits &
+  // races with the map search debouncer when opening from Calendar).
+  if (!signal?.aborted) {
+    const local = localCampusSearchItem(trimmed);
+    if (local) return [local];
+  }
+
+  const friendlyName = matchedBuilding?.displayName;
+  const expanded = expandBuildingQuery(query);
+  const effectiveQuery = expanded || query;
+
   const radii = [0.02, 0.06, 0.15];
   const MIN_GOOD_RESULTS = 3;
   let allRequestsFailed = true;
+
+  const finalize = (items: SearchItem[]): SearchItem[] => {
+    if (!friendlyName || items.length === 0) return items;
+    // Surface the canonical UT name on the top result so the search bar shows
+    // "Gates Dell Complex (GDC)" instead of the long Nominatim string.
+    return items.map((it, idx) => (idx === 0 ? { ...it, name: friendlyName } : it));
+  };
 
   if (userLocation) {
     for (const r of radii) {
       if (signal?.aborted) return [];
 
       const params = new URLSearchParams({
-        q: query,
+        q: effectiveQuery,
         format: 'json',
         limit: '10',
         addressdetails: '1',
@@ -93,8 +142,8 @@ export async function geocodeSearch(
         allRequestsFailed = false;
 
         const data: any[] = await res.json();
-        if (data.length >= MIN_GOOD_RESULTS) return parseResults(data);
-        if (data.length > 0 && r === radii[radii.length - 1]) return parseResults(data);
+        if (data.length >= MIN_GOOD_RESULTS) return finalize(parseResults(data));
+        if (data.length > 0 && r === radii[radii.length - 1]) return finalize(parseResults(data));
       } catch (e) {
         if ((e as Error).name === 'AbortError') return [];
         continue;
@@ -106,7 +155,7 @@ export async function geocodeSearch(
 
   // Unbounded fallback (biased toward Austin)
   const fallbackParams = new URLSearchParams({
-    q: query,
+    q: effectiveQuery,
     format: 'json',
     limit: '10',
     addressdetails: '1',
@@ -122,14 +171,26 @@ export async function geocodeSearch(
       signal,
     );
     if (!res.ok) {
+      const local = localCampusSearchItem(trimmed);
+      if (local) return [local];
       if (allRequestsFailed) throw new GeocodingNetworkError();
       return [];
     }
     const data: any[] = await res.json();
-    return parseResults(data);
+    const parsed = finalize(parseResults(data));
+    if (parsed.length > 0) return parsed;
+    const local = localCampusSearchItem(trimmed);
+    if (local) return [local];
+    return [];
   } catch (e) {
     if ((e as Error).name === 'AbortError') return [];
-    if (e instanceof GeocodingNetworkError) throw e;
+    if (e instanceof GeocodingNetworkError) {
+      const local = localCampusSearchItem(trimmed);
+      if (local) return [local];
+      throw e;
+    }
+    const local = localCampusSearchItem(trimmed);
+    if (local) return [local];
     if (allRequestsFailed) throw new GeocodingNetworkError();
     return [];
   }

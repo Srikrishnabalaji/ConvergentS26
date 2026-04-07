@@ -10,9 +10,9 @@ type Props = {
 export function LocationConfirmCard({ onConfirm, onReposition }: Props) {
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Is this your exact location?</Text>
+      <Text style={styles.title}>Have you arrived?</Text>
       <Text style={styles.subtitle}>
-        If not, reposition your location marker
+        Tap Yes to open the indoor map and find your room. Reposition the marker if the pin is not where you are standing.
       </Text>
       <View style={styles.buttons}>
         <TouchableOpacity

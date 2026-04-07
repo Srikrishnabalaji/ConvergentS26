@@ -7,9 +7,11 @@ import {
   TouchableOpacity,
   TextInput,
   FlatList,
-  ScrollView,
+  ScrollView as RNScrollView,
   Platform,
+  Pressable,
 } from 'react-native';
+import { ScrollView as MapScrollView } from 'react-native-gesture-handler';
 import { Image } from 'expo-image';
 import Svg, { Polyline, Circle } from 'react-native-svg';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -20,7 +22,9 @@ import {
   astar,
   buildRoute,
   searchRooms,
+  resolveRoomFromQuery,
   findEntrance,
+  findNearest,
 } from '@/lib/services/indoor-navigation';
 
 // ---------------------------------------------------------------------------
@@ -38,9 +42,41 @@ const FLOOR_IMAGES: Record<string, any> = {
 
 const SCREEN = Dimensions.get('window');
 const PRIMARY = '#0B617E';
+const PAGE_BG = '#f4f7f9';
+const CARD_BORDER = '#e8eef2';
+const TEXT_PRIMARY = '#0f172a';
+const TEXT_MUTED = '#64748b';
 
 // Cropped image dimensions (from extract_floor_images.py)
-const IMAGE_ASPECT = 2878 / 1546; // ≈ 1.862
+const IMAGE_ASPECT = 2878 / 1546; // ≈ 1.862 (width / height)
+
+/** Extra scale so the plan starts noticeably zoomed; user pans (and pinches on iOS) to see more. */
+const MAP_DISPLAY_SCALE = 1.38;
+
+const MAP_ZOOM_MIN_MUL = 0.82;
+const MAP_ZOOM_MAX_MUL = 2.05;
+const MAP_ZOOM_STEP = 0.14;
+
+/**
+ * Size that covers the viewport (object-fit: cover) so the floor plan fills the tree
+ * instead of letterboxing on tall phones. ScrollView then allows panning to edges.
+ */
+function coverSize(boxW: number, boxH: number, contentAspect: number): { w: number; h: number } {
+  if (boxW <= 0 || boxH <= 0) return { w: 0, h: 0 };
+  const boxAspect = boxW / boxH;
+  if (boxAspect > contentAspect) {
+    const w = boxW;
+    const h = w / contentAspect;
+    if (h >= boxH) return { w, h };
+    const h2 = boxH;
+    return { w: h2 * contentAspect, h: h2 };
+  }
+  const h = boxH;
+  const w = h * contentAspect;
+  if (w >= boxW) return { w, h };
+  const w2 = boxW;
+  return { w: w2, h: w2 / contentAspect };
+}
 
 // The crop rectangle used to extract images (fractions of the full PDF page).
 // Node coordinates in the JSON are normalized to the FULL page, so we need to
@@ -55,6 +91,14 @@ function toImageX(nx: number, imgW: number): number {
 }
 function toImageY(ny: number, imgH: number): number {
   return ((ny - CROP.top) / CROP_H) * imgH;
+}
+
+/** Inverse of toImageX/Y: convert a pixel tap position back to normalized coords */
+function fromImageX(px: number, imgW: number): number {
+  return (px / imgW) * CROP_W + CROP.left;
+}
+function fromImageY(py: number, imgH: number): number {
+  return (py / imgH) * CROP_H + CROP.top;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,21 +130,65 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
   const [routeSegments, setRouteSegments] = useState<RouteSegment[]>([]);
   const [activeSegmentIdx, setActiveSegmentIdx] = useState(0);
   const [routeError, setRouteError] = useState('');
+
+  // Placement flow: when the destination came from outside (e.g. a calendar
+  // event), we ask the user to drop a pin for their starting location before
+  // computing the route.
+  //   'idle'   - normal manual flow (no external destination)
+  //   'prompt' - showing the "Drop a pin or use main entrance" card
+  //   'tap'    - user chose to drop a pin; tapping the floor plan picks the start
+  const [placementMode, setPlacementMode] = useState<'idle' | 'prompt' | 'tap'>('idle');
+  // Pre-fetched destination from props (kept across re-renders so we don't
+  // overwrite the user's choices later)
+  const externalDestRef = useRef<GraphNode | null>(null);
+
   useEffect(() => {
-    if (!initialDestination) return;
-    const results = searchRooms(graph, initialDestination);
-    if (results.length > 0) {
-      handleSelectRoom(results[0]);
-    }
-  }, []);
+    const raw = initialDestination?.trim();
+    if (!raw) return;
+    const dest = resolveRoomFromQuery(graph, raw);
+    if (!dest) return;
+    externalDestRef.current = dest;
+    setDestNode(dest);
+    setActiveFloorId(dest.floorId);
+    // Surface the placement prompt so the user picks their starting position
+    setPlacementMode('prompt');
+  }, [initialDestination, graph]);
 
   const inputRef = useRef<TextInput>(null);
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<React.ComponentRef<typeof MapScrollView>>(null);
 
-  // Make the floor plan 2x screen width so it's large enough to read room
-  // numbers. Users scroll horizontally & vertically, and pinch to zoom further.
-  const imageWidth = SCREEN.width * 2;
-  const imageHeight = imageWidth / IMAGE_ASPECT;
+  const [mapViewport, setMapViewport] = useState<{ w: number; h: number } | null>(null);
+  const [scrollViewport, setScrollViewport] = useState({ w: 0, h: 0 });
+  const [mapZoomMul, setMapZoomMul] = useState(1);
+
+  const bumpMapZoom = useCallback((delta: number) => {
+    setMapZoomMul((z) => {
+      const n = Math.round((z + delta) * 100) / 100;
+      return Math.min(MAP_ZOOM_MAX_MUL, Math.max(MAP_ZOOM_MIN_MUL, n));
+    });
+  }, []);
+
+  const { imageWidth, imageHeight } = useMemo(() => {
+    const pad = 24;
+    const fallbackW = Math.max(0, SCREEN.width - pad);
+    const fallbackH = Math.max(200, SCREEN.height * 0.42);
+    const boxW = mapViewport?.w ?? fallbackW;
+    const boxH = mapViewport?.h ?? fallbackH;
+    const { w, h } = coverSize(boxW, boxH, IMAGE_ASPECT);
+    const mul = MAP_DISPLAY_SCALE * mapZoomMul;
+    return {
+      imageWidth: Math.round(w * mul),
+      imageHeight: Math.round(h * mul),
+    };
+  }, [mapViewport, mapZoomMul]);
+
+  // Start scrolled to center so the building (and route) are in view, not top-left.
+  useEffect(() => {
+    if (scrollViewport.w < 8 || imageWidth < 8) return;
+    const x = Math.max(0, (imageWidth - scrollViewport.w) / 2);
+    const y = Math.max(0, (imageHeight - scrollViewport.h) / 2);
+    scrollRef.current?.scrollTo({ x, y, animated: false });
+  }, [activeFloorId, imageWidth, imageHeight, scrollViewport.w, scrollViewport.h, mapZoomMul]);
 
   // ------ Search ------
   const searchResults = useMemo(
@@ -126,28 +214,67 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
   );
 
   // ------ Calculate route ------
+  const computeRoute = useCallback(
+    (start: GraphNode, dest: GraphNode) => {
+      setRouteError('');
+      const result = astar(graph, start.id, dest.id);
+      if (!result) {
+        setRouteError(
+          'No route found — floors may not be connected yet. Try a room on the same floor as your start.',
+        );
+        return false;
+      }
+      const segments = buildRoute(graph, result.nodeIds);
+      setRouteSegments(segments);
+      setActiveSegmentIdx(0);
+      const firstFloor = segments.find((s) => s.waypoints.length > 0);
+      if (firstFloor) setActiveFloorId(firstFloor.floorId);
+      return true;
+    },
+    [graph],
+  );
+
   const handleNavigate = useCallback(() => {
     if (!destNode) return;
-    setRouteError('');
-
-    // Default start: first room on floor 1 (no entrance/hallway nodes in current data)
+    // Default start: most-connected node on floor 1 (acts as the "entrance")
     const start = startNode ?? findEntrance(graph, graph.floors[0].id);
     if (!start) return;
+    computeRoute(start, destNode);
+  }, [graph, startNode, destNode, computeRoute]);
 
-    const result = astar(graph, start.id, destNode.id);
-    if (!result) {
-      setRouteError('No route found — floors may not be connected yet. Try a room on the same floor as your start.');
-      return;
-    }
+  // ------ Placement flow handlers ------
+  const handleUseMainEntrance = useCallback(() => {
+    const dest = destNode ?? externalDestRef.current;
+    if (!dest) return;
+    const entrance = findEntrance(graph, graph.floors[0].id);
+    if (!entrance) return;
+    setStartNode(entrance);
+    setActiveFloorId(entrance.floorId);
+    setPlacementMode('idle');
+    computeRoute(entrance, dest);
+  }, [graph, destNode, computeRoute]);
 
-    const segments = buildRoute(graph, result.nodeIds);
-    setRouteSegments(segments);
-    setActiveSegmentIdx(0);
+  const handleEnterTapMode = useCallback(() => {
+    setPlacementMode('tap');
+  }, []);
 
-    // Jump to the first floor that has waypoints
-    const firstFloor = segments.find((s) => s.waypoints.length > 0);
-    if (firstFloor) setActiveFloorId(firstFloor.floorId);
-  }, [graph, startNode, destNode]);
+  const handleFloorPlanTap = useCallback(
+    (e: { nativeEvent: { locationX: number; locationY: number } }) => {
+      if (placementMode !== 'tap') return;
+      const dest = destNode ?? externalDestRef.current;
+      if (!dest) return;
+      const { locationX, locationY } = e.nativeEvent;
+      // Convert pixel tap into the graph's normalized (0-1) coords
+      const nx = fromImageX(locationX, imageWidth);
+      const ny = fromImageY(locationY, imageHeight);
+      const nearest = findNearest(graph, activeFloorId, nx, ny);
+      if (!nearest) return;
+      setStartNode(nearest);
+      setPlacementMode('idle');
+      computeRoute(nearest, dest);
+    },
+    [placementMode, destNode, imageWidth, imageHeight, graph, activeFloorId, computeRoute],
+  );
 
   // Clear route
   const handleClearRoute = useCallback(() => {
@@ -156,6 +283,8 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
     setDestNode(null);
     setStartNode(null);
     setRouteError('');
+    externalDestRef.current = null;
+    setPlacementMode('idle');
   }, []);
 
   // ------ Active segment for current floor ------
@@ -172,14 +301,17 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
     <View style={styles.container}>
       {/* Top bar */}
       <View style={styles.topBar}>
-        <TouchableOpacity onPress={onExit} style={styles.backBtn}>
-          <MaterialIcons name="arrow-back" size={24} color="#333" />
+        <TouchableOpacity onPress={onExit} style={styles.backBtn} hitSlop={12}>
+          <MaterialIcons name="arrow-back" size={24} color={PRIMARY} />
         </TouchableOpacity>
-        <Text style={styles.title} numberOfLines={1}>
-          {graph.buildingName} — Indoor
-        </Text>
+        <View style={styles.titleBlock}>
+          <Text style={styles.title} numberOfLines={1}>
+            {graph.buildingName}
+          </Text>
+          <Text style={styles.titleHint}>Indoor map</Text>
+        </View>
         {routeSegments.length > 0 && (
-          <TouchableOpacity onPress={handleClearRoute} style={styles.clearBtn}>
+          <TouchableOpacity onPress={handleClearRoute} style={styles.clearBtn} hitSlop={8}>
             <Text style={styles.clearBtnText}>Clear</Text>
           </TouchableOpacity>
         )}
@@ -187,7 +319,7 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
 
       {/* Floor tabs — single horizontal row */}
       <View style={styles.floorTabsContainer}>
-        <ScrollView
+        <RNScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.floorTabs}
@@ -210,32 +342,65 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
               </TouchableOpacity>
             );
           })}
-        </ScrollView>
+        </RNScrollView>
       </View>
 
-      {/* Floor plan + route overlay — scrollable in both axes, zoomable */}
-      <ScrollView
-        ref={scrollRef}
-        style={styles.mapScroll}
-        contentContainerStyle={styles.mapContent}
-        maximumZoomScale={3}
-        minimumZoomScale={0.5}
-        bouncesZoom
-        showsVerticalScrollIndicator={false}
-        showsHorizontalScrollIndicator={false}
-      >
-        <View style={{ width: imageWidth, height: imageHeight }}>
-          <Image
-            source={FLOOR_IMAGES[activeFloorId]}
-            style={{ width: imageWidth, height: imageHeight }}
-            contentFit="fill"
-          />
-          {/* SVG overlay for route + markers */}
-          <Svg
-            style={StyleSheet.absoluteFill}
-            viewBox={`0 0 ${imageWidth} ${imageHeight}`}
+      {/* Floor plan — 2D pan via gesture-handler ScrollView; zoom uses +/- only */}
+      <View style={styles.mapStage}>
+        <View
+          style={styles.mapCard}
+          onLayout={(e) => {
+            const { width, height } = e.nativeEvent.layout;
+            if (width > 0 && height > 0) {
+              setMapViewport((prev) =>
+                prev && Math.abs(prev.w - width) < 1 && Math.abs(prev.h - height) < 1 ? prev : { w: width, h: height },
+              );
+            }
+          }}
+        >
+          <MapScrollView
+            ref={scrollRef}
+            style={styles.mapScroll}
+            contentContainerStyle={[
+              styles.mapContent,
+              { width: imageWidth, height: imageHeight },
+            ]}
+            centerContent={false}
+            // Native pinch zoom on iOS breaks two-axis panning; use + / − for zoom instead.
+            maximumZoomScale={1}
+            minimumZoomScale={1}
+            bouncesZoom={false}
+            scrollEnabled
+            directionalLockEnabled={false}
+            nestedScrollEnabled
+            overScrollMode="always"
+            showsVerticalScrollIndicator
+            showsHorizontalScrollIndicator
+            alwaysBounceVertical={false}
+            alwaysBounceHorizontal={false}
+            onLayout={(e) => {
+              const { width, height } = e.nativeEvent.layout;
+              setScrollViewport((prev) =>
+                prev.w === width && prev.h === height
+                  ? prev
+                  : { w: Math.max(0, width), h: Math.max(0, height) },
+              );
+            }}
           >
-            {/* Route polylines — Google Maps style */}
+            <Pressable
+              style={[styles.mapImageWrap, { width: imageWidth, height: imageHeight }]}
+              onPress={placementMode === 'tap' ? handleFloorPlanTap : undefined}
+            >
+              <Image
+                source={FLOOR_IMAGES[activeFloorId]}
+                style={StyleSheet.absoluteFill}
+                contentFit="fill"
+              />
+              <Svg
+                style={StyleSheet.absoluteFill}
+                viewBox={`0 0 ${imageWidth} ${imageHeight}`}
+                pointerEvents="none"
+              >
             {floorSegments.map((seg, idx) => {
               if (seg.waypoints.length < 2) return null;
               const points = seg.waypoints
@@ -243,7 +408,6 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
                 .join(' ');
               return (
                 <React.Fragment key={idx}>
-                  {/* Border/outline for contrast */}
                   <Polyline
                     points={points}
                     fill="none"
@@ -252,7 +416,6 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
-                  {/* Main route line */}
                   <Polyline
                     points={points}
                     fill="none"
@@ -264,7 +427,6 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
                 </React.Fragment>
               );
             })}
-            {/* Start marker — green pin */}
             {(() => {
               const sn = startNode ?? (routeSegments.length > 0 ? findEntrance(graph, graph.floors[0].id) : null);
               if (!sn || sn.floorId !== activeFloorId) return null;
@@ -275,16 +437,35 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
                 </>
               );
             })()}
-            {/* Destination marker — red pin */}
             {destNode && destNode.floorId === activeFloorId && (
               <>
                 <Circle cx={toImageX(destNode.x, imageWidth)} cy={toImageY(destNode.y, imageHeight)} r={7} fill="#EA4335" opacity={0.25} />
                 <Circle cx={toImageX(destNode.x, imageWidth)} cy={toImageY(destNode.y, imageHeight)} r={4.5} fill="#EA4335" stroke="#fff" strokeWidth={1.5} />
               </>
             )}
-          </Svg>
+              </Svg>
+            </Pressable>
+          </MapScrollView>
+          <View style={styles.mapZoomRail} pointerEvents="box-none">
+            <TouchableOpacity
+              style={[styles.mapZoomBtn, mapZoomMul >= MAP_ZOOM_MAX_MUL - 0.001 && styles.mapZoomBtnDisabled]}
+              onPress={() => bumpMapZoom(MAP_ZOOM_STEP)}
+              disabled={mapZoomMul >= MAP_ZOOM_MAX_MUL - 0.001}
+              accessibilityLabel="Zoom in floor plan"
+            >
+              <MaterialIcons name="add" size={22} color={mapZoomMul >= MAP_ZOOM_MAX_MUL - 0.001 ? '#cbd5e1' : PRIMARY} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.mapZoomBtn, mapZoomMul <= MAP_ZOOM_MIN_MUL + 0.001 && styles.mapZoomBtnDisabled]}
+              onPress={() => bumpMapZoom(-MAP_ZOOM_STEP)}
+              disabled={mapZoomMul <= MAP_ZOOM_MIN_MUL + 0.001}
+              accessibilityLabel="Zoom out floor plan"
+            >
+              <MaterialIcons name="remove" size={22} color={mapZoomMul <= MAP_ZOOM_MIN_MUL + 0.001 ? '#cbd5e1' : PRIMARY} />
+            </TouchableOpacity>
+          </View>
         </View>
-      </ScrollView>
+      </View>
 
       {/* Route instruction card (shown when route is active) */}
       {routeSegments.length > 0 && (
@@ -330,33 +511,87 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
         </View>
       )}
 
-      {/* Bottom panel — start/dest input (shown when no active route) */}
-      {!isSearching && routeSegments.length === 0 && (
+      {/* Placement prompt — shown when destination came from outside (e.g.
+          calendar event) and we still need a starting position */}
+      {!isSearching && routeSegments.length === 0 && placementMode !== 'idle' && destNode && (
         <View style={styles.bottomPanel}>
+          <Text style={styles.panelLabel}>You are at {graph.buildingName}</Text>
+          <Text style={styles.placementHeading}>
+            Where are you in the building?
+          </Text>
+          <Text style={styles.placementSub}>
+            {placementMode === 'tap'
+              ? `Tap your location on the floor plan above. Switch floors at the top if needed.`
+              : `Drop a pin on the floor plan, or use the main entrance to route to ${destNode.label}.`}
+          </Text>
+          {placementMode === 'tap' ? (
+            <TouchableOpacity
+              style={[styles.navigateBtn, styles.navigateBtnSecondary]}
+              onPress={() => setPlacementMode('prompt')}
+            >
+              <MaterialIcons name="close" size={18} color={PRIMARY} />
+              <Text style={[styles.navigateBtnText, { color: PRIMARY }]}>Cancel pin drop</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.placementButtons}>
+              <TouchableOpacity
+                style={[styles.navigateBtn, styles.navigateBtnSecondary, styles.placementBtn]}
+                onPress={handleEnterTapMode}
+              >
+                <MaterialIcons name="touch-app" size={18} color={PRIMARY} />
+                <Text style={[styles.navigateBtnText, { color: PRIMARY }]}>Drop a pin</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.navigateBtn, styles.placementBtn]}
+                onPress={handleUseMainEntrance}
+              >
+                <MaterialIcons name="meeting-room" size={18} color="#fff" />
+                <Text style={styles.navigateBtnText}>Main entrance</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          {routeError ? <Text style={styles.errorText}>{routeError}</Text> : null}
+        </View>
+      )}
+
+      {/* Bottom panel — start/dest input (shown when no active route) */}
+      {!isSearching && routeSegments.length === 0 && placementMode === 'idle' && (
+        <View style={styles.bottomPanel}>
+          <Text style={styles.panelLabel}>Route</Text>
           <TouchableOpacity
             style={styles.inputRow}
+            activeOpacity={0.7}
             onPress={() => {
               setSelectingFor('start');
               setIsSearching(true);
             }}
           >
-            <View style={[styles.dot, { backgroundColor: '#4CAF50' }]} />
-            <Text style={[styles.inputPlaceholder, startNode && { color: '#333' }]}>
-              {startNode ? `From: ${startNode.label}` : 'Start: Main Entrance (default)'}
-            </Text>
+            <View style={[styles.dot, styles.dotStart]} />
+            <View style={styles.inputRowText}>
+              <Text style={styles.inputLabel}>From</Text>
+              <Text style={[styles.inputValue, !startNode && styles.inputValuePlaceholder]} numberOfLines={1}>
+                {startNode ? startNode.label : 'Main entrance (default)'}
+              </Text>
+            </View>
+            <MaterialIcons name="chevron-right" size={22} color="#cbd5e1" />
           </TouchableOpacity>
           <View style={styles.inputDivider} />
           <TouchableOpacity
             style={styles.inputRow}
+            activeOpacity={0.7}
             onPress={() => {
               setSelectingFor('dest');
               setIsSearching(true);
             }}
           >
-            <View style={[styles.dot, { backgroundColor: '#E53935' }]} />
-            <Text style={[styles.inputPlaceholder, destNode && { color: '#333' }]}>
-              {destNode ? `To: ${destNode.label}` : 'Where are you going?'}
-            </Text>
+            <View style={[styles.dot, styles.dotDest]} />
+            <View style={styles.inputRowText}>
+              <Text style={styles.inputLabel}>To</Text>
+              <Text style={[styles.inputValue, !destNode && styles.inputValuePlaceholder]} numberOfLines={1}>
+                {destNode ? destNode.label : 'Search for a room'}
+              </Text>
+            </View>
+            <MaterialIcons name="chevron-right" size={22} color="#cbd5e1" />
           </TouchableOpacity>
           {routeError ? (
             <Text style={styles.errorText}>{routeError}</Text>
@@ -374,8 +609,8 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
       {isSearching && (
         <View style={styles.searchOverlay}>
           <View style={styles.searchBar}>
-            <TouchableOpacity onPress={() => setIsSearching(false)}>
-              <MaterialIcons name="arrow-back" size={24} color="#333" />
+            <TouchableOpacity onPress={() => setIsSearching(false)} hitSlop={12}>
+              <MaterialIcons name="arrow-back" size={24} color={PRIMARY} />
             </TouchableOpacity>
             <TextInput
               ref={inputRef}
@@ -394,6 +629,7 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
             )}
           </View>
           <FlatList
+            style={styles.searchList}
             data={searchResults}
             keyExtractor={(item) => item.id}
             keyboardShouldPersistTaps="handled"
@@ -432,66 +668,78 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: PAGE_BG,
   },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingTop: Platform.OS === 'ios' ? 4 : 12,
-    paddingBottom: 6,
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 6 : 12,
+    paddingBottom: 12,
     backgroundColor: '#fff',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#ddd',
+    borderBottomWidth: 1,
+    borderBottomColor: CARD_BORDER,
   },
   backBtn: {
     padding: 4,
-    marginRight: 8,
+    marginRight: 10,
+  },
+  titleBlock: {
+    flex: 1,
+    minWidth: 0,
   },
   title: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '700',
-    color: '#000',
-    flex: 1,
+    color: TEXT_PRIMARY,
+    letterSpacing: -0.3,
+  },
+  titleHint: {
+    marginTop: 2,
+    fontSize: 12,
+    fontWeight: '600',
+    color: TEXT_MUTED,
   },
   clearBtn: {
     paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingVertical: 6,
   },
   clearBtnText: {
     fontSize: 14,
-    color: '#E53935',
-    fontWeight: '600',
+    color: '#b91c1c',
+    fontWeight: '700',
   },
 
-  // Floor tabs — constrained height
   floorTabsContainer: {
     backgroundColor: '#fff',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#eee',
+    borderBottomWidth: 1,
+    borderBottomColor: CARD_BORDER,
   },
   floorTabs: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    gap: 8,
     alignItems: 'center',
   },
   floorTab: {
     paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: '#f0f0f0',
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: PAGE_BG,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 6,
   },
   floorTabActive: {
     backgroundColor: PRIMARY,
+    borderColor: PRIMARY,
   },
   floorTabText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#666',
+    color: '#475569',
   },
   floorTabTextActive: {
     color: '#fff',
@@ -500,26 +748,81 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#E53935',
+    backgroundColor: '#fecaca',
+    borderWidth: 1,
+    borderColor: '#b91c1c',
   },
 
-  // Map scroll — takes remaining space
+  mapStage: {
+    flex: 1,
+    backgroundColor: PAGE_BG,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 12,
+  },
+  mapCard: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    overflow: 'hidden',
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+  },
   mapScroll: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f8fafc',
   },
   mapContent: {
-    // No centering — image is wider than screen, user scrolls to explore
+    alignItems: 'flex-start',
+  },
+  mapImageWrap: {
+    position: 'relative',
+    backgroundColor: '#f8fafc',
+  },
+  mapZoomRail: {
+    position: 'absolute',
+    right: 10,
+    bottom: 10,
+    gap: 8,
+  },
+  mapZoomBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  mapZoomBtnDisabled: {
+    opacity: 0.55,
   },
 
-  // Instruction card
   instructionCard: {
     backgroundColor: '#fff',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#ddd',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    paddingBottom: 20,
+    marginHorizontal: 16,
+    marginBottom: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
   },
   instructionRow: {
     flexDirection: 'row',
@@ -531,50 +834,97 @@ const styles = StyleSheet.create({
   },
   instructionStep: {
     fontSize: 11,
-    color: '#999',
-    marginBottom: 2,
+    fontWeight: '600',
+    color: TEXT_MUTED,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 4,
   },
   instructionText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#333',
+    color: '#334155',
     textAlign: 'center',
   },
 
-  // Bottom panel
   bottomPanel: {
     backgroundColor: '#fff',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#ddd',
-    paddingHorizontal: 20,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    paddingHorizontal: 16,
     paddingTop: 14,
-    paddingBottom: 24,
+    paddingBottom: 18,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
+  },
+  panelLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#475569',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    marginBottom: 10,
   },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: 12,
     gap: 12,
   },
-  dot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+  inputRowText: {
+    flex: 1,
+    minWidth: 0,
   },
-  inputPlaceholder: {
-    fontSize: 15,
-    color: '#999',
+  inputLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: TEXT_MUTED,
+    marginBottom: 2,
+  },
+  inputValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: TEXT_PRIMARY,
+  },
+  inputValuePlaceholder: {
+    color: '#94a3b8',
+    fontWeight: '500',
+  },
+  dot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#fff',
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.12,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  dotStart: {
+    backgroundColor: '#22c55e',
+  },
+  dotDest: {
+    backgroundColor: '#ef4444',
   },
   inputDivider: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: '#ddd',
-    marginLeft: 22,
+    backgroundColor: '#f1f5f9',
+    marginLeft: 36,
   },
   errorText: {
     fontSize: 13,
-    color: '#E53935',
-    marginTop: 8,
+    color: '#b91c1c',
+    marginTop: 10,
     textAlign: 'center',
+    fontWeight: '500',
   },
   navigateBtn: {
     flexDirection: 'row',
@@ -583,44 +933,84 @@ const styles = StyleSheet.create({
     backgroundColor: PRIMARY,
     borderRadius: 12,
     paddingVertical: 14,
-    marginTop: 12,
+    marginTop: 14,
     gap: 8,
+    shadowColor: PRIMARY,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 2,
   },
   navigateBtnText: {
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
   },
+  navigateBtnSecondary: {
+    backgroundColor: '#fff',
+    borderWidth: 1.5,
+    borderColor: PRIMARY,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  placementHeading: {
+    marginTop: 4,
+    fontSize: 18,
+    fontWeight: '700',
+    color: TEXT_PRIMARY,
+  },
+  placementSub: {
+    marginTop: 6,
+    fontSize: 13,
+    color: TEXT_MUTED,
+    lineHeight: 18,
+  },
+  placementButtons: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 14,
+  },
+  placementBtn: {
+    flex: 1,
+    marginTop: 0,
+  },
 
   // Search overlay
   searchOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#fff',
+    backgroundColor: PAGE_BG,
     zIndex: 100,
   },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#ddd',
-    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: CARD_BORDER,
+    gap: 10,
     marginTop: Platform.OS === 'ios' ? 4 : 12,
+  },
+  searchList: {
+    flex: 1,
+    backgroundColor: PAGE_BG,
   },
   searchInput: {
     flex: 1,
     fontSize: 16,
-    color: '#000',
+    color: TEXT_PRIMARY,
     paddingVertical: 0,
+    fontWeight: '500',
   },
   searchResult: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 14,
+    backgroundColor: '#fff',
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: '#f1f5f9',
     gap: 12,
   },
   searchResultText: {
@@ -629,17 +1019,20 @@ const styles = StyleSheet.create({
   searchResultLabel: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#333',
+    color: '#334155',
   },
   searchResultFloor: {
     fontSize: 12,
-    color: '#999',
+    fontWeight: '500',
+    color: TEXT_MUTED,
     marginTop: 2,
   },
   emptyText: {
     textAlign: 'center',
-    color: '#999',
+    color: TEXT_MUTED,
     marginTop: 40,
     fontSize: 14,
+    fontWeight: '500',
+    paddingHorizontal: 24,
   },
 });

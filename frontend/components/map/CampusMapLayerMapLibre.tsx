@@ -16,6 +16,19 @@ import type { CampusMapLayerProps } from './CampusMapLayer.types';
 
 const DESTINATION_PIN_IMAGE = require('../../assets/map/destination-pin.png');
 
+type RoutePoint = { latitude: number; longitude: number };
+
+/** Remove consecutive duplicate points — MapLibre logs "Invalid geometry" on degenerate lines. */
+function lineStringCoordinates(points: RoutePoint[]): [number, number][] {
+  const out: [number, number][] = [];
+  for (const p of points) {
+    const pair: [number, number] = [p.longitude, p.latitude];
+    const prev = out[out.length - 1];
+    if (!prev || prev[0] !== pair[0] || prev[1] !== pair[1]) out.push(pair);
+  }
+  return out.length >= 2 ? out : [];
+}
+
 function longitudeDeltaToZoom(longitudeDelta: number, mapWidth: number): number {
   const z = Math.log2((360 * (mapWidth / 256)) / longitudeDelta);
   return Math.min(20, Math.max(10, Math.round(z)));
@@ -112,6 +125,7 @@ export default function CampusMapLayerMapLibre({
   showRoute,
   repositionMarker,
   followUserHeading,
+  onDestinationPress,
 }: CampusMapLayerProps) {
   const [mapStyle, setMapStyle] = useState<string | object | null>(null);
   const [showAttribution, setShowAttribution] = useState(false);
@@ -145,6 +159,8 @@ export default function CampusMapLayerMapLibre({
 
   const routeGeoJSON = useMemo(() => {
     if (!showRoute || routeCoordinates.length < 2) return EMPTY_GEOJSON;
+    const coordinates = lineStringCoordinates(routeCoordinates);
+    if (coordinates.length < 2) return EMPTY_GEOJSON;
     return {
       type: 'FeatureCollection' as const,
       features: [{
@@ -152,7 +168,7 @@ export default function CampusMapLayerMapLibre({
         properties: {},
         geometry: {
           type: 'LineString' as const,
-          coordinates: routeCoordinates.map((c) => [c.longitude, c.latitude]),
+          coordinates,
         },
       }],
     };
@@ -166,6 +182,8 @@ export default function CampusMapLayerMapLibre({
     const dLat = last.latitude  - destination.latitude;
     const dLng = last.longitude - destination.longitude;
     if (Math.sqrt(dLat * dLat + dLng * dLng) < 0.000009) return EMPTY_GEOJSON;
+    const coordinates = lineStringCoordinates([last, destination]);
+    if (coordinates.length < 2) return EMPTY_GEOJSON;
     return {
       type: 'FeatureCollection' as const,
       features: [{
@@ -173,10 +191,7 @@ export default function CampusMapLayerMapLibre({
         properties: {},
         geometry: {
           type: 'LineString' as const,
-          coordinates: [
-            [last.longitude,        last.latitude],
-            [destination.longitude, destination.latitude],
-          ],
+          coordinates,
         },
       }],
     };
@@ -285,7 +300,18 @@ export default function CampusMapLayerMapLibre({
         />
       </ShapeSource>
 
-      <ShapeSource id="destination-marker" shape={destinationGeoJSON}>
+      <ShapeSource
+        id="destination-marker"
+        shape={destinationGeoJSON}
+        hitbox={onDestinationPress ? { width: 64, height: 64 } : undefined}
+        onPress={
+          onDestinationPress
+            ? () => {
+                onDestinationPress();
+              }
+            : undefined
+        }
+      >
         <SymbolLayer
           id="destination-symbol"
           style={{

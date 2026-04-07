@@ -27,6 +27,7 @@ import { DEFAULT_USER_LOCATION } from '@/constants/map';
 import { searchRooms } from '@/lib/services/indoor-navigation';
 import gdcGraphData from '@/assets/gdc_graph.json';
 import type { BuildingGraph, GraphNode } from '@/lib/services/indoor-navigation';
+import { parseLocationString, findBuilding } from '@/lib/data/utBuildings';
 
 const getTodayString = () => {
   const today = new Date();
@@ -249,14 +250,19 @@ export default function CalendarScreen() {
   }, [selectedDate, eventsVisibleByFilter]);
 
   const handleEventPress = (location: string) => {
-    const dashIdx = location.indexOf(' - ');
-    const building = dashIdx !== -1 ? location.slice(0, dashIdx) : location;
-    const room = dashIdx !== -1 ? location.slice(dashIdx + 3) : '';
+    if (!location || !location.trim()) return;
+    // Parse "GDC 2.204" / "GDC - 2.204" / "ECJ - Room 0132" / etc.
+    const { building, room } = parseLocationString(location);
+    // Pass the canonical building code (e.g. "GDC") so the map's geocoder can
+    // expand it to the full UT building name. The room is held in the
+    // background until the user reaches the building.
     router.push({
       pathname: '/(tabs)/map',
       params: {
-        searchQuery: building,
+        searchQuery: building || location,
         ...(room ? { roomQuery: room } : {}),
+        // Fresh navigation each tap — same params alone may not re-run map listeners.
+        calNav: String(Date.now()),
       },
     });
   };
