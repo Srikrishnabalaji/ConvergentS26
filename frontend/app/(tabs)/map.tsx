@@ -6,6 +6,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   Keyboard,
+  Alert,
   Platform,
   Animated as RNAnimated,
 } from 'react-native';
@@ -76,6 +77,7 @@ export default function MapScreen() {
   const [routeWalkMin, setRouteWalkMin] = useState(0);
   const [routeLoading, setRouteLoading] = useState(false);
   const [showOverview, setShowOverview] = useState(false);
+  const [initialRoom, setInitialRoom] = useState<string | undefined>(undefined);
 
   // Voice search
   const [isListening, setIsListening] = useState(false);
@@ -108,30 +110,30 @@ export default function MapScreen() {
   }, [currentTime, routeWalkMin]);
 
   // Read searchQuery param passed from the calendar
-  const { searchQuery } = useLocalSearchParams<{ searchQuery?: string }>();
+  const { searchQuery, roomQuery } = useLocalSearchParams<{ searchQuery?: string; roomQuery?: string }>();
 
   useEffect(() => {
     if (!searchQuery) return;
     const q = Array.isArray(searchQuery) ? searchQuery[0] : searchQuery;
+    const r = Array.isArray(roomQuery) ? roomQuery[0] : roomQuery;
     if (!q.trim()) return;
 
     setQuery(q);
+    if (r) setInitialRoom(r);
 
-    // Geocode immediately and auto-select the top result
     (async () => {
       try {
         const results = await geocodeSearch(q, userLocation);
         if (results.length > 0) {
           handleSelectPlace(results[0]);
         } else {
-          // No match found — at least open the search panel with the text pre-filled
           transitionToSearch();
         }
       } catch {
         transitionToSearch();
       }
     })();
-  }, [searchQuery]);
+  }, [searchQuery, roomQuery]);
 
   // -----------------------------------------------------------------------
   // Voice search event handlers
@@ -716,6 +718,7 @@ export default function MapScreen() {
         <IndoorMapView
           graph={gdcGraphData as BuildingGraph}
           onExit={handleBack}
+          initialDestination={initialRoom}
         />
       </SafeAreaView>
     );

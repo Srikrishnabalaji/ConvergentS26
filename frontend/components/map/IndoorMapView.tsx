@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -63,12 +63,13 @@ function toImageY(ny: number, imgH: number): number {
 type Props = {
   graph: BuildingGraph;
   onExit: () => void;
+  initialDestination?: string;
 };
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
-export function IndoorMapView({ graph, onExit }: Props) {
+export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
   // Active floor
   const [activeFloorId, setActiveFloorId] = useState(graph.floors[0]?.id ?? 'f0');
 
@@ -85,6 +86,13 @@ export function IndoorMapView({ graph, onExit }: Props) {
   const [routeSegments, setRouteSegments] = useState<RouteSegment[]>([]);
   const [activeSegmentIdx, setActiveSegmentIdx] = useState(0);
   const [routeError, setRouteError] = useState('');
+  useEffect(() => {
+    if (!initialDestination) return;
+    const results = searchRooms(graph, initialDestination);
+    if (results.length > 0) {
+      handleSelectRoom(results[0]);
+    }
+  }, []);
 
   const inputRef = useRef<TextInput>(null);
   const scrollRef = useRef<ScrollView>(null);

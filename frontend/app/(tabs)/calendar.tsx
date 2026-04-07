@@ -24,6 +24,9 @@ import { supabase } from '../../lib/supabase';
 import { switchTrackColors, switchThumbColor } from '@/lib/switchTheme';
 import { geocodeSearch, type SearchItem, GeocodingNetworkError } from '@/lib/services/geocoding';
 import { DEFAULT_USER_LOCATION } from '@/constants/map';
+import { searchRooms } from '@/lib/services/indoor-navigation';
+import gdcGraphData from '@/assets/gdc_graph.json';
+import type { BuildingGraph, GraphNode } from '@/lib/services/indoor-navigation';
 
 const getTodayString = () => {
   const today = new Date();
@@ -116,16 +119,25 @@ export default function CalendarScreen() {
   const [locationSearching, setLocationSearching] = useState(false);
   const locationDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const roomDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [roomValidating, setRoomValidating] = useState(false);
+  const [roomError, setRoomError] = useState<string | null>(null);
+
+  const [roomSuggestions, setRoomSuggestions] = useState<GraphNode[]>([]);
+  const [roomSearching, setRoomSearching] = useState(false);
+
   const [newEvent, setNewEvent] = useState<{
     title: string;
-    location: string;
+    building: string;
+    room: string;
     time: string;
     notify: boolean;
     notifyInAdvance: number | null;
     groupId: any | null;
   }>({
     title: '',
-    location: '',
+    building: '',
+    room: '',
     time: '',
     notify: false,
     notifyInAdvance: null,
@@ -237,9 +249,15 @@ export default function CalendarScreen() {
   }, [selectedDate, eventsVisibleByFilter]);
 
   const handleEventPress = (location: string) => {
+    const dashIdx = location.indexOf(' - ');
+    const building = dashIdx !== -1 ? location.slice(0, dashIdx) : location;
+    const room = dashIdx !== -1 ? location.slice(dashIdx + 3) : '';
     router.push({
       pathname: '/(tabs)/map',
-      params: { searchQuery: location }
+      params: {
+        searchQuery: building,
+        ...(room ? { roomQuery: room } : {}),
+      },
     });
   };
 
@@ -260,18 +278,25 @@ export default function CalendarScreen() {
 
   const handleOpenAddModal = () => {
     setEditingEventId(null);
-    setNewEvent({ title: '', location: '', time: '', notify: false, notifyInAdvance: null, groupId: null});
+    setNewEvent({ title: '', building: '', room: '', time: '', notify: false, notifyInAdvance: null, groupId: null});
     setTimeValue(new Date());
     setShowAddModal(true);
     setLocationSuggestions([]);
     setLocationSearching(false);
+    setRoomSuggestions([]);
+    setRoomSearching(false);
   };
 
   const handleOpenEditModal = (event: any) => {
     setEditingEventId(event.id);
+    const stored: string = event.location ?? '';
+    const dashIdx = stored.indexOf(' - ');
+    const building = dashIdx !== -1 ? stored.slice(0, dashIdx) : stored;
+    const room = dashIdx !== -1 ? stored.slice(dashIdx + 3) : '';
     setNewEvent({
       title: event.title,
-      location: event.location,
+      building,
+      room,
       time: event.time,
       notify: event.notify,
       notifyInAdvance: event.notifyInAdvance ?? null,
@@ -281,11 +306,16 @@ export default function CalendarScreen() {
     setShowAddModal(true);
     setLocationSuggestions([]);
     setLocationSearching(false);
+    setRoomError(null);
+    setRoomSuggestions([]);
+    setRoomSearching(false);
   };
 
-  const handleLocationChange = (text: string) => {
-    setNewEvent(prev => ({ ...prev, location: text }));
+
+  const handleBuildingChange = (text: string) => {
+    setNewEvent(prev => ({ ...prev, building: text, room: '' }));
     setLocationSuggestions([]);
+    setRoomError(null);
 
     if (locationDebounceRef.current) clearTimeout(locationDebounceRef.current);
     if (!text.trim()) { setLocationSearching(false); return; }
@@ -303,9 +333,33 @@ export default function CalendarScreen() {
     }, 400);
   };
 
-  const handleSelectLocationSuggestion = (item: SearchItem) => {
-    setNewEvent(prev => ({ ...prev, location: item.name }));
+  const handleSelectBuildingSuggestion = (item: SearchItem) => {
+    setNewEvent(prev => ({ ...prev, building: item.name, room: '' }));
     setLocationSuggestions([]);
+    setRoomError(null);
+    Keyboard.dismiss();
+  };
+
+  const handleRoomChange = (text: string) => {
+    setNewEvent(prev => ({ ...prev, room: text }));
+    setRoomError(null);
+    setRoomSuggestions([]);
+
+    if (!text.trim()) { setRoomSearching(false); return; }
+
+    if (roomDebounceRef.current) clearTimeout(roomDebounceRef.current);
+    setRoomSearching(true);
+    roomDebounceRef.current = setTimeout(() => {
+      const results = searchRooms(gdcGraphData as BuildingGraph, text);
+      setRoomSuggestions(results.slice(0, 5));
+      setRoomSearching(false);
+    }, 200);
+  };
+
+  const handleSelectRoomSuggestion = (node: GraphNode) => {
+    setNewEvent(prev => ({ ...prev, room: node.label }));
+    setRoomSuggestions([]);
+    setRoomError(null);
     Keyboard.dismiss();
   };
 
@@ -319,17 +373,38 @@ export default function CalendarScreen() {
       return;
     }
 
-    if (newEvent.location.trim()) {
-      const isValid = await validateBuilding(newEvent.location);
+    if (newEvent.building.trim()) {
+      const isValid = await validateBuilding(newEvent.building);
       if (!isValid) {
         Alert.alert(
           'Unknown Building',
-          `"${extractBuilding(newEvent.location)}" wasn't found on campus. Please check the building name.`,
+          `"${newEvent.building}" wasn't found on campus. Please check the building name.`,
           [{ text: 'OK' }]
         );
         return;
       }
     }
+
+    if (newEvent.room.trim()) {
+      const roomResults = searchRooms(gdcGraphData as BuildingGraph, newEvent.room);
+      const exactMatch = roomResults.some(
+        (n) => n.label.toLowerCase() === newEvent.room.trim().toLowerCase()
+      );
+      if (!exactMatch) {
+        Alert.alert(
+          'Unknown Room',
+          `"${newEvent.room}" wasn't found in this building. Please select a room from the suggestions.`,
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+    }
+
+    const combinedLocation = newEvent.building.trim()
+      ? newEvent.room.trim()
+        ? `${newEvent.building.trim()} - ${newEvent.room.trim()}`
+        : newEvent.building.trim()
+      : '';
 
     if (newEvent.notify && newEvent.notifyInAdvance != null) {
       const [year, month, day] = selectedDate.split('-');
@@ -347,7 +422,7 @@ export default function CalendarScreen() {
         await Notifications.scheduleNotificationAsync({
           content: {
             title: `${newEvent.title}`,
-            body: newEvent.location ? `Head to ${newEvent.location}` : 'Your event is starting now!',
+            body: combinedLocation ? `Head to ${combinedLocation}` : 'Your event is starting now!',
             sound: true,
           },
           trigger: { type: 'date', date: triggerDate } as Notifications.DateTriggerInput,
@@ -362,7 +437,7 @@ export default function CalendarScreen() {
       id: eventId,
       event_date: selectedDate,
       title: newEvent.title,
-      location: newEvent.location,
+      location: combinedLocation,
       time: newEvent.time,
       notify: newEvent.notify,
       notify_in_advance: newEvent.notifyInAdvance,
@@ -380,7 +455,7 @@ export default function CalendarScreen() {
     const localEventData = {
       id: eventId,
       title: newEvent.title,
-      location: newEvent.location,
+      location: combinedLocation,
       time: newEvent.time,
       notify: newEvent.notify,
       notifyInAdvance: newEvent.notifyInAdvance,
@@ -403,7 +478,7 @@ export default function CalendarScreen() {
       }
     });
 
-    setNewEvent({ title: '', location: '', time: '', notify: false, notifyInAdvance: null, groupId: null});
+    setNewEvent({ title: '', building: '', room: '', time: '', notify: false, notifyInAdvance: null, groupId: null});
     setTimeValue(new Date());
     setEditingEventId(null);
     setShowTimePicker(false);
@@ -514,12 +589,12 @@ export default function CalendarScreen() {
                   placeholderTextColor="#999"
                 />
 
-                <Text style={styles.label}>Location</Text>
+                {/* <Text style={styles.label}>Building</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="e.g., ECJ, GDC, PCL..."
-                  value={newEvent.location}
-                  onChangeText={handleLocationChange}
+                  placeholder="e.g., GDC, ECJ, PCL..."
+                  value={newEvent.building}
+                  onChangeText={handleBuildingChange}
                   placeholderTextColor="#999"
                 />
                 {locationSearching && (
@@ -531,7 +606,7 @@ export default function CalendarScreen() {
                       <TouchableOpacity
                         key={item.id}
                         style={styles.suggestionRow}
-                        onPress={() => handleSelectLocationSuggestion(item)}
+                        onPress={() => handleSelectBuildingSuggestion(item)}
                       >
                         <MaterialIcons name="location-on" size={16} color={PRIMARY} style={{ marginRight: 8 }} />
                         <View style={{ flex: 1 }}>
@@ -544,6 +619,100 @@ export default function CalendarScreen() {
                     ))}
                   </View>
                 )}
+
+                <Text style={styles.label}>Room <Text style={{ color: '#94a3b8', fontWeight: '400' }}>(optional)</Text></Text>
+                <TextInput
+                  style={[styles.input, !newEvent.building.trim() && { opacity: 0.5 }]}
+                  placeholder="e.g., 2.216, 0132..."
+                  value={newEvent.room}
+                  onChangeText={handleRoomChange}
+                  placeholderTextColor="#999"
+                  editable={!!newEvent.building.trim()}
+                />
+                {roomSearching && (
+                  <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: 4 }}>Searching rooms...</Text>
+                )}
+                {roomSuggestions.length > 0 && (
+                  <View style={styles.suggestionsContainer}>
+                    {roomSuggestions.map((node) => (
+                      <TouchableOpacity
+                        key={node.id}
+                        style={styles.suggestionRow}
+                        onPress={() => handleSelectRoomSuggestion(node)}
+                      >
+                        <MaterialIcons name="meeting-room" size={16} color={PRIMARY} style={{ marginRight: 8 }} />
+                        <Text style={styles.suggestionName}>{node.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+                {roomError ? (
+                  <Text style={{ color: '#dc2626', fontSize: 12, marginTop: 4 }}>{roomError}</Text>
+                ) : null} */}
+
+                <Text style={styles.label}>Location</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
+                  <View style={{ flex: 1 }}>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Building (GDC, PCL...)"
+                      value={newEvent.building}
+                      onChangeText={handleBuildingChange}
+                      placeholderTextColor="#999"
+                    />
+                    {locationSearching && (
+                      <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: 4 }}>Searching...</Text>
+                    )}
+                    {locationSuggestions.length > 0 && (
+                      <View style={styles.suggestionsContainer}>
+                        {locationSuggestions.map((item) => (
+                          <TouchableOpacity
+                            key={item.id}
+                            style={styles.suggestionRow}
+                            onPress={() => handleSelectBuildingSuggestion(item)}
+                          >
+                            <MaterialIcons name="location-on" size={16} color={PRIMARY} style={{ marginRight: 8 }} />
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.suggestionName} numberOfLines={1}>{item.name}</Text>
+                              {item.address ? (
+                                <Text style={styles.suggestionAddress} numberOfLines={1}>{item.address}</Text>
+                              ) : null}
+                            </View>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                  <View style={{ width: 90 }}>
+                    <TextInput
+                      style={[styles.input, !newEvent.building.trim() && { opacity: 1 }]}
+                      placeholder="Room"
+                      value={newEvent.room}
+                      onChangeText={handleRoomChange}
+                      placeholderTextColor="#999"
+                      editable={!!newEvent.building.trim()}
+                    />
+                    {roomSearching && (
+                      <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: 4 }}>...</Text>
+                    )}
+                    {roomSuggestions.length > 0 && (
+                      <View style={styles.suggestionsContainer}>
+                        {roomSuggestions.map((node) => (
+                          <TouchableOpacity
+                            key={node.id}
+                            style={styles.suggestionRow}
+                            onPress={() => handleSelectRoomSuggestion(node)}
+                          >
+                            <Text style={styles.suggestionName}>{node.label}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+                    {roomError ? (
+                      <Text style={{ color: '#dc2626', fontSize: 12, marginTop: 4 }}>{roomError}</Text>
+                    ) : null}
+                  </View>
+                </View>
 
                 <Text style={styles.label}>Time *</Text>
                 <TouchableOpacity 
