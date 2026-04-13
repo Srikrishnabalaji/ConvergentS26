@@ -611,6 +611,33 @@ export default function CalendarScreen() {
               </View>
 
               <ScrollView style={styles.formContainer} showsVerticalScrollIndicator={false}>
+                <Text style={styles.label}>Group</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+                  <TouchableOpacity
+                    style={[styles.chip, !newEvent.groupId && styles.chipSelected]}
+                    onPress={() => setNewEvent(prev => ({ ...prev, groupId: null }))}
+                  >
+                    <Text style={[styles.chipText, !newEvent.groupId && styles.chipTextSelected]}>
+                      None
+                    </Text>
+                  </TouchableOpacity>
+
+                  {groups.map((group) => {
+                    const isSelected = newEvent.groupId === group.id;
+                    return (
+                      <TouchableOpacity
+                        key={group.id}
+                        style={[styles.chip, isSelected && styles.chipSelected]}
+                        onPress={() => setNewEvent(prev => ({ ...prev, groupId: group.id }))}
+                      >
+                        <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
+                          {group.name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+
                 <Text style={styles.label}>Event Title *</Text>
                 <TextInput
                   style={styles.input}
@@ -790,10 +817,10 @@ export default function CalendarScreen() {
                       <TouchableOpacity
                         key={option.label}
                         style={[styles.chip, isSelected && styles.chipSelected]}
-                        onPress={() => setNewEvent(prev => ({ 
-                          ...prev, 
-                          notifyInAdvance: option.value, 
-                          notify: option.value !== null 
+                        onPress={() => setNewEvent(prev => ({
+                          ...prev,
+                          notifyInAdvance: option.value,
+                          notify: option.value !== null
                         }))}
                       >
                         <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
@@ -803,32 +830,7 @@ export default function CalendarScreen() {
                     );
                   })}
                 </ScrollView>
-                <Text style={styles.label}>Group</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
-                  <TouchableOpacity
-                    style={[styles.chip, !newEvent.groupId && styles.chipSelected]}
-                    onPress={() => setNewEvent(prev => ({ ...prev, groupId: null }))}
-                  >
-                    <Text style={[styles.chipText, !newEvent.groupId && styles.chipTextSelected]}>
-                      None
-                    </Text>
-                  </TouchableOpacity>
-                
-                  {groups.map((group) => {
-                    const isSelected = newEvent.groupId === group.id;
-                    return (
-                      <TouchableOpacity
-                        key={group.id}
-                        style={[styles.chip, isSelected && styles.chipSelected]}
-                        onPress={() => setNewEvent(prev => ({ ...prev, groupId: group.id }))}
-                      >
-                        <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
-                          {group.name}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
+
 
                 {editingEventId && (
                   <TouchableOpacity style={styles.deleteFormButton} onPress={handleDeleteEvent}>
