@@ -147,20 +147,18 @@ export default function SettingsScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <View style={styles.banner}>
+        <Text style={styles.pageTitle}>Settings</Text>
+      </View>
+
+      <View style={styles.contentContainer}>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.headerBlock}>
-          <View>
-            <Text style={styles.pageTitle}>Settings</Text>
-            <Text style={styles.pageSubtitle}>Account and preferences</Text>
-          </View>
-        </View>
-
         <View style={styles.profileCard}>
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>{initials}</Text>
@@ -254,6 +252,7 @@ export default function SettingsScreen() {
           <Text style={styles.signOutText}>Log out</Text>
         </TouchableOpacity>
       </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -286,15 +285,30 @@ function RowSwitch({
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#f4f7f9',
+    backgroundColor: PRIMARY,
+  },
+  banner: {
+    backgroundColor: PRIMARY,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 10,
+    shadowColor: '#04303f',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 8,
+    zIndex: 1,
+  },
+  contentContainer: {
+    flex: 1,
+    backgroundColor: '#f5f7f9',
   },
   scroll: {
     flex: 1,
-    backgroundColor: '#f4f7f9',
   },
   scrollContent: {
     paddingHorizontal: 20,
-    paddingTop: 8,
+    paddingTop: 22,
     paddingBottom: 48,
   },
   loadingWrap: {
@@ -303,20 +317,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#f4f7f9',
   },
-  headerBlock: {
-    marginBottom: 20,
-  },
   pageTitle: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: PRIMARY,
-    letterSpacing: -0.5,
-  },
-  pageSubtitle: {
-    marginTop: 4,
-    fontSize: 14,
-    color: '#64748b',
-    maxWidth: 280,
+    fontSize: 40,
+    fontWeight: '800',
+    color: '#fff',
+    letterSpacing: -1,
   },
   profileCard: {
     flexDirection: 'row',

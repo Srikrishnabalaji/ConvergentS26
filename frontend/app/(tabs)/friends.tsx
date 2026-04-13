@@ -391,7 +391,7 @@ export default function FriendsScreen() {
   // Render
   // -------------------------------------------------------------------------
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
 
 
       {/* ── Pin-drop modal ──────────────────────────────────────────── */}
@@ -560,20 +560,19 @@ export default function FriendsScreen() {
         </View>
       </Modal>
 
-      {/* ── Main scroll ─────────────────────────────────────────────── */}
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <View style={styles.banner}>
         <View style={styles.headerRow}>
           <Text style={styles.headerTitle}>Friends</Text>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <TouchableOpacity style={styles.iconBtn} onPress={openPinModal}>
-              <MaterialIcons name="add-location" size={22} color="#0B617E" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/(tabs)/myGroups' as never)}>
-              <MaterialIcons name="chevron-right" size={26} color="#0B617E" />
+              <MaterialIcons name="add-location" size={22} color="#fff" />
             </TouchableOpacity>
           </View>
         </View>
+      </View>
 
+      <View style={styles.contentContainer}>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.searchWrap}>
           <MaterialIcons name="search" size={20} color="#9ca3af" />
           <TextInput
@@ -735,6 +734,7 @@ export default function FriendsScreen() {
           </>
         )}
       </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -743,12 +743,14 @@ export default function FriendsScreen() {
 // Styles
 // ---------------------------------------------------------------------------
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#f4f7f9' },
-  scrollContent: { paddingHorizontal: 20, paddingBottom: 40 },
+  safeArea: { flex: 1, backgroundColor: '#0B617E' },
+  banner: { backgroundColor: '#0B617E', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 10, shadowColor: '#04303f', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.15, shadowRadius: 10, elevation: 8, zIndex: 1 },
+  contentContainer: { flex: 1, backgroundColor: '#f5f7f9' },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 22, paddingBottom: 40 },
 
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, marginBottom: 14 },
-  headerTitle: { fontSize: 34, fontWeight: '700', color: '#0B617E' },
-  iconBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f3f4f6' },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  headerTitle: { fontSize: 40, fontWeight: '800', color: '#fff', letterSpacing: -1 },
+  iconBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.15)' },
 
   searchWrap: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#d1d5db', borderRadius: 12, backgroundColor: '#f9fafb', paddingHorizontal: 12, height: 48, marginBottom: 12 },
   searchInput: { flex: 1, marginLeft: 8, fontSize: 16, color: '#111827' },

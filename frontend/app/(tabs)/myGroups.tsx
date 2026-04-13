@@ -133,7 +133,6 @@ function GroupCard({
                   style={[
                     cardStyles.btnCompact,
                     cardStyles.btnCompactLeave,
-                    canEdit && onEdit && { marginLeft: 6 },
                   ]}
                   onPress={onLeave}
                   disabled={leaving}
@@ -155,7 +154,6 @@ function GroupCard({
                 <TouchableOpacity
                   style={[
                     cardStyles.btnCompactJoin,
-                    ((canEdit && onEdit) || onLeave) && { marginLeft: 6 },
                     joining && { opacity: 0.65 },
                   ]}
                   onPress={onJoin}
@@ -185,20 +183,17 @@ function GroupCard({
 const cardStyles = StyleSheet.create({
   cardWrap: {
     backgroundColor: '#fff',
-    borderRadius: 14,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#e8eef2',
-    shadowColor: '#0f172a',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 1,
-    overflow: 'hidden',
+    borderRadius: 18,
+    marginBottom: 12,
+    shadowColor: '#0B617E',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07,
+    shadowRadius: 14,
+    elevation: 2,
   },
   cardMain: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
   cardMainRow: {
     flexDirection: 'row',
@@ -220,83 +215,80 @@ const cardStyles = StyleSheet.create({
     alignItems: 'center',
     flexShrink: 0,
     alignSelf: 'center',
+    gap: 6,
   },
   cardTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: PRIMARY,
-    marginBottom: 4,
-    lineHeight: 21,
+    color: '#0f172a',
+    marginBottom: 3,
+    lineHeight: 22,
   },
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   activeDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: PRIMARY,
     marginRight: 6,
   },
   cardMeta: {
-    fontSize: 12,
-    color: '#94a3b8',
+    fontSize: 13,
+    color: '#64748b',
     flex: 1,
+    fontWeight: '500',
   },
   avatarImg: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    marginRight: 12,
+    width: 50,
+    height: 50,
+    borderRadius: 15,
+    marginRight: 14,
     backgroundColor: '#f1f5f9',
   },
   avatarPlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    marginRight: 12,
-    backgroundColor: '#f8fafc',
+    width: 50,
+    height: 50,
+    borderRadius: 15,
+    marginRight: 14,
+    backgroundColor: 'rgba(11, 97, 126, 0.07)',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#eef2f6',
   },
   btnCompact: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 5,
-    paddingHorizontal: 9,
-    borderRadius: 8,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: 'rgba(11, 97, 126, 0.07)',
   },
   btnCompactText: {
     color: PRIMARY,
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '600',
   },
   btnCompactLeave: {
-    borderColor: '#fecaca',
-    backgroundColor: '#fffafa',
+    backgroundColor: '#fef2f2',
   },
   btnCompactLeaveText: {
-    color: '#b91c1c',
-    fontSize: 12,
+    color: '#dc2626',
+    fontSize: 13,
     fontWeight: '600',
   },
   btnCompactJoin: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 5,
-    paddingHorizontal: 10,
-    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 10,
     backgroundColor: PRIMARY,
   },
   btnCompactJoinText: {
     color: '#fff',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
   },
 });
@@ -480,11 +472,11 @@ export default function MyGroupsScreen() {
       : discoverGroups.filter((g) => g.type === activeTab);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
       <Modal
         visible={!!selectedGroup}
         transparent
-        animationType="fade"
+        animationType="slide"
         onRequestClose={() => setSelectedGroup(null)}
       >
         <Pressable
@@ -624,66 +616,58 @@ export default function MyGroupsScreen() {
           </Pressable>
         </Pressable>
       </Modal>
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={fetchGroups} tintColor={PRIMARY} />
-        }
-      >
+      <View style={styles.banner}>
         <View style={styles.headerBlock}>
           <View>
             <Text style={styles.pageTitle}>Groups</Text>
-            <Text style={styles.pageSubtitle}>Communities you&apos;re in and discover</Text>
+            {/* <Text style={styles.pageSubtitle}>Communities you&apos;re in and discover</Text> */}
           </View>
-          <View style={styles.headerActions}>
-            <TouchableOpacity
-              style={styles.headerIconBtn}
-              onPress={() => router.push('/(tabs)/friends' as never)}
-              accessibilityRole="button"
-              accessibilityLabel="Friends"
-              accessibilityHint="Opens your friends list"
-            >
-              <MaterialIcons name="groups" size={22} color={PRIMARY} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.headerIconBtnPrimary}
-              onPress={() => router.push('/create-group' as never)}
-              accessibilityRole="button"
-              accessibilityLabel="Create group"
-              accessibilityHint="Starts creating a new group"
-            >
-              <MaterialIcons name="add" size={26} color="#fff" />
-            </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.headerIconBtnPrimary}
+            onPress={() => router.push('/create-group' as never)}
+            accessibilityRole="button"
+            accessibilityLabel="Create group"
+            accessibilityHint="Starts creating a new group"
+          >
+            <MaterialIcons name="add" size={22} color={PRIMARY} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <View style={styles.contentContainer}>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={loading} onRefresh={fetchGroups} tintColor={PRIMARY} />
+          }
+        >
+          <View style={styles.segmentWrap}>
+            {(['my_groups', 'friends', 'campus_org'] as const).map((tab) => {
+              const labels = {
+                my_groups: 'All',
+                friends: 'Friends',
+                campus_org: 'Campus',
+              };
+              const active = activeTab === tab;
+              return (
+                <TouchableOpacity
+                  key={tab}
+                  style={[styles.segmentItem, active && styles.segmentItemActive]}
+                  onPress={() => setActiveTab(tab)}
+                  activeOpacity={0.85}
+                >
+                  <Text style={[styles.segmentLabel, active && styles.segmentLabelActive]}>
+                    {labels[tab]}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
-        </View>
 
-        <View style={styles.segmentWrap}>
-          {(['my_groups', 'friends', 'campus_org'] as const).map((tab) => {
-            const labels = {
-              my_groups: 'All',
-              friends: 'Friends',
-              campus_org: 'Campus',
-            };
-            const active = activeTab === tab;
-            return (
-              <TouchableOpacity
-                key={tab}
-                style={[styles.segmentItem, active && styles.segmentItemActive]}
-                onPress={() => setActiveTab(tab)}
-                activeOpacity={0.85}
-              >
-                <Text style={[styles.segmentLabel, active && styles.segmentLabelActive]}>
-                  {labels[tab]}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Your groups</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Your groups</Text>
           {!loading && filteredMyGroups.length > 0 ? (
             <View style={styles.countPill}>
               <Text style={styles.countPillText}>{filteredMyGroups.length}</Text>
@@ -697,7 +681,7 @@ export default function MyGroupsScreen() {
         ) : filteredMyGroups.length === 0 ? (
           <View style={styles.emptyCard}>
             <View style={styles.emptyIconCircle}>
-              <MaterialIcons name="groups" size={32} color="#cbd5e1" />
+              <MaterialIcons name="groups" size={32} color="#85b0bf" />
             </View>
             <Text style={styles.emptyTitle}>No groups yet</Text>
             <Text style={styles.emptySubtitle}>
@@ -730,7 +714,7 @@ export default function MyGroupsScreen() {
         {filteredDiscover.length === 0 ? (
           <View style={styles.emptyCard}>
             <View style={styles.emptyIconCircle}>
-              <MaterialIcons name="explore" size={30} color="#cbd5e1" />
+              <MaterialIcons name="explore" size={30} color="#85b0bf" />
             </View>
             <Text style={styles.emptyTitle}>Nothing to join</Text>
             <Text style={styles.emptySubtitle}>
@@ -749,8 +733,9 @@ export default function MyGroupsScreen() {
               onPress={() => setSelectedGroup(group)}
             />
           ))
-        )}
-      </ScrollView>
+          )}
+        </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -758,115 +743,110 @@ export default function MyGroupsScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#f4f7f9',
+    backgroundColor: '#0B617E',
+  },
+  banner: {
+    backgroundColor: '#0B617E',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 10,
+    shadowColor: '#04303f',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 8,
+    zIndex: 1,
+  },
+  contentContainer: {
+    flex: 1,
+    backgroundColor: '#f5f7f9',
   },
   scrollView: {
     flex: 1,
-    backgroundColor: '#f4f7f9',
   },
   scrollContent: {
     paddingHorizontal: 20,
-    paddingTop: 8,
+    paddingTop: 22,
     paddingBottom: 48,
   },
   headerBlock: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 20,
+    marginBottom: 0,
   },
   pageTitle: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: PRIMARY,
-    letterSpacing: -0.5,
+    fontSize: 40,
+    fontWeight: '800',
+    color: '#fff',
+    letterSpacing: -1,
   },
   pageSubtitle: {
     marginTop: 4,
-    fontSize: 14,
-    color: '#64748b',
+    fontSize: 15,
+    color: 'rgba(255, 255, 255, 0.7)',
     maxWidth: 220,
   },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  headerIconBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 10,
-    shadowColor: '#0f172a',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
-  },
   headerIconBtnPrimary: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: PRIMARY,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  segmentWrap: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(11, 97, 126, 0.1)',
+    borderRadius: 14,
+    padding: 3,
+    marginBottom: 22,
+  },
+  segmentItem: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: 12,
+  },
+  segmentItemActive: {
+    backgroundColor: PRIMARY,
     shadowColor: PRIMARY,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 6,
     elevation: 3,
   },
-  segmentWrap: {
-    flexDirection: 'row',
-    backgroundColor: '#e2e8f0',
-    borderRadius: 14,
-    padding: 4,
-    marginBottom: 24,
-  },
-  segmentItem: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderRadius: 11,
-  },
-  segmentItemActive: {
-    backgroundColor: '#fff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    elevation: 2,
-  },
   segmentLabel: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '600',
     color: '#64748b',
   },
   segmentLabelActive: {
-    color: PRIMARY,
+    color: '#fff',
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 14,
   },
   sectionTitle: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
-    color: '#475569',
-    letterSpacing: 1.2,
+    color: '#94a3b8',
+    letterSpacing: 0.8,
     textTransform: 'uppercase',
   },
   countPill: {
     marginLeft: 8,
-    backgroundColor: 'rgba(11, 97, 126, 0.12)',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
+    backgroundColor: 'rgba(11, 97, 126, 0.1)',
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 10,
   },
   countPillText: {
     fontSize: 12,
@@ -874,31 +854,33 @@ const styles = StyleSheet.create({
     color: PRIMARY,
   },
   loadingBlock: {
-    paddingVertical: 40,
+    paddingVertical: 48,
     alignItems: 'center',
   },
   emptyCard: {
     backgroundColor: '#fff',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#e8eef2',
-    borderStyle: 'dashed',
-    paddingVertical: 28,
-    paddingHorizontal: 20,
+    borderRadius: 20,
+    paddingVertical: 36,
+    paddingHorizontal: 24,
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 24,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 14,
+    elevation: 1,
   },
   emptyIconCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#f8fafc',
+    width: 72,
+    height: 72,
+    borderRadius: 22,
+    backgroundColor: 'rgba(11, 97, 126, 0.06)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
+    marginBottom: 16,
   },
   emptyTitle: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '600',
     color: '#334155',
     marginBottom: 6,
@@ -907,70 +889,68 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#94a3b8',
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: 21,
     maxWidth: 260,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.45)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
+    backgroundColor: 'rgba(15, 23, 42, 0.5)',
+    justifyContent: 'flex-end',
   },
   modalSheet: {
     backgroundColor: '#fff',
-    borderRadius: 20,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     width: '100%',
-    maxWidth: 360,
-    maxHeight: '88%',
+    maxHeight: '85%',
     overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.2,
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.15,
     shadowRadius: 24,
-    elevation: 12,
+    elevation: 16,
   },
   modalScrollContent: {
-    paddingBottom: 28,
+    paddingBottom: 36,
   },
   modalHandle: {
     alignSelf: 'center',
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#e2e8f0',
-    marginTop: 10,
-    marginBottom: 6,
+    width: 40,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: '#d4d8de',
+    marginTop: 12,
+    marginBottom: 8,
   },
   modalHero: {
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingBottom: 16,
+    paddingHorizontal: 24,
+    paddingBottom: 20,
+    paddingTop: 8,
   },
   modalHeroImage: {
-    width: 112,
-    height: 112,
-    borderRadius: 20,
+    width: 100,
+    height: 100,
+    borderRadius: 24,
     backgroundColor: '#f1f5f9',
-    marginBottom: 14,
+    marginBottom: 16,
   },
   modalHeroPlaceholder: {
-    width: 112,
-    height: 112,
-    borderRadius: 20,
-    backgroundColor: '#f1f5f9',
-    marginBottom: 14,
+    width: 100,
+    height: 100,
+    borderRadius: 24,
+    backgroundColor: 'rgba(11, 97, 126, 0.08)',
+    marginBottom: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
   },
   modalTitle: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: '700',
-    color: PRIMARY,
+    color: '#0f172a',
     textAlign: 'center',
-    marginBottom: 10,
+    marginBottom: 12,
+    letterSpacing: -0.3,
   },
   modalMetaRow: {
     flexDirection: 'row',
@@ -979,39 +959,38 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
     borderRadius: 20,
   },
   modalBadgeText: {
-    fontSize: 12,
-    fontWeight: '700',
+    fontSize: 13,
+    fontWeight: '600',
   },
   modalMetaMuted: {
     fontSize: 14,
     color: '#64748b',
+    fontWeight: '500',
   },
   modalSection: {
-    marginHorizontal: 16,
+    marginHorizontal: 20,
     marginBottom: 16,
-    backgroundColor: '#f8fafc',
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#f1f5f9',
+    backgroundColor: '#f8fafb',
+    borderRadius: 16,
+    padding: 16,
   },
   modalSectionTitle: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
-    color: '#64748b',
-    letterSpacing: 1,
+    color: '#94a3b8',
+    letterSpacing: 0.8,
     textTransform: 'uppercase',
-    marginBottom: 8,
+    marginBottom: 10,
   },
   modalBodyText: {
     fontSize: 15,
     color: '#334155',
-    lineHeight: 22,
+    lineHeight: 23,
   },
   modalPlaceholder: {
     fontSize: 14,
@@ -1038,26 +1017,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e2e8f0',
+    borderBottomColor: '#edf1f5',
   },
   memberAvatarImg: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: 14,
     marginRight: 12,
     backgroundColor: '#e2e8f0',
   },
   memberAvatarFallback: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: 14,
     marginRight: 12,
-    backgroundColor: 'rgba(11, 97, 126, 0.15)',
+    backgroundColor: 'rgba(11, 97, 126, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   memberAvatarInitials: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '700',
     color: PRIMARY,
   },
@@ -1068,17 +1047,15 @@ const styles = StyleSheet.create({
     color: '#0f172a',
   },
   roleBadge: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 8,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+    backgroundColor: 'rgba(11, 97, 126, 0.06)',
   },
   roleBadgeText: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#64748b',
+    color: PRIMARY,
     textTransform: 'capitalize',
   },
   modalPrimaryBtn: {
@@ -1086,10 +1063,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: PRIMARY,
-    marginHorizontal: 16,
-    paddingVertical: 15,
-    borderRadius: 14,
+    marginHorizontal: 20,
+    paddingVertical: 16,
+    borderRadius: 16,
     marginBottom: 10,
+    shadowColor: PRIMARY,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
   },
   modalPrimaryBtnText: {
     color: '#fff',
@@ -1097,9 +1079,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   modalCloseBtn: {
-    marginHorizontal: 16,
-    paddingVertical: 12,
+    marginHorizontal: 20,
+    paddingVertical: 14,
     alignItems: 'center',
+    backgroundColor: '#f1f5f9',
+    borderRadius: 14,
   },
   modalCloseBtnText: {
     fontSize: 16,

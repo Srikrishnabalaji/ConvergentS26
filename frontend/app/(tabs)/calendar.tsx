@@ -599,7 +599,7 @@ export default function CalendarScreen() {
   }, [events, selectedDate, groupEventsOnly, selectedGroupFilterId]);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
       <Modal visible={showAddModal} transparent animationType="slide" onRequestClose={() => setShowAddModal(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
           <Pressable style={styles.modalOverlay} onPress={() => setShowAddModal(false)}>
@@ -852,6 +852,21 @@ export default function CalendarScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
+      <View style={styles.banner}>
+        <View style={styles.headerBlock}>
+          <Text style={styles.pageTitle}>Calendar</Text>
+          <TouchableOpacity
+            style={styles.headerAddBtn}
+            onPress={handleOpenAddModal}
+            accessibilityRole="button"
+            accessibilityLabel="Add event"
+          >
+            <MaterialIcons name="add" size={22} color={PRIMARY} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <View style={styles.contentContainer}>
       <ScrollView
         style={styles.scrollPage}
         contentContainerStyle={styles.scrollPageContent}
@@ -859,21 +874,6 @@ export default function CalendarScreen() {
         keyboardShouldPersistTaps="handled"
         nestedScrollEnabled
       >
-        <View style={styles.headerBlock}>
-          <View>
-            <Text style={styles.pageTitle}>Calendar</Text>
-            <Text style={styles.pageSubtitle}>Plan your week and group meetups</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.headerIconBtnPrimary}
-            onPress={handleOpenAddModal}
-            accessibilityRole="button"
-            accessibilityLabel="Add event"
-          >
-            <MaterialIcons name="add" size={26} color="#fff" />
-          </TouchableOpacity>
-        </View>
-
         {groupNameDisplay ? (
           <View style={styles.groupContextRow}>
             <MaterialIcons name="groups" size={20} color={PRIMARY} style={{ marginRight: 8 }} />
@@ -994,6 +994,7 @@ export default function CalendarScreen() {
           ))
         )}
       </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -1001,15 +1002,30 @@ export default function CalendarScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#f4f7f9',
+    backgroundColor: '#0B617E',
+  },
+  banner: {
+    backgroundColor: '#0B617E',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 10,
+    shadowColor: '#04303f',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 8,
+    zIndex: 1,
+  },
+  contentContainer: {
+    flex: 1,
+    backgroundColor: '#f5f7f9',
   },
   scrollPage: {
     flex: 1,
-    backgroundColor: '#f4f7f9',
   },
   scrollPageContent: {
     paddingHorizontal: 20,
-    paddingTop: 8,
+    paddingTop: 22,
     paddingBottom: 48,
   },
   filterCard: {
@@ -1084,32 +1100,25 @@ const styles = StyleSheet.create({
   },
   headerBlock: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
   },
   pageTitle: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: PRIMARY,
-    letterSpacing: -0.5,
+    fontSize: 40,
+    fontWeight: '800',
+    color: '#fff',
+    letterSpacing: -1,
   },
-  pageSubtitle: {
-    marginTop: 4,
-    fontSize: 14,
-    color: '#64748b',
-    maxWidth: 240,
-  },
-  headerIconBtnPrimary: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: PRIMARY,
+  headerAddBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: PRIMARY,
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
+    shadowOpacity: 0.1,
     shadowRadius: 6,
     elevation: 3,
   },
