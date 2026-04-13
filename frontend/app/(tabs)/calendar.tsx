@@ -27,7 +27,7 @@ import { DEFAULT_USER_LOCATION } from '@/constants/map';
 import { searchRooms } from '@/lib/services/indoor-navigation';
 import gdcGraphData from '@/assets/gdc_graph.json';
 import type { BuildingGraph, GraphNode } from '@/lib/services/indoor-navigation';
-import { parseLocationString, findBuilding } from '@/lib/data/utBuildings';
+import { parseLocationString, findBuilding, UT_BUILDINGS } from '@/lib/data/utBuildings';
 
 const getTodayString = () => {
   const today = new Date();
@@ -320,23 +320,48 @@ export default function CalendarScreen() {
 
   const handleBuildingChange = (text: string) => {
     setNewEvent(prev => ({ ...prev, building: text, room: '' }));
-    setLocationSuggestions([]);
     setRoomError(null);
 
-    if (locationDebounceRef.current) clearTimeout(locationDebounceRef.current);
-    if (!text.trim()) { setLocationSearching(false); return; }
+    if (!text.trim()) {
+      setLocationSuggestions([]);
+      setLocationSearching(false);
+      return;
+    }
 
-    setLocationSearching(true);
-    locationDebounceRef.current = setTimeout(async () => {
-      try {
-        const results = await geocodeSearch(text, DEFAULT_USER_LOCATION);
-        setLocationSuggestions(results);
-      } catch {
-        setLocationSuggestions([]);
-      } finally {
-        setLocationSearching(false);
-      }
-    }, 400);
+    const q = text.trim().toLowerCase();
+    const utMatches = UT_BUILDINGS.filter(b =>
+      b.code.toLowerCase().startsWith(q) ||
+      b.displayName.toLowerCase().includes(q) ||
+      b.fullName.toLowerCase().includes(q) ||
+      (b.aliases ?? []).some(a => a.startsWith(q))
+    ).slice(0, 6);
+
+    if (utMatches.length > 0) {
+      setLocationSuggestions(
+        utMatches.map(b => ({
+          id: b.code,
+          name: b.code,
+          address: b.displayName,
+          latitude: 0,
+          longitude: 0,
+        }))
+      );
+      setLocationSearching(false);
+    } else {
+      setLocationSuggestions([]);
+      setLocationSearching(true);
+      if (locationDebounceRef.current) clearTimeout(locationDebounceRef.current);
+      locationDebounceRef.current = setTimeout(async () => {
+        try {
+          const results = await geocodeSearch(text, DEFAULT_USER_LOCATION);
+          setLocationSuggestions(results);
+        } catch {
+          setLocationSuggestions([]);
+        } finally {
+          setLocationSearching(false);
+        }
+      }, 400);
+    }
   };
 
   const handleSelectBuildingSuggestion = (item: SearchItem) => {
