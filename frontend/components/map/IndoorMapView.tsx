@@ -23,9 +23,25 @@ import {
   buildRoute,
   searchRooms,
   resolveRoomFromQuery,
-  findEntrance,
   findNearest,
 } from '@/lib/services/indoor-navigation';
+import { decodeGrid, computeGridRoute, type OccupancyGrid } from '@/lib/services/grid-astar';
+
+// ---------------------------------------------------------------------------
+// Pre-bundled occupancy grids (produced by backend/export_grids.py).
+// Loaded as static JSON assets; decoded once and cached in _decodedGrids.
+// ---------------------------------------------------------------------------
+const RAW_FLOOR_GRIDS: Record<string, any> = {
+  f0: require('@/assets/grids/gdc_f0.json'),
+  f1: require('@/assets/grids/gdc_f1.json'),
+  f2: require('@/assets/grids/gdc_f2.json'),
+  f3: require('@/assets/grids/gdc_f3.json'),
+  f4: require('@/assets/grids/gdc_f4.json'),
+  f5: require('@/assets/grids/gdc_f5.json'),
+  f6: require('@/assets/grids/gdc_f6.json'),
+};
+// Decoded (bit-unpacked) grids — populated lazily on first use per floor.
+const _decodedGrids: Record<string, OccupancyGrid> = {};
 
 // ---------------------------------------------------------------------------
 // Floor plan image map — maps floorId to require()'d asset
@@ -114,8 +130,8 @@ type Props = {
 // Component
 // ---------------------------------------------------------------------------
 export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
-  // Active floor
-  const [activeFloorId, setActiveFloorId] = useState(graph.floors[0]?.id ?? 'f0');
+  // Active floor — default to Floor 2 (f1) where the main entrance is
+  const [activeFloorId, setActiveFloorId] = useState('f1');
 
   // Room search
   const [searchQuery, setSearchQuery] = useState('');
@@ -213,6 +229,20 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
     [selectingFor],
   );
 
+  // ------ Entrance accessor ------
+  const getEntrance = useCallback((): GraphNode | null => {
+    return graph.nodes.find((n) => n.id === 'entrance-f1') ?? null;
+  }, [graph]);
+
+  // ------ Grid accessor (lazy decode + cache) ------
+  const getGrid = useCallback((floorId: string): OccupancyGrid | null => {
+    if (_decodedGrids[floorId]) return _decodedGrids[floorId];
+    const raw = RAW_FLOOR_GRIDS[floorId];
+    if (!raw) return null;
+    _decodedGrids[floorId] = decodeGrid(raw);
+    return _decodedGrids[floorId];
+  }, []);
+
   // ------ Calculate route ------
   const computeRoute = useCallback(
     (start: GraphNode, dest: GraphNode) => {
@@ -224,29 +254,33 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
         );
         return false;
       }
+      // Build node-level route segments (waypoints = node positions only).
       const segments = buildRoute(graph, result.nodeIds);
-      setRouteSegments(segments);
+      // Replace each floor segment's waypoints with wall-respecting grid A*
+      // corridor paths. Falls back to straight-line if grid is unavailable.
+      const enhanced = computeGridRoute(segments, getGrid);
+      setRouteSegments(enhanced);
       setActiveSegmentIdx(0);
-      const firstFloor = segments.find((s) => s.waypoints.length > 0);
+      const firstFloor = enhanced.find((s) => s.waypoints.length > 0);
       if (firstFloor) setActiveFloorId(firstFloor.floorId);
       return true;
     },
-    [graph],
+    [graph, getGrid],
   );
 
   const handleNavigate = useCallback(() => {
     if (!destNode) return;
-    // Default start: most-connected node on floor 1 (acts as the "entrance")
-    const start = startNode ?? findEntrance(graph, graph.floors[0].id);
+    // Default start: main entrance on Floor 2
+    const start = startNode ?? getEntrance();
     if (!start) return;
     computeRoute(start, destNode);
-  }, [graph, startNode, destNode, computeRoute]);
+  }, [startNode, destNode, computeRoute, getEntrance]);
 
   // ------ Placement flow handlers ------
   const handleUseMainEntrance = useCallback(() => {
     const dest = destNode ?? externalDestRef.current;
     if (!dest) return;
-    const entrance = findEntrance(graph, graph.floors[0].id);
+    const entrance = getEntrance();
     if (!entrance) return;
     setStartNode(entrance);
     setActiveFloorId(entrance.floorId);
@@ -406,6 +440,15 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
               const points = seg.waypoints
                 .map(([x, y]) => `${toImageX(x, imageWidth)},${toImageY(y, imageHeight)}`)
                 .join(' ');
+              // The last waypoint is where this floor segment leads — mark it
+              // so the user can see the line's direction at a glance.
+              const [endX, endY] = seg.waypoints[seg.waypoints.length - 1];
+              // If there's a later route segment whose start lives on a
+              // different floor, this segment terminates at a transport node
+              // (elevator/stairs). Otherwise it ends at the destination room
+              // and the red dest marker already covers it.
+              const isTransportEnd =
+                routeSegments.indexOf(seg) < routeSegments.length - 1;
               return (
                 <React.Fragment key={idx}>
                   <Polyline
@@ -424,11 +467,30 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
+                  {isTransportEnd && (
+                    <>
+                      <Circle
+                        cx={toImageX(endX, imageWidth)}
+                        cy={toImageY(endY, imageHeight)}
+                        r={7}
+                        fill="#4285F4"
+                        opacity={0.25}
+                      />
+                      <Circle
+                        cx={toImageX(endX, imageWidth)}
+                        cy={toImageY(endY, imageHeight)}
+                        r={4.5}
+                        fill="#4285F4"
+                        stroke="#fff"
+                        strokeWidth={1.5}
+                      />
+                    </>
+                  )}
                 </React.Fragment>
               );
             })}
             {(() => {
-              const sn = startNode ?? (routeSegments.length > 0 ? findEntrance(graph, graph.floors[0].id) : null);
+              const sn = startNode ?? (routeSegments.length > 0 ? getEntrance() : null);
               if (!sn || sn.floorId !== activeFloorId) return null;
               return (
                 <>

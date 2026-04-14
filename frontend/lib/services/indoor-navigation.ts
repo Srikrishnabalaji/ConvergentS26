@@ -70,8 +70,10 @@ export function astar(
     adj.set(n.id, []);
   }
   for (const e of graph.edges) {
-    adj.get(e.from)?.push({ neighborId: e.to, weight: e.weight, edgeId: e.id });
-    adj.get(e.to)?.push({ neighborId: e.from, weight: e.weight, edgeId: e.id });
+    // Use 'distance' field if 'weight' is undefined (newer graphs use distance)
+    const w = (e as any).weight ?? (e as any).distance ?? 1;
+    adj.get(e.from)?.push({ neighborId: e.to, weight: w, edgeId: e.id });
+    adj.get(e.to)?.push({ neighborId: e.from, weight: w, edgeId: e.id });
   }
 
   // Heuristic: Euclidean distance (normalized coords, so scale doesn't matter for ordering)
@@ -90,6 +92,9 @@ export function astar(
   const openSet: string[] = [startId];
   const inOpen = new Set<string>([startId]);
   const closed = new Set<string>();
+
+  console.log(`[A*] Search from "${startNode.label}" (${startId}) to "${endNode.label}" (${endId})`);
+  console.log(`[A*] Start neighbors: ${adj.get(startId)?.length ?? 0} edges`);
 
   const popMin = (): string | undefined => {
     let minIdx = 0;
@@ -141,6 +146,7 @@ export function astar(
     }
   }
 
+  console.log(`[A*] FAILED: No path found. Explored ${closed.size} nodes, ${openSet.length} remaining in queue`);
   return null; // No path found
 }
 

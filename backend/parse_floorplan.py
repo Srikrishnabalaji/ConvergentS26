@@ -35,6 +35,28 @@ def uid(k=7):
 def dist(ax, ay, bx, by):
     return math.hypot(ax - bx, ay - by)
 
+def _point_seg_dist2(px, py, x0, y0, x1, y1):
+    """Squared distance from point (px,py) to segment (x0,y0)-(x1,y1)."""
+    dx, dy = x1 - x0, y1 - y0
+    l2 = dx * dx + dy * dy
+    if l2 == 0.0:
+        return (px - x0) ** 2 + (py - y0) ** 2
+    t = ((px - x0) * dx + (py - y0) * dy) / l2
+    if t < 0.0:
+        t = 0.0
+    elif t > 1.0:
+        t = 1.0
+    qx, qy = x0 + t * dx, y0 + t * dy
+    return (px - qx) ** 2 + (py - qy) ** 2
+
+def _point_near_any_seg(px, py, segs, max_d):
+    """True if (px,py) is within max_d of any segment in segs."""
+    md2 = max_d * max_d
+    for (x0, y0, x1, y1) in segs:
+        if _point_seg_dist2(px, py, x0, y0, x1, y1) <= md2:
+            return True
+    return False
+
 # ── node / edge ───────────────────────────────────────────────────────────────
 
 class Node:
@@ -102,6 +124,9 @@ def render_occupancy_grid(page, scale=3, min_seg_len=1, wall_thickness=7):
     # The raster catches pillars and structural elements correctly but walls
     # are broken/dotted due to 0.06pt stroke width. Draw vector line segments
     # on top to ensure walls are continuous and solid.
+    # We also collect wall_segs (in PDF coords) for later door validation:
+    # a real door's swing arc center should sit on or very near a wall stroke.
+    wall_segs = []  # list of (x0, y0, x1, y1) in PDF coordinates
     MAX_LINE_FRAC = 0.70
     for path in page.get_drawings():
         items = path.get("items", [])
@@ -121,6 +146,7 @@ def render_occupancy_grid(page, scale=3, min_seg_len=1, wall_thickness=7):
                     continue
                 cv2.line(grid, (int(x0), int(y0)), (int(x1), int(y1)),
                          0, wall_thickness)
+                wall_segs.append((item[1].x, item[1].y, item[2].x, item[2].y))
             elif item[0] == "re":
                 rect = item[1]
                 rx0, ry0 = int(rect.x0 * scale), int(rect.y0 * scale)
@@ -140,24 +166,75 @@ def render_occupancy_grid(page, scale=3, min_seg_len=1, wall_thickness=7):
     grid = cv2.bitwise_not(wall_mask)
 
     # === Step 2: Detect doors from vector data ===
-    # A door is a quarter-circle arc in a path that also contains straight
-    # lines (the door leaf). Pillars/circles have no attached lines.
+    # A real door has a very specific signature in the PDF:
+    #   1. The path contains exactly ONE quarter-circle arc (the swing).
+    #   2. The path contains a "leaf" line whose length ≈ arc radius.
+    #   3. One leaf endpoint sits at the arc center (= hinge), the other
+    #      at one of the arc endpoints (= open position).
+    #   4. The arc center sits on or very near a wall stroke (doors are
+    #      cut into walls; cabinet doors / fixture arcs are not).
+    # Loose detection (any-arc + any-line) misfires on cabinets, sinks,
+    # decorative arcs and punches phantom holes through walls.
     door_arcs = []
     for path in page.get_drawings():
         items = path.get("items", [])
-        has_lines = any(i[0] == "l" for i in items)
-        if not has_lines:
-            continue  # no leaf lines → not a door
+
+        # Collect arcs (quarter circles) and lines from this path
+        path_arcs = []
+        path_lines = []
         for item in items:
-            if item[0] != "c":
+            if item[0] == "c":
+                p0 = (item[1].x, item[1].y)
+                p1 = (item[2].x, item[2].y)
+                p2 = (item[3].x, item[3].y)
+                p3 = (item[4].x, item[4].y)
+                ok, acx, acy, ar = is_quarter_circle(p0, p1, p2, p3)
+                if ok and 4 <= ar <= 70:
+                    path_arcs.append((acx, acy, ar, p0, p3))
+            elif item[0] == "l":
+                path_lines.append((item[1].x, item[1].y,
+                                   item[2].x, item[2].y))
+
+        # Check 1: exactly one quarter-circle arc
+        if len(path_arcs) != 1:
+            continue
+        if not path_lines:
+            continue
+
+        acx, acy, ar, p0, p3 = path_arcs[0]
+        leaf_tol = max(2.0, ar * 0.15)  # endpoint coincidence tolerance
+        len_tol_lo = ar * 0.75
+        len_tol_hi = ar * 1.25
+
+        # Checks 2 + 3: find a leaf line of length≈r whose endpoints
+        # match (arc center) and (one of the arc endpoints)
+        leaf_found = False
+        for (lx0, ly0, lx1, ly1) in path_lines:
+            llen = math.hypot(lx1 - lx0, ly1 - ly0)
+            if llen < len_tol_lo or llen > len_tol_hi:
                 continue
-            p0 = (item[1].x, item[1].y)
-            p1 = (item[2].x, item[2].y)
-            p2 = (item[3].x, item[3].y)
-            p3 = (item[4].x, item[4].y)
-            ok, acx, acy, ar = is_quarter_circle(p0, p1, p2, p3)
-            if ok and 4 <= ar <= 70:
-                door_arcs.append((acx, acy, ar, p0, p3))
+            # one endpoint at hinge (arc center)?
+            d_a_center = dist(lx0, ly0, acx, acy)
+            d_b_center = dist(lx1, ly1, acx, acy)
+            if d_a_center < leaf_tol:
+                ox, oy = lx1, ly1  # other end
+            elif d_b_center < leaf_tol:
+                ox, oy = lx0, ly0
+            else:
+                continue
+            # other endpoint near p0 or p3?
+            if (dist(ox, oy, p0[0], p0[1]) < leaf_tol or
+                    dist(ox, oy, p3[0], p3[1]) < leaf_tol):
+                leaf_found = True
+                break
+        if not leaf_found:
+            continue
+
+        # Check 4: arc center near a wall stroke (within ~5 PDF pts)
+        if not _point_near_any_seg(acx, acy, wall_segs, max_d=5.0):
+            continue
+
+        door_arcs.append((acx, acy, ar, p0, p3))
 
     # Group arcs by center
     arc_centers = []
@@ -1356,11 +1433,12 @@ def build_floor_edges_bfs(nodes, grid, scale, pw, ph):
         path_b.reverse()
         full_path_px = path_a + path_b
 
-        # Center the path in corridors (pull waypoints toward corridor centers)
-        # Small radius to avoid crossing thin walls
-        full_path_px = _center_path(full_path_px, dist_transform, grid, radius=5)
+        # Center the path in corridors. Larger radius pulls waypoints
+        # firmly toward corridor centerlines so paths don't hug a wall on
+        # one side of the BFS Voronoi boundary.
+        full_path_px = _center_path(full_path_px, dist_transform, grid, radius=15)
 
-        # LOS-greedy subsampling in pixel space — guarantees no wall crossing
+        # LOS-greedy subsampling — guarantees no Bresenham pixel crosses a wall.
         subsampled_px = _los_subsample(grid, full_path_px)
 
         # Convert to normalized coords
