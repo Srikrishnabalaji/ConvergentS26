@@ -401,24 +401,6 @@ export default function FriendsScreen() {
             <Text style={styles.pinSheetTitle}>Drop Your Pin</Text>
             <Text style={styles.pinSheetSub}>Set your location and choose who can see it.</Text>
 
-            {/*<Text style={styles.pinLabel}>Building</Text>
-            <TextInput
-              style={styles.pinInput}
-              placeholder="e.g. Engineering Hall"
-              placeholderTextColor="#9ca3af"
-              value={pinBuilding}
-              onChangeText={setPinBuilding}
-            />
-
-            <Text style={styles.pinLabel}>Room</Text>
-            <TextInput
-              style={styles.pinInput}
-              placeholder="e.g. 204"
-              placeholderTextColor="#9ca3af"
-              value={pinRoom}
-              onChangeText={setPinRoom}
-            />*/}
-
             <Text style={styles.pinLabel}>Building</Text>
             <TextInput
               style={styles.pinInput}
@@ -465,22 +447,6 @@ export default function FriendsScreen() {
               editable={!!pinBuilding.trim()}
             />
             {pinRoomSuggestions.length > 0 && (
-              // <View style={styles.pinSuggestionList}>
-              //   {pinRoomSuggestions.map((node: any) => (
-              //     <TouchableOpacity
-              //       key={node.id}
-              //       style={styles.pinSuggestionRow}
-              //       onPress={() => {
-              //         setPinRoom(node.label);
-              //         setPinRoomSuggestions([]);
-              //       }}
-              //     >
-              //       <MaterialIcons name="meeting-room" size={14} color="#0B617E" style={{ marginRight: 6 }} />
-              //       <Text style={styles.pinSuggestionText}>{node.label}</Text>
-              //     </TouchableOpacity>
-              //   ))}
-              // </View>
-
               <View style={styles.pinSuggestionList}>
                 {pinBuildingSuggestions.map((item: any) => (
                   <TouchableOpacity

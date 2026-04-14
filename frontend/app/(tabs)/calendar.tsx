@@ -161,7 +161,12 @@ export default function CalendarScreen() {
     if (groupData) setGroups(groupData);
 
     //events
-    const { data: eventData, error } = await supabase.from('events').select('*');
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data: eventData, error } = await supabase
+      .from('events')
+      .select('*')
+      .eq('user_id', user?.id);
+
     if (error) {
       console.error('Error fetching events:', error);
       return;
@@ -464,8 +469,10 @@ export default function CalendarScreen() {
     }
 
     const eventId = editingEventId ? editingEventId : Date.now().toString();
+    const { data: { user } } = await supabase.auth.getUser();
     const dbEventData = {
       id: eventId,
+      user_id: user?.id,
       event_date: selectedDate,
       title: newEvent.title,
       location: combinedLocation,
@@ -646,67 +653,6 @@ export default function CalendarScreen() {
                   onChangeText={(text) => setNewEvent(prev => ({...prev, title: text }))}
                   placeholderTextColor="#999"
                 />
-
-                {/* <Text style={styles.label}>Building</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="e.g., GDC, ECJ, PCL..."
-                  value={newEvent.building}
-                  onChangeText={handleBuildingChange}
-                  placeholderTextColor="#999"
-                />
-                {locationSearching && (
-                  <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: 4 }}>Searching...</Text>
-                )}
-                {locationSuggestions.length > 0 && (
-                  <View style={styles.suggestionsContainer}>
-                    {locationSuggestions.map((item) => (
-                      <TouchableOpacity
-                        key={item.id}
-                        style={styles.suggestionRow}
-                        onPress={() => handleSelectBuildingSuggestion(item)}
-                      >
-                        <MaterialIcons name="location-on" size={16} color={PRIMARY} style={{ marginRight: 8 }} />
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.suggestionName} numberOfLines={1}>{item.name}</Text>
-                          {item.address ? (
-                            <Text style={styles.suggestionAddress} numberOfLines={1}>{item.address}</Text>
-                          ) : null}
-                        </View>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                )}
-
-                <Text style={styles.label}>Room <Text style={{ color: '#94a3b8', fontWeight: '400' }}>(optional)</Text></Text>
-                <TextInput
-                  style={[styles.input, !newEvent.building.trim() && { opacity: 0.5 }]}
-                  placeholder="e.g., 2.216, 0132..."
-                  value={newEvent.room}
-                  onChangeText={handleRoomChange}
-                  placeholderTextColor="#999"
-                  editable={!!newEvent.building.trim()}
-                />
-                {roomSearching && (
-                  <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: 4 }}>Searching rooms...</Text>
-                )}
-                {roomSuggestions.length > 0 && (
-                  <View style={styles.suggestionsContainer}>
-                    {roomSuggestions.map((node) => (
-                      <TouchableOpacity
-                        key={node.id}
-                        style={styles.suggestionRow}
-                        onPress={() => handleSelectRoomSuggestion(node)}
-                      >
-                        <MaterialIcons name="meeting-room" size={16} color={PRIMARY} style={{ marginRight: 8 }} />
-                        <Text style={styles.suggestionName}>{node.label}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                )}
-                {roomError ? (
-                  <Text style={{ color: '#dc2626', fontSize: 12, marginTop: 4 }}>{roomError}</Text>
-                ) : null} */}
 
                 <Text style={styles.label}>Location</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
