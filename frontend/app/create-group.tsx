@@ -9,6 +9,7 @@ import {
   Switch,
   Alert,
   StyleSheet,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -24,9 +25,24 @@ export default function CreateGroupScreen() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [isCampusOrg, setIsCampusOrg] = useState(false);
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [hasPassword, setHasPassword] = useState(false);
+  const [joinPassword, setJoinPassword] = useState('');
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Password only applies to public friend groups
+  const showPasswordOption = !isPrivate && !isCampusOrg;
+  // When user switches to campus org or private, clear password settings
+  function handleCampusToggle(val: boolean) {
+    setIsCampusOrg(val);
+    if (val) { setHasPassword(false); setJoinPassword(''); }
+  }
+  function handlePrivateToggle(val: boolean) {
+    setIsPrivate(val);
+    if (val) { setHasPassword(false); setJoinPassword(''); }
+  }
 
   async function pickImage() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -52,6 +68,10 @@ export default function CreateGroupScreen() {
       Alert.alert('Error', 'Please enter a group name.');
       return;
     }
+    if (showPasswordOption && hasPassword && !joinPassword.trim()) {
+      Alert.alert('Error', 'Please enter a join password, or disable the password option.');
+      return;
+    }
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       Alert.alert('Error', 'You must be signed in to create a group.');
@@ -63,49 +83,52 @@ export default function CreateGroupScreen() {
 
     try {
       if (imageUri && imageBase64) {
-          const ext = 'jpg';
-          const path = `${user.id}/${Date.now()}.${ext}`;
-          const { error: uploadError } = await supabase.storage
+        const ext = 'jpg';
+        const path = `${user.id}/${Date.now()}.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from('group-images')
+          .upload(path, decode(imageBase64), {
+            contentType: `image/${ext}`,
+            upsert: false,
+          });
+        if (!uploadError) {
+          const { data: urlData } = supabase.storage
             .from('group-images')
-            .upload(path, decode(imageBase64), {
-              contentType: `image/${ext}`,
-              upsert: false,
-            });
-          if (!uploadError) {
-            const { data: urlData } = supabase.storage
-              .from('group-images')
-              .getPublicUrl(path);
-            imageUrl = urlData.publicUrl;
-          }
+            .getPublicUrl(path);
+          imageUrl = urlData.publicUrl;
         }
+      }
 
       const type = isCampusOrg ? 'campus_org' : 'friends';
-      const { data: group, error: groupError } = await supabase
-        .from('groups')
-        .insert({
-          name: name.trim(),
-          description: description.trim() || null,
-          image_url: imageUrl,
-          type,
-        })
-        .select('id')
-        .single();
+      const effectivePassword =
+        showPasswordOption && hasPassword && joinPassword.trim()
+          ? joinPassword.trim()
+          : null;
 
-      if (groupError) {
-        Alert.alert('Failed to create group', groupError.message);
+      // Use an RPC so the creator is added as admin atomically and RLS
+      // doesn't block the implicit RETURNING on private groups.
+      const { data: rpcData, error: groupError } = await supabase.rpc('create_group', {
+        p_name: name.trim(),
+        p_description: description.trim() || null,
+        p_image_url: imageUrl,
+        p_type: type,
+        p_is_private: isPrivate,
+        p_join_password: effectivePassword,
+      });
+
+      if (groupError || rpcData?.error) {
+        Alert.alert('Failed to create group', groupError?.message ?? rpcData?.error ?? 'Something went wrong.');
         setLoading(false);
         return;
       }
 
-      const { error: memberError } = await supabase.from('group_members').insert({
-        group_id: group.id,
-        user_id: user.id,
-        role: 'admin',
-      });
-
-      if (memberError) {
-        Alert.alert('Group created', 'There was an issue adding you as admin. Try refreshing.');
+      if (isPrivate) {
+        Alert.alert(
+          'Private group created',
+          'Your join code is ready. You can view and share it from the group\'s edit screen.',
+        );
       }
+
       router.back();
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Something went wrong.');
@@ -116,30 +139,37 @@ export default function CreateGroupScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View className="flex-1 px-5 pt-2">
-        <View className="flex-row items-center justify-between mb-6">
-          <TouchableOpacity onPress={() => router.back()} className="p-2 -ml-2">
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.closeBtn}>
             <MaterialIcons name="close" size={28} color="#0B617E" />
           </TouchableOpacity>
-          <Text className="text-[20px] font-semibold text-primary">Create Group</Text>
-          <View className="w-10" />
+          <Text style={styles.headerTitle}>Create Group</Text>
+          <View style={styles.headerSpacer} />
         </View>
 
-        <TouchableOpacity
-          className="w-[100px] h-[100px] rounded-xl bg-gray-200 items-center justify-center mb-6 self-center"
-          onPress={pickImage}
-        >
+        {/* Image picker */}
+        <TouchableOpacity style={styles.imagePicker} onPress={pickImage}>
           {imageUri ? (
-            <Image source={{ uri: imageUri }} className="w-full h-full rounded-xl" />
+            <Image source={{ uri: imageUri }} style={styles.imagePreview} />
           ) : (
-            <MaterialIcons name="add-a-photo" size={36} color="#666" />
+            <>
+              <MaterialIcons name="add-a-photo" size={32} color="#94a3b8" />
+              <Text style={styles.imagePickerLabel}>Add photo</Text>
+            </>
           )}
         </TouchableOpacity>
 
-        <View className="gap-1.5 mb-4">
-          <Text className="text-sm font-semibold text-gray-700">Group name</Text>
+        {/* Group name */}
+        <View style={styles.fieldGroup}>
+          <Text style={styles.fieldLabel}>Group name</Text>
           <TextInput
-            className="border border-gray-200 rounded-[10px] px-4 py-3.5 text-base text-black bg-gray-50"
+            style={styles.textInput}
             placeholder="e.g. Calc Study Group"
             placeholderTextColor="#999"
             value={name}
@@ -147,10 +177,11 @@ export default function CreateGroupScreen() {
           />
         </View>
 
-        <View className="gap-1.5 mb-4">
-          <Text className="text-sm font-semibold text-gray-700">Description (optional)</Text>
+        {/* Description */}
+        <View style={styles.fieldGroup}>
+          <Text style={styles.fieldLabel}>Description (optional)</Text>
           <TextInput
-            className="border border-gray-200 rounded-[10px] px-4 py-3.5 text-base text-black bg-gray-50 min-h-[100px]"
+            style={[styles.textInput, styles.textInputMulti]}
             placeholder="What is this group about?"
             placeholderTextColor="#999"
             value={description}
@@ -160,37 +191,98 @@ export default function CreateGroupScreen() {
           />
         </View>
 
-        <View className="flex-row items-center justify-between py-3 border-b border-gray-100">
-          <Text className="text-base font-medium text-gray-800">This is a campus org</Text>
-          <View className="w-[52] items-center justify-center">
-            <Switch
-              value={isCampusOrg}
-              onValueChange={setIsCampusOrg}
-              trackColor={switchTrackColors}
-              thumbColor={switchThumbColor(isCampusOrg, PRIMARY_HEX)}
-              ios_backgroundColor={switchTrackColors.false}
-            />
+        {/* Divider label */}
+        <Text style={styles.sectionLabel}>GROUP SETTINGS</Text>
+
+        {/* Campus org toggle */}
+        <View style={styles.toggleRow}>
+          <View style={styles.toggleTextCol}>
+            <Text style={styles.toggleTitle}>Campus organization</Text>
+            <Text style={styles.toggleSubtitle}>New members must be approved by an admin</Text>
           </View>
+          <Switch
+            value={isCampusOrg}
+            onValueChange={handleCampusToggle}
+            trackColor={switchTrackColors}
+            thumbColor={switchThumbColor(isCampusOrg, PRIMARY_HEX)}
+            ios_backgroundColor={switchTrackColors.false}
+          />
         </View>
 
+        {/* Private toggle */}
+        <View style={styles.toggleRow}>
+          <View style={styles.toggleTextCol}>
+            <Text style={styles.toggleTitle}>Private group</Text>
+            <Text style={styles.toggleSubtitle}>Not discoverable — members join with a unique code</Text>
+          </View>
+          <Switch
+            value={isPrivate}
+            onValueChange={handlePrivateToggle}
+            trackColor={switchTrackColors}
+            thumbColor={switchThumbColor(isPrivate, PRIMARY_HEX)}
+            ios_backgroundColor={switchTrackColors.false}
+          />
+        </View>
+
+        {/* Private group info banner */}
+        {isPrivate && (
+          <View style={styles.infoBanner}>
+            <MaterialIcons name="key" size={16} color="#0B617E" style={{ marginRight: 8, marginTop: 1 }} />
+            <Text style={styles.infoBannerText}>
+              A unique join code will be automatically generated. View and share it from the group's edit screen after creating.
+            </Text>
+          </View>
+        )}
+
+        {/* Password option (public friend groups only) */}
+        {showPasswordOption && (
+          <>
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleTextCol}>
+                <Text style={styles.toggleTitle}>Require a password to join</Text>
+                <Text style={styles.toggleSubtitle}>Members must enter a password you set</Text>
+              </View>
+              <Switch
+                value={hasPassword}
+                onValueChange={setHasPassword}
+                trackColor={switchTrackColors}
+                thumbColor={switchThumbColor(hasPassword, PRIMARY_HEX)}
+                ios_backgroundColor={switchTrackColors.false}
+              />
+            </View>
+            {hasPassword && (
+              <View style={[styles.fieldGroup, { marginTop: 4 }]}>
+                <Text style={styles.fieldLabel}>Join password</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Choose a password for your group"
+                  placeholderTextColor="#999"
+                  value={joinPassword}
+                  onChangeText={setJoinPassword}
+                  autoCapitalize="none"
+                />
+              </View>
+            )}
+          </>
+        )}
+
+        {/* Create button */}
         <TouchableOpacity
-          className="bg-primary rounded-[10px] py-4 items-center mt-8"
+          style={[styles.createBtn, loading && { opacity: 0.7 }]}
           onPress={handleCreate}
           disabled={loading}
-          style={loading ? { opacity: 0.7 } : undefined}
         >
           {loading ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text className="text-white text-base font-semibold">Create</Text>
+            <Text style={styles.createBtnText}>Create Group</Text>
           )}
         </TouchableOpacity>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
-// Decode base64 to ArrayBuffer for Supabase upload
 function decode(base64: string): ArrayBuffer {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -201,8 +293,78 @@ function decode(base64: string): ArrayBuffer {
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#fff',
+  safeArea: { flex: 1, backgroundColor: '#fff' },
+  scrollContent: { paddingHorizontal: 20, paddingBottom: 48, paddingTop: 8 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 24,
   },
+  closeBtn: { padding: 4, marginLeft: -4 },
+  headerTitle: { fontSize: 20, fontWeight: '600', color: '#0B617E' },
+  headerSpacer: { width: 36 },
+  imagePicker: {
+    width: 100,
+    height: 100,
+    borderRadius: 20,
+    backgroundColor: '#f1f5f9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    marginBottom: 24,
+    overflow: 'hidden',
+  },
+  imagePreview: { width: '100%', height: '100%' },
+  imagePickerLabel: { fontSize: 12, color: '#94a3b8', marginTop: 6, fontWeight: '500' },
+  fieldGroup: { marginBottom: 16 },
+  fieldLabel: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 6 },
+  textInput: {
+    borderWidth: 1.5,
+    borderColor: '#e5e7eb',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: '#111827',
+    backgroundColor: '#fafafa',
+  },
+  textInputMulti: { minHeight: 96, paddingTop: 12 },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#94a3b8',
+    letterSpacing: 1,
+    marginBottom: 4,
+    marginTop: 8,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#f1f5f9',
+  },
+  toggleTextCol: { flex: 1, marginRight: 12 },
+  toggleTitle: { fontSize: 15, fontWeight: '500', color: '#111827' },
+  toggleSubtitle: { fontSize: 12, color: '#94a3b8', marginTop: 2, lineHeight: 17 },
+  infoBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: 'rgba(11, 97, 126, 0.07)',
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  infoBannerText: { flex: 1, fontSize: 13, color: '#0B617E', lineHeight: 19, fontWeight: '500' },
+  createBtn: {
+    backgroundColor: '#0B617E',
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: 28,
+  },
+  createBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });

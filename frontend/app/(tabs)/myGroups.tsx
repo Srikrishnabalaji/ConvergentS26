@@ -11,6 +11,9 @@ import {
   StyleSheet,
   Modal,
   Pressable,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -18,7 +21,7 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { supabase } from '@/lib/supabase';
 
 type GroupType = 'friends' | 'campus_org';
-type TabType = 'my_groups' | 'friends' | 'campus_org';
+type PanelType = 'my_groups' | 'discover';
 
 type Group = {
   id: string;
@@ -26,6 +29,8 @@ type Group = {
   description: string | null;
   image_url: string | null;
   type: GroupType;
+  is_private: boolean;
+  has_join_password: boolean;
   member_count?: number;
 };
 
@@ -46,36 +51,47 @@ function initialsFromName(name: string | null | undefined): string {
   return name.slice(0, 2).toUpperCase();
 }
 
+// ---------------------------------------------------------------------------
+// GroupCard
+// ---------------------------------------------------------------------------
+
 function GroupCard({
   group,
   subtitle,
-  showActiveDot,
   onJoin,
-  isJoinable,
-  joining,
+  joinLabel,
+  joinLoading,
   canEdit,
   onEdit,
   onPress,
   onLeave,
   leaving,
+  isPending,
+  onCancelRequest,
+  cancellingRequest,
 }: {
   group: Group;
   subtitle: string;
-  showActiveDot?: boolean;
   onJoin?: () => void;
-  isJoinable?: boolean;
-  joining?: boolean;
+  joinLabel?: string;
+  joinLoading?: boolean;
   canEdit?: boolean;
   onEdit?: () => void;
   onPress?: () => void;
   onLeave?: () => void;
   leaving?: boolean;
+  isPending?: boolean;
+  onCancelRequest?: () => void;
+  cancellingRequest?: boolean;
 }) {
   const typeLabel = group.type === 'campus_org' ? 'Campus' : 'Friends';
-  const metaLine = `${typeLabel} · ${subtitle}`;
+  const privateLabel = group.is_private ? ' · Private' : '';
+  const metaLine = `${typeLabel}${privateLabel} · ${subtitle}`;
+  const effectiveJoinLabel = joinLabel ?? 'Join';
 
-  const hasActions =
-    (canEdit && onEdit) || onLeave || (isJoinable && onJoin);
+  const showJoinBtn = !!onJoin && !isPending;
+  const showPendingState = isPending;
+  const hasActions = (canEdit && onEdit) || onLeave || showJoinBtn || showPendingState;
 
   const mainContent = (
     <>
@@ -87,13 +103,18 @@ function GroupCard({
         </View>
       )}
       <View style={cardStyles.cardTextCol}>
-        <Text style={cardStyles.cardTitle} numberOfLines={2}>
-          {group.name}
-        </Text>
-        <View style={cardStyles.metaRow}>
-          {showActiveDot && <View style={cardStyles.activeDot} />}
-          <Text style={cardStyles.cardMeta}>{metaLine}</Text>
+        <View style={cardStyles.nameLockRow}>
+          <Text style={cardStyles.cardTitle} numberOfLines={1}>
+            {group.name}
+          </Text>
+          {group.is_private && (
+            <MaterialIcons name="lock" size={13} color="#94a3b8" style={{ marginLeft: 5, marginTop: 1 }} />
+          )}
+          {!group.is_private && group.has_join_password && (
+            <MaterialIcons name="key" size={13} color="#94a3b8" style={{ marginLeft: 5, marginTop: 1 }} />
+          )}
         </View>
+        <Text style={cardStyles.cardMeta} numberOfLines={1}>{metaLine}</Text>
       </View>
     </>
   );
@@ -114,15 +135,13 @@ function GroupCard({
             <View style={cardStyles.cardTouchableLeft}>{mainContent}</View>
           )}
 
-          {hasActions ? (
+          {hasActions && (
             <View style={cardStyles.actionsInline}>
               {canEdit && onEdit && (
                 <TouchableOpacity
                   style={cardStyles.btnCompact}
                   onPress={onEdit}
                   activeOpacity={0.7}
-                  accessibilityRole="button"
-                  accessibilityLabel="Edit group"
                 >
                   <MaterialIcons name="edit" size={15} color={PRIMARY} style={{ marginRight: 3 }} />
                   <Text style={cardStyles.btnCompactText}>Edit</Text>
@@ -130,15 +149,10 @@ function GroupCard({
               )}
               {onLeave && (
                 <TouchableOpacity
-                  style={[
-                    cardStyles.btnCompact,
-                    cardStyles.btnCompactLeave,
-                  ]}
+                  style={[cardStyles.btnCompact, cardStyles.btnCompactLeave]}
                   onPress={onLeave}
                   disabled={leaving}
                   activeOpacity={0.7}
-                  accessibilityRole="button"
-                  accessibilityLabel="Leave group"
                 >
                   {leaving ? (
                     <ActivityIndicator size="small" color="#dc2626" />
@@ -150,30 +164,55 @@ function GroupCard({
                   )}
                 </TouchableOpacity>
               )}
-              {isJoinable && onJoin && (
+              {showJoinBtn && (
                 <TouchableOpacity
                   style={[
                     cardStyles.btnCompactJoin,
-                    joining && { opacity: 0.65 },
+                    effectiveJoinLabel === 'Request' && cardStyles.btnCompactRequest,
+                    joinLoading && { opacity: 0.65 },
                   ]}
                   onPress={onJoin}
-                  disabled={joining}
+                  disabled={joinLoading}
                   activeOpacity={0.85}
-                  accessibilityRole="button"
-                  accessibilityLabel="Join group"
                 >
-                  {joining ? (
+                  {joinLoading ? (
                     <ActivityIndicator size="small" color="#fff" />
                   ) : (
                     <>
-                      <MaterialIcons name="group-add" size={15} color="#fff" style={{ marginRight: 4 }} />
-                      <Text style={cardStyles.btnCompactJoinText}>Join</Text>
+                      <MaterialIcons
+                        name={effectiveJoinLabel === 'Request' ? 'send' : 'group-add'}
+                        size={14}
+                        color="#fff"
+                        style={{ marginRight: 4 }}
+                      />
+                      <Text style={cardStyles.btnCompactJoinText}>{effectiveJoinLabel}</Text>
                     </>
                   )}
                 </TouchableOpacity>
               )}
+              {showPendingState && (
+                <View style={cardStyles.pendingWrap}>
+                  <View style={cardStyles.btnPending}>
+                    <MaterialIcons name="schedule" size={13} color="#92400e" style={{ marginRight: 3 }} />
+                    <Text style={cardStyles.btnPendingText}>Pending</Text>
+                  </View>
+                  {onCancelRequest && (
+                    <TouchableOpacity
+                      style={cardStyles.btnCancelRequest}
+                      onPress={onCancelRequest}
+                      disabled={cancellingRequest}
+                    >
+                      {cancellingRequest ? (
+                        <ActivityIndicator size="small" color="#64748b" />
+                      ) : (
+                        <Text style={cardStyles.btnCancelRequestText}>Cancel</Text>
+                      )}
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
             </View>
-          ) : null}
+          )}
         </View>
       </View>
     </View>
@@ -191,14 +230,8 @@ const cardStyles = StyleSheet.create({
     shadowRadius: 14,
     elevation: 2,
   },
-  cardMain: {
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  cardMainRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
+  cardMain: { paddingHorizontal: 16, paddingVertical: 14 },
+  cardMainRow: { flexDirection: 'row', alignItems: 'center' },
   cardTouchableLeft: {
     flex: 1,
     flexDirection: 'row',
@@ -206,10 +239,8 @@ const cardStyles = StyleSheet.create({
     minWidth: 0,
     marginRight: 8,
   },
-  cardTextCol: {
-    flex: 1,
-    minWidth: 0,
-  },
+  cardTextCol: { flex: 1, minWidth: 0 },
+  nameLockRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 3 },
   actionsInline: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -221,26 +252,10 @@ const cardStyles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#0f172a',
-    marginBottom: 3,
     lineHeight: 22,
+    flexShrink: 1,
   },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  activeDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: PRIMARY,
-    marginRight: 6,
-  },
-  cardMeta: {
-    fontSize: 13,
-    color: '#64748b',
-    flex: 1,
-    fontWeight: '500',
-  },
+  cardMeta: { fontSize: 13, color: '#64748b', fontWeight: '500' },
   avatarImg: {
     width: 50,
     height: 50,
@@ -265,19 +280,9 @@ const cardStyles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: 'rgba(11, 97, 126, 0.07)',
   },
-  btnCompactText: {
-    color: PRIMARY,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  btnCompactLeave: {
-    backgroundColor: '#fef2f2',
-  },
-  btnCompactLeaveText: {
-    color: '#dc2626',
-    fontSize: 13,
-    fontWeight: '600',
-  },
+  btnCompactText: { color: PRIMARY, fontSize: 13, fontWeight: '600' },
+  btnCompactLeave: { backgroundColor: '#fef2f2' },
+  btnCompactLeaveText: { color: '#dc2626', fontSize: 13, fontWeight: '600' },
   btnCompactJoin: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -286,32 +291,238 @@ const cardStyles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: PRIMARY,
   },
-  btnCompactJoinText: {
-    color: '#fff',
-    fontSize: 13,
+  btnCompactRequest: { backgroundColor: PRIMARY },
+  btnCompactJoinText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  pendingWrap: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  btnPending: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: '#fef3c7',
+  },
+  btnPendingText: { color: '#92400e', fontSize: 12, fontWeight: '700' },
+  btnCancelRequest: {
+    paddingVertical: 5,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    backgroundColor: '#f1f5f9',
+  },
+  btnCancelRequestText: { color: '#64748b', fontSize: 11, fontWeight: '600' },
+});
+
+// ---------------------------------------------------------------------------
+// Small reusable Input Modal (code join + password prompt)
+// ---------------------------------------------------------------------------
+
+function InputModal({
+  visible,
+  title,
+  subtitle,
+  placeholder,
+  value,
+  onChangeText,
+  onConfirm,
+  confirmLabel,
+  confirming,
+  onCancel,
+  secureText,
+  icon,
+}: {
+  visible: boolean;
+  title: string;
+  subtitle?: string;
+  placeholder: string;
+  value: string;
+  onChangeText: (v: string) => void;
+  onConfirm: () => void;
+  confirmLabel: string;
+  confirming: boolean;
+  onCancel: () => void;
+  secureText?: boolean;
+  icon?: React.ComponentProps<typeof MaterialIcons>['name'];
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={onCancel}>
+      <Pressable style={modalInputStyles.overlay} onPress={onCancel}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={modalInputStyles.kvContainer}
+        >
+          <Pressable style={modalInputStyles.sheet} onPress={(e) => e.stopPropagation()}>
+            {icon && (
+              <View style={modalInputStyles.iconCircle}>
+                <MaterialIcons name={icon} size={28} color={PRIMARY} />
+              </View>
+            )}
+            <Text style={modalInputStyles.title}>{title}</Text>
+            {subtitle && <Text style={modalInputStyles.subtitle}>{subtitle}</Text>}
+            <TextInput
+              style={modalInputStyles.input}
+              placeholder={placeholder}
+              placeholderTextColor="#94a3b8"
+              value={value}
+              onChangeText={onChangeText}
+              secureTextEntry={secureText}
+              autoCapitalize={secureText ? 'none' : 'characters'}
+              returnKeyType="done"
+              onSubmitEditing={onConfirm}
+              autoFocus
+            />
+            <TouchableOpacity
+              style={[modalInputStyles.confirmBtn, confirming && { opacity: 0.7 }]}
+              onPress={onConfirm}
+              disabled={confirming}
+            >
+              {confirming ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={modalInputStyles.confirmBtnText}>{confirmLabel}</Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity style={modalInputStyles.cancelBtn} onPress={onCancel}>
+              <Text style={modalInputStyles.cancelBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Pressable>
+    </Modal>
+  );
+}
+
+const modalInputStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+  },
+  kvContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  sheet: {
+    width: '100%',
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    paddingHorizontal: 24,
+    paddingTop: 28,
+    paddingBottom: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  iconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 18,
+    backgroundColor: 'rgba(11, 97, 126, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    alignSelf: 'center',
+  },
+  title: {
+    fontSize: 21,
+    fontWeight: '700',
+    color: '#0f172a',
+    textAlign: 'center',
+    marginBottom: 8,
+    letterSpacing: -0.3,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: '#64748b',
+    textAlign: 'center',
+    lineHeight: 21,
+    marginBottom: 20,
+    paddingHorizontal: 4,
+  },
+  input: {
+    borderWidth: 1.5,
+    borderColor: '#e2e8f0',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 15,
+    fontSize: 18,
+    color: '#0f172a',
+    backgroundColor: '#f8fafc',
+    textAlign: 'center',
+    letterSpacing: 3,
+    marginBottom: 20,
     fontWeight: '700',
   },
+  confirmBtn: {
+    backgroundColor: PRIMARY,
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  confirmBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  cancelBtn: {
+    backgroundColor: '#f1f5f9',
+    borderRadius: 14,
+    paddingVertical: 15,
+    alignItems: 'center',
+  },
+  cancelBtnText: { color: '#64748b', fontSize: 15, fontWeight: '600' },
 });
+
+// ---------------------------------------------------------------------------
+// Main screen
+// ---------------------------------------------------------------------------
 
 export default function MyGroupsScreen() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<TabType>('my_groups');
+  const [activePanel, setActivePanel] = useState<PanelType>('my_groups');
+
+  // Groups data
   const [myGroups, setMyGroups] = useState<Group[]>([]);
   const [discoverGroups, setDiscoverGroups] = useState<Group[]>([]);
   const [adminGroupIds, setAdminGroupIds] = useState<Set<string>>(new Set());
   const [editorGroupIds, setEditorGroupIds] = useState<Set<string>>(new Set());
+  const [pendingRequestIds, setPendingRequestIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+
+  // Action loading states
   const [joiningId, setJoiningId] = useState<string | null>(null);
+  const [requestingId, setRequestingId] = useState<string | null>(null);
+  const [cancellingRequestId, setCancellingRequestId] = useState<string | null>(null);
   const [leavingId, setLeavingId] = useState<string | null>(null);
+
+  // Group detail modal
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [detailMembers, setDetailMembers] = useState<DetailMember[]>([]);
   const [detailMembersLoading, setDetailMembersLoading] = useState(false);
 
+  // Discover search
+  const [discoverSearch, setDiscoverSearch] = useState('');
+
+  // Join-by-code modal
+  const [showCodeModal, setShowCodeModal] = useState(false);
+  const [codeInput, setCodeInput] = useState('');
+  const [joiningByCode, setJoiningByCode] = useState(false);
+
+  // Password prompt modal
+  const [passwordGroup, setPasswordGroup] = useState<Group | null>(null);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [joiningWithPassword, setJoiningWithPassword] = useState(false);
+
+  // -------------------------------------------------------------------------
+  // isMemberOfSelected: used to gate the member list in the detail modal
+  // -------------------------------------------------------------------------
   const isMemberOfSelected = useMemo(() => {
     if (!selectedGroup) return false;
     return myGroups.some((g) => g.id === selectedGroup.id);
   }, [selectedGroup, myGroups]);
 
+  // -------------------------------------------------------------------------
+  // Load members when the detail modal opens (only for own groups)
+  // -------------------------------------------------------------------------
   useEffect(() => {
     if (!selectedGroup || !isMemberOfSelected) {
       setDetailMembers([]);
@@ -337,111 +548,178 @@ export default function MyGroupsScreen() {
         .select('id, full_name, avatar_url')
         .in('id', ids);
       if (cancelled) return;
-      setDetailMembersLoading(false);
       const byId = new Map((profs ?? []).map((p) => [p.id, p]));
       const merged: DetailMember[] = rows.map((r) => {
         const p = byId.get(r.user_id);
         return {
           user_id: r.user_id,
           role: r.role,
-          profiles: p
-            ? { full_name: p.full_name, avatar_url: p.avatar_url }
-            : null,
+          profiles: p ? { full_name: p.full_name, avatar_url: p.avatar_url } : null,
         };
       });
       const order: Record<string, number> = { admin: 0, editor: 1, member: 2 };
       merged.sort((a, b) => (order[a.role] ?? 3) - (order[b.role] ?? 3));
+      setDetailMembersLoading(false);
       setDetailMembers(merged);
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [selectedGroup, isMemberOfSelected]);
 
+  // -------------------------------------------------------------------------
+  // fetchGroups
+  // -------------------------------------------------------------------------
   const fetchGroups = useCallback(async () => {
+    setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) { setLoading(false); return; }
 
-    const { data: memberRows } = await supabase
-      .from('group_members')
-      .select('group_id, role')
-      .eq('user_id', user.id);
-    const myGroupIds = new Set((memberRows ?? []).map((r) => r.group_id));
-    const adminIds = new Set(
-      (memberRows ?? []).filter((r) => r.role === 'admin').map((r) => r.group_id)
+    const [memberRes, groupsRes, countRes, requestsRes] = await Promise.all([
+      supabase.from('group_members').select('group_id, role').eq('user_id', user.id),
+      supabase.from('groups').select('id, name, description, image_url, type, is_private, has_join_password'),
+      supabase.rpc('get_group_member_counts'),
+      supabase.rpc('get_my_join_requests'),
+    ]);
+
+    const memberRows = memberRes.data ?? [];
+    const allGroups = groupsRes.data ?? [];
+
+    const myGroupIds = new Set(memberRows.map((r) => r.group_id));
+    const adminIds = new Set(memberRows.filter((r) => r.role === 'admin').map((r) => r.group_id));
+    const editorIds = new Set(memberRows.filter((r) => r.role === 'editor').map((r) => r.group_id));
+    const pendingIds = new Set(
+      (requestsRes.data ?? [])
+        .filter((r: { group_id: string; status: string }) => r.status === 'pending')
+        .map((r: { group_id: string; status: string }) => r.group_id)
     );
-    const editorIds = new Set(
-      (memberRows ?? []).filter((r) => r.role === 'editor').map((r) => r.group_id)
-    );
+
     setAdminGroupIds(adminIds);
     setEditorGroupIds(editorIds);
-
-    const { data: allGroups } = await supabase
-      .from('groups')
-      .select('id, name, description, image_url, type');
-
-    if (!allGroups) {
-      setMyGroups([]);
-      setDiscoverGroups([]);
-      setLoading(false);
-      return;
-    }
+    setPendingRequestIds(pendingIds);
 
     let countByGroup: Record<string, number> = {};
-    const { data: countRows, error: countError } = await supabase.rpc('get_group_member_counts');
-    if (!countError && countRows) {
-      countByGroup = countRows.reduce(
+    if (!countRes.error && countRes.data) {
+      countByGroup = countRes.data.reduce(
         (acc: Record<string, number>, row: { group_id: string; member_count: unknown }) => {
           acc[row.group_id] = Number(row.member_count ?? 0);
           return acc;
         },
         {}
       );
-    } else {
-      const { data: memberCounts } = await supabase.from('group_members').select('group_id');
-      countByGroup = (memberCounts ?? []).reduce(
-        (acc: Record<string, number>, row: { group_id: string }) => {
-          acc[row.group_id] = (acc[row.group_id] ?? 0) + 1;
-          return acc;
-        },
-        {}
-      );
     }
 
-    const withCounts = allGroups.map((g) => ({
-      ...g,
-      member_count: countByGroup[g.id] ?? 0,
-    }));
-
-    const mine = withCounts.filter((g) => myGroupIds.has(g.id));
-    const discover = withCounts.filter((g) => !myGroupIds.has(g.id));
-
-    setMyGroups(mine);
-    setDiscoverGroups(discover);
+    const withCounts = allGroups.map((g) => ({ ...g, member_count: countByGroup[g.id] ?? 0 }));
+    setMyGroups(withCounts.filter((g) => myGroupIds.has(g.id)) as Group[]);
+    setDiscoverGroups(withCounts.filter((g) => !myGroupIds.has(g.id)) as Group[]);
     setLoading(false);
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      fetchGroups();
-    }, [fetchGroups])
-  );
+  useFocusEffect(useCallback(() => { fetchGroups(); }, [fetchGroups]));
 
-  async function handleJoin(groupId: string) {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+  // -------------------------------------------------------------------------
+  // Join routing: decide the right path based on group type + settings
+  // -------------------------------------------------------------------------
+  function handleJoinPress(group: Group) {
+    if (joiningId || requestingId) return;
+    if (group.type === 'campus_org') {
+      handleRequestJoin(group.id);
+    } else if (group.has_join_password) {
+      setPasswordGroup(group);
+      setPasswordInput('');
+    } else {
+      handleDirectFriendJoin(group.id);
+    }
+  }
+
+  async function handleDirectFriendJoin(groupId: string) {
     setJoiningId(groupId);
-    const { error } = await supabase.from('group_members').insert({
-      group_id: groupId,
-      user_id: user.id,
-      role: 'member',
+    const { data, error } = await supabase.rpc('join_friend_group', {
+      p_group_id: groupId,
+      p_password: null,
     });
     setJoiningId(null);
+    if (error || data?.error) {
+      Alert.alert('Error', error?.message ?? data?.error ?? 'Could not join group.');
+    } else {
+      fetchGroups();
+    }
+  }
+
+  async function handleJoinWithPassword() {
+    if (!passwordGroup) return;
+    setJoiningWithPassword(true);
+    const { data, error } = await supabase.rpc('join_friend_group', {
+      p_group_id: passwordGroup.id,
+      p_password: passwordInput.trim(),
+    });
+    setJoiningWithPassword(false);
+    if (error || data?.error) {
+      if (data?.error === 'incorrect_password') {
+        Alert.alert('Wrong password', 'The password you entered is incorrect. Try again.');
+      } else {
+        Alert.alert('Error', error?.message ?? data?.error ?? 'Could not join group.');
+      }
+      return;
+    }
+    setPasswordGroup(null);
+    setPasswordInput('');
+    fetchGroups();
+  }
+
+  async function handleRequestJoin(groupId: string) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    setRequestingId(groupId);
+    const { error } = await supabase.from('group_join_requests').insert({
+      group_id: groupId,
+      user_id: user.id,
+    });
+    setRequestingId(null);
     if (error) {
       Alert.alert('Error', error.message);
     } else {
       fetchGroups();
     }
+  }
+
+  async function handleCancelRequest(groupId: string) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    setCancellingRequestId(groupId);
+    const { error } = await supabase
+      .from('group_join_requests')
+      .delete()
+      .eq('group_id', groupId)
+      .eq('user_id', user.id);
+    setCancellingRequestId(null);
+    if (error) {
+      Alert.alert('Error', error.message);
+    } else {
+      fetchGroups();
+    }
+  }
+
+  async function handleJoinByCode() {
+    const code = codeInput.trim().toUpperCase();
+    if (!code) return;
+    setJoiningByCode(true);
+    const { data, error } = await supabase.rpc('join_group_by_code', { p_code: code });
+    setJoiningByCode(false);
+    if (error || data?.error) {
+      if (data?.error === 'invalid_code') {
+        Alert.alert('Invalid code', 'No private group found with that code. Double-check and try again.');
+      } else if (data?.error === 'already_member') {
+        Alert.alert('Already a member', `You're already in ${data?.group_name ?? 'that group'}.`);
+        setShowCodeModal(false);
+        setCodeInput('');
+      } else {
+        Alert.alert('Error', error?.message ?? data?.error ?? 'Something went wrong.');
+      }
+      return;
+    }
+    setShowCodeModal(false);
+    setCodeInput('');
+    Alert.alert('Joined!', `You've joined ${data?.group_name ?? 'the group'}.`);
+    fetchGroups();
   }
 
   async function handleLeave(groupId: string) {
@@ -462,31 +740,70 @@ export default function MyGroupsScreen() {
     }
   }
 
-  const filteredMyGroups =
-    activeTab === 'my_groups'
-      ? myGroups
-      : myGroups.filter((g) => g.type === activeTab);
-  const filteredDiscover =
-    activeTab === 'my_groups'
-      ? discoverGroups
-      : discoverGroups.filter((g) => g.type === activeTab);
+  // -------------------------------------------------------------------------
+  // Derived / filtered data
+  // -------------------------------------------------------------------------
+  const myFriendGroups = useMemo(() => myGroups.filter((g) => g.type === 'friends'), [myGroups]);
+  const myCampusGroups = useMemo(() => myGroups.filter((g) => g.type === 'campus_org'), [myGroups]);
 
+  const searchedDiscover = useMemo(() => {
+    const q = discoverSearch.trim().toLowerCase();
+    if (!q) return discoverGroups;
+    return discoverGroups.filter((g) => g.name.toLowerCase().startsWith(q));
+  }, [discoverGroups, discoverSearch]);
+
+  const discoverFriendGroups = useMemo(() => searchedDiscover.filter((g) => g.type === 'friends'), [searchedDiscover]);
+  const discoverCampusGroups = useMemo(() => searchedDiscover.filter((g) => g.type === 'campus_org'), [searchedDiscover]);
+
+  const hasDiscoverSearch = discoverSearch.trim().length > 0;
+  const noSearchResults = hasDiscoverSearch && discoverFriendGroups.length === 0 && discoverCampusGroups.length === 0;
+
+  // -------------------------------------------------------------------------
+  // Render
+  // -------------------------------------------------------------------------
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
+
+      {/* Join-by-code modal */}
+      <InputModal
+        visible={showCodeModal}
+        title="Join with Code"
+        subtitle="Enter the private group's unique code to join it."
+        placeholder="e.g. A3BF19CD"
+        value={codeInput}
+        onChangeText={setCodeInput}
+        onConfirm={handleJoinByCode}
+        confirmLabel="Join Group"
+        confirming={joiningByCode}
+        onCancel={() => { setShowCodeModal(false); setCodeInput(''); }}
+        icon="key"
+      />
+
+      {/* Password prompt modal */}
+      <InputModal
+        visible={!!passwordGroup}
+        title="Password Required"
+        subtitle={`Enter the password to join "${passwordGroup?.name ?? ''}".`}
+        placeholder="Group password"
+        value={passwordInput}
+        onChangeText={setPasswordInput}
+        onConfirm={handleJoinWithPassword}
+        confirmLabel="Join"
+        confirming={joiningWithPassword}
+        onCancel={() => { setPasswordGroup(null); setPasswordInput(''); }}
+        secureText
+        icon="lock"
+      />
+
+      {/* Group detail modal */}
       <Modal
         visible={!!selectedGroup}
         transparent
         animationType="slide"
         onRequestClose={() => setSelectedGroup(null)}
       >
-        <Pressable
-          style={styles.modalOverlay}
-          onPress={() => setSelectedGroup(null)}
-        >
-          <Pressable
-            style={styles.modalSheet}
-            onPress={(e) => e.stopPropagation()}
-          >
+        <Pressable style={styles.modalOverlay} onPress={() => setSelectedGroup(null)}>
+          <Pressable style={styles.modalSheet} onPress={(e) => e.stopPropagation()}>
             {selectedGroup && (
               <ScrollView
                 showsVerticalScrollIndicator={false}
@@ -495,10 +812,7 @@ export default function MyGroupsScreen() {
                 <View style={styles.modalHandle} />
                 <View style={styles.modalHero}>
                   {selectedGroup.image_url ? (
-                    <Image
-                      source={{ uri: selectedGroup.image_url }}
-                      style={styles.modalHeroImage}
-                    />
+                    <Image source={{ uri: selectedGroup.image_url }} style={styles.modalHeroImage} />
                   ) : (
                     <View style={styles.modalHeroPlaceholder}>
                       <MaterialIcons name="groups" size={40} color="#94a3b8" />
@@ -512,7 +826,7 @@ export default function MyGroupsScreen() {
                         selectedGroup.type === 'campus_org'
                           ? { backgroundColor: 'rgba(11, 97, 126, 0.12)' }
                           : { backgroundColor: '#f1f5f9' },
-                        { marginRight: 10, marginBottom: 4 },
+                        { marginRight: 8, marginBottom: 4 },
                       ]}
                     >
                       <Text
@@ -524,6 +838,12 @@ export default function MyGroupsScreen() {
                         {selectedGroup.type === 'campus_org' ? 'Campus org' : 'Friend group'}
                       </Text>
                     </View>
+                    {selectedGroup.is_private && (
+                      <View style={[styles.modalBadge, { backgroundColor: '#f1f5f9', marginRight: 8, marginBottom: 4 }]}>
+                        <MaterialIcons name="lock" size={12} color="#64748b" style={{ marginRight: 4 }} />
+                        <Text style={[styles.modalBadgeText, { color: '#64748b' }]}>Private</Text>
+                      </View>
+                    )}
                     <Text style={[styles.modalMetaMuted, { marginBottom: 4 }]}>
                       {selectedGroup.member_count ?? 0} members
                     </Text>
@@ -544,9 +864,7 @@ export default function MyGroupsScreen() {
                   {!isMemberOfSelected ? (
                     <View style={styles.modalHintBox}>
                       <MaterialIcons name="lock-outline" size={18} color="#94a3b8" style={{ marginRight: 8 }} />
-                      <Text style={styles.modalHintText}>
-                        Join this group to see who is in it.
-                      </Text>
+                      <Text style={styles.modalHintText}>Join this group to see who is in it.</Text>
                     </View>
                   ) : detailMembersLoading ? (
                     <View style={styles.modalLoading}>
@@ -555,7 +873,7 @@ export default function MyGroupsScreen() {
                   ) : detailMembers.length === 0 ? (
                     <Text style={styles.modalPlaceholder}>No members loaded.</Text>
                   ) : (
-                    <View style={styles.memberList}>
+                    <View>
                       {detailMembers.map((m, index) => (
                         <View
                           key={m.user_id}
@@ -565,10 +883,7 @@ export default function MyGroupsScreen() {
                           ]}
                         >
                           {m.profiles?.avatar_url ? (
-                            <Image
-                              source={{ uri: m.profiles.avatar_url }}
-                              style={styles.memberAvatarImg}
-                            />
+                            <Image source={{ uri: m.profiles.avatar_url }} style={styles.memberAvatarImg} />
                           ) : (
                             <View style={styles.memberAvatarFallback}>
                               <Text style={styles.memberAvatarInitials}>
@@ -616,123 +931,218 @@ export default function MyGroupsScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* ── Header ── */}
       <View style={styles.banner}>
         <View style={styles.headerBlock}>
-          <View>
-            <Text style={styles.pageTitle}>Groups</Text>
-            {/* <Text style={styles.pageSubtitle}>Communities you&apos;re in and discover</Text> */}
-          </View>
+          <Text style={styles.pageTitle}>Groups</Text>
           <TouchableOpacity
             style={styles.headerIconBtnPrimary}
             onPress={() => router.push('/create-group' as never)}
             accessibilityRole="button"
             accessibilityLabel="Create group"
-            accessibilityHint="Starts creating a new group"
           >
             <MaterialIcons name="add" size={22} color={PRIMARY} />
           </TouchableOpacity>
         </View>
       </View>
 
+      {/* ── Main content ── */}
       <View style={styles.contentContainer}>
+        {/* 2-tab segment */}
+        <View style={styles.segmentWrap}>
+          {(['my_groups', 'discover'] as const).map((panel) => {
+            const labels: Record<PanelType, string> = {
+              my_groups: 'Your Groups',
+              discover: 'Discover',
+            };
+            const active = activePanel === panel;
+            return (
+              <TouchableOpacity
+                key={panel}
+                style={[styles.segmentItem, active && styles.segmentItemActive]}
+                onPress={() => setActivePanel(panel)}
+                activeOpacity={0.85}
+              >
+                <Text style={[styles.segmentLabel, active && styles.segmentLabelActive]}>
+                  {labels[panel]}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
         <ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
           refreshControl={
             <RefreshControl refreshing={loading} onRefresh={fetchGroups} tintColor={PRIMARY} />
           }
         >
-          <View style={styles.segmentWrap}>
-            {(['my_groups', 'friends', 'campus_org'] as const).map((tab) => {
-              const labels = {
-                my_groups: 'All',
-                friends: 'Friends',
-                campus_org: 'Campus',
-              };
-              const active = activeTab === tab;
-              return (
+          {/* ═══════════════════════════════════════════════════════════════
+              PANEL A — YOUR GROUPS
+          ═══════════════════════════════════════════════════════════════ */}
+          {activePanel === 'my_groups' && (
+            <>
+              {loading && myGroups.length === 0 ? (
+                <View style={styles.loadingBlock}>
+                  <ActivityIndicator color={PRIMARY} size="large" />
+                </View>
+              ) : (
+                <>
+                  {/* Friend Groups sub-section */}
+                  <SectionHeader title="Friend Groups" count={myFriendGroups.length} />
+                  {myFriendGroups.length === 0 ? (
+                    <EmptyCard
+                      icon="people"
+                      title="No friend groups yet"
+                      subtitle="Create one with the + button or join one in Discover."
+                    />
+                  ) : (
+                    myFriendGroups.map((group) => (
+                      <GroupCard
+                        key={group.id}
+                        group={group}
+                        subtitle={`${group.member_count ?? 0} members`}
+                        canEdit={adminGroupIds.has(group.id) || editorGroupIds.has(group.id)}
+                        onEdit={() => router.push(`/edit-group/${group.id}` as never)}
+                        onPress={() => setSelectedGroup(group)}
+                        onLeave={!adminGroupIds.has(group.id) ? () => !leavingId && handleLeave(group.id) : undefined}
+                        leaving={leavingId === group.id}
+                      />
+                    ))
+                  )}
+
+                  {/* Campus Groups sub-section */}
+                  <SectionHeader title="Campus Groups" count={myCampusGroups.length} topSpacing />
+                  {myCampusGroups.length === 0 ? (
+                    <EmptyCard
+                      icon="school"
+                      title="No campus groups yet"
+                      subtitle="Request to join a campus org in Discover."
+                    />
+                  ) : (
+                    myCampusGroups.map((group) => (
+                      <GroupCard
+                        key={group.id}
+                        group={group}
+                        subtitle={`${group.member_count ?? 0} members`}
+                        canEdit={adminGroupIds.has(group.id) || editorGroupIds.has(group.id)}
+                        onEdit={() => router.push(`/edit-group/${group.id}` as never)}
+                        onPress={() => setSelectedGroup(group)}
+                        onLeave={!adminGroupIds.has(group.id) ? () => !leavingId && handleLeave(group.id) : undefined}
+                        leaving={leavingId === group.id}
+                      />
+                    ))
+                  )}
+                </>
+              )}
+            </>
+          )}
+
+          {/* ═══════════════════════════════════════════════════════════════
+              PANEL B — DISCOVER
+          ═══════════════════════════════════════════════════════════════ */}
+          {activePanel === 'discover' && (
+            <>
+              {/* Search bar + join-by-code */}
+              <View style={styles.searchRow}>
+                <View style={styles.searchInputWrap}>
+                  <MaterialIcons name="search" size={20} color="#94a3b8" style={{ marginRight: 8 }} />
+                  <TextInput
+                    style={styles.searchInput}
+                    placeholder="Search groups…"
+                    placeholderTextColor="#94a3b8"
+                    value={discoverSearch}
+                    onChangeText={setDiscoverSearch}
+                    returnKeyType="search"
+                    clearButtonMode="while-editing"
+                  />
+                </View>
                 <TouchableOpacity
-                  key={tab}
-                  style={[styles.segmentItem, active && styles.segmentItemActive]}
-                  onPress={() => setActiveTab(tab)}
-                  activeOpacity={0.85}
+                  style={styles.codeBtn}
+                  onPress={() => { setCodeInput(''); setShowCodeModal(true); }}
+                  activeOpacity={0.8}
+                  accessibilityLabel="Join with code"
                 >
-                  <Text style={[styles.segmentLabel, active && styles.segmentLabelActive]}>
-                    {labels[tab]}
-                  </Text>
+                  <MaterialIcons name="key" size={20} color={PRIMARY} />
                 </TouchableOpacity>
-              );
-            })}
-          </View>
+              </View>
 
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Your groups</Text>
-          {!loading && filteredMyGroups.length > 0 ? (
-            <View style={styles.countPill}>
-              <Text style={styles.countPillText}>{filteredMyGroups.length}</Text>
-            </View>
-          ) : null}
-        </View>
-        {loading && myGroups.length === 0 ? (
-          <View style={styles.loadingBlock}>
-            <ActivityIndicator color={PRIMARY} size="large" />
-          </View>
-        ) : filteredMyGroups.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <View style={styles.emptyIconCircle}>
-              <MaterialIcons name="groups" size={32} color="#85b0bf" />
-            </View>
-            <Text style={styles.emptyTitle}>No groups yet</Text>
-            <Text style={styles.emptySubtitle}>
-              Create a group with the + button or browse invites below.
-            </Text>
-          </View>
-        ) : (
-          filteredMyGroups.map((group) => (
-            <GroupCard
-              key={group.id}
-              group={group}
-              subtitle={`${group.member_count ?? 0} members`}
-              canEdit={adminGroupIds.has(group.id) || editorGroupIds.has(group.id)}
-              onEdit={() => router.push(`/edit-group/${group.id}` as never)}
-              onPress={() => setSelectedGroup(group)}
-              onLeave={!adminGroupIds.has(group.id) ? () => !leavingId && handleLeave(group.id) : undefined}
-              leaving={leavingId === group.id}
-            />
-          ))
-        )}
+              {loading && discoverGroups.length === 0 ? (
+                <View style={styles.loadingBlock}>
+                  <ActivityIndicator color={PRIMARY} size="large" />
+                </View>
+              ) : noSearchResults ? (
+                <EmptyCard
+                  icon="search-off"
+                  title={`No results for "${discoverSearch.trim()}"`}
+                  subtitle="Try a different search term."
+                />
+              ) : (
+                <>
+                  {/* Friend groups in discover */}
+                  {(!hasDiscoverSearch || discoverFriendGroups.length > 0) && (
+                    <>
+                      <SectionHeader title="Friend Groups" count={discoverFriendGroups.length} />
+                      {discoverFriendGroups.length === 0 ? (
+                        <EmptyCard
+                          icon="people-outline"
+                          title="No friend groups to join"
+                          subtitle="All available friend groups will appear here."
+                        />
+                      ) : (
+                        discoverFriendGroups.map((group) => (
+                          <GroupCard
+                            key={group.id}
+                            group={group}
+                            subtitle={`${group.member_count ?? 0} members`}
+                            onJoin={() => handleJoinPress(group)}
+                            joinLabel="Join"
+                            joinLoading={joiningId === group.id}
+                            onPress={() => setSelectedGroup(group)}
+                          />
+                        ))
+                      )}
+                    </>
+                  )}
 
-        <View style={[styles.sectionHeader, { marginTop: 8 }]}>
-          <Text style={styles.sectionTitle}>Discover</Text>
-          {!loading && filteredDiscover.length > 0 ? (
-            <View style={styles.countPill}>
-              <Text style={styles.countPillText}>{filteredDiscover.length}</Text>
-            </View>
-          ) : null}
-        </View>
-        {filteredDiscover.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <View style={styles.emptyIconCircle}>
-              <MaterialIcons name="explore" size={30} color="#85b0bf" />
-            </View>
-            <Text style={styles.emptyTitle}>Nothing to join</Text>
-            <Text style={styles.emptySubtitle}>
-              When new groups are available, they will show up here.
-            </Text>
-          </View>
-        ) : (
-          filteredDiscover.map((group) => (
-            <GroupCard
-              key={group.id}
-              group={group}
-              subtitle={`${group.member_count ?? 0} members`}
-              isJoinable
-              onJoin={() => !joiningId && handleJoin(group.id)}
-              joining={joiningId === group.id}
-              onPress={() => setSelectedGroup(group)}
-            />
-          ))
+                  {/* Campus orgs in discover */}
+                  {(!hasDiscoverSearch || discoverCampusGroups.length > 0) && (
+                    <>
+                      <SectionHeader title="Campus Groups" count={discoverCampusGroups.length} topSpacing={!hasDiscoverSearch || discoverFriendGroups.length > 0} />
+                      {discoverCampusGroups.length === 0 ? (
+                        <EmptyCard
+                          icon="school"
+                          title="No campus orgs to join"
+                          subtitle="Available campus organizations will appear here."
+                        />
+                      ) : (
+                        discoverCampusGroups.map((group) => {
+                          const isPending = pendingRequestIds.has(group.id);
+                          return (
+                            <GroupCard
+                              key={group.id}
+                              group={group}
+                              subtitle={`${group.member_count ?? 0} members`}
+                              onJoin={!isPending ? () => handleJoinPress(group) : undefined}
+                              joinLabel="Request"
+                              joinLoading={requestingId === group.id}
+                              isPending={isPending}
+                              onCancelRequest={isPending ? () => handleCancelRequest(group.id) : undefined}
+                              cancellingRequest={cancellingRequestId === group.id}
+                              onPress={() => setSelectedGroup(group)}
+                            />
+                          );
+                        })
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+            </>
           )}
         </ScrollView>
       </View>
@@ -740,11 +1150,45 @@ export default function MyGroupsScreen() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Small helper components
+// ---------------------------------------------------------------------------
+
+function SectionHeader({ title, count, topSpacing }: { title: string; count: number; topSpacing?: boolean }) {
+  return (
+    <View style={[styles.sectionHeader, topSpacing && { marginTop: 8 }]}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {count > 0 && (
+        <View style={styles.countPill}>
+          <Text style={styles.countPillText}>{count}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+function EmptyCard({ icon, title, subtitle }: {
+  icon: React.ComponentProps<typeof MaterialIcons>['name'];
+  title: string;
+  subtitle: string;
+}) {
+  return (
+    <View style={styles.emptyCard}>
+      <View style={styles.emptyIconCircle}>
+        <MaterialIcons name={icon} size={30} color="#85b0bf" />
+      </View>
+      <Text style={styles.emptyTitle}>{title}</Text>
+      <Text style={styles.emptySubtitle}>{subtitle}</Text>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Styles
+// ---------------------------------------------------------------------------
+
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#0B617E',
-  },
+  safeArea: { flex: 1, backgroundColor: '#0B617E' },
   banner: {
     backgroundColor: '#0B617E',
     paddingHorizontal: 20,
@@ -757,36 +1201,15 @@ const styles = StyleSheet.create({
     elevation: 8,
     zIndex: 1,
   },
-  contentContainer: {
-    flex: 1,
-    backgroundColor: '#f5f7f9',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 22,
-    paddingBottom: 48,
-  },
+  contentContainer: { flex: 1, backgroundColor: '#f5f7f9' },
+  scrollView: { flex: 1 },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 48 },
   headerBlock: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 0,
   },
-  pageTitle: {
-    fontSize: 40,
-    fontWeight: '800',
-    color: '#fff',
-    letterSpacing: -1,
-  },
-  pageSubtitle: {
-    marginTop: 4,
-    fontSize: 15,
-    color: 'rgba(255, 255, 255, 0.7)',
-    maxWidth: 220,
-  },
+  pageTitle: { fontSize: 40, fontWeight: '800', color: '#fff', letterSpacing: -1 },
   headerIconBtnPrimary: {
     width: 36,
     height: 36,
@@ -802,37 +1225,34 @@ const styles = StyleSheet.create({
   },
   segmentWrap: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(11, 97, 126, 0.1)',
-    borderRadius: 14,
-    padding: 3,
-    marginBottom: 22,
+    backgroundColor: '#f5f7f9',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 4,
+    gap: 8,
   },
   segmentItem: {
     flex: 1,
     paddingVertical: 10,
     alignItems: 'center',
     borderRadius: 12,
+    backgroundColor: 'rgba(11, 97, 126, 0.07)',
   },
   segmentItemActive: {
     backgroundColor: PRIMARY,
     shadowColor: PRIMARY,
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
+    shadowOpacity: 0.22,
     shadowRadius: 6,
     elevation: 3,
   },
-  segmentLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#64748b',
-  },
-  segmentLabelActive: {
-    color: '#fff',
-  },
+  segmentLabel: { fontSize: 14, fontWeight: '600', color: '#64748b' },
+  segmentLabelActive: { color: '#fff' },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: 12,
+    marginTop: 20,
   },
   sectionTitle: {
     fontSize: 13,
@@ -848,22 +1268,15 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 10,
   },
-  countPillText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: PRIMARY,
-  },
-  loadingBlock: {
-    paddingVertical: 48,
-    alignItems: 'center',
-  },
+  countPillText: { fontSize: 12, fontWeight: '700', color: PRIMARY },
+  loadingBlock: { paddingVertical: 48, alignItems: 'center' },
   emptyCard: {
     backgroundColor: '#fff',
     borderRadius: 20,
-    paddingVertical: 36,
-    paddingHorizontal: 24,
+    paddingVertical: 28,
+    paddingHorizontal: 20,
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 8,
     shadowColor: '#0f172a',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
@@ -871,27 +1284,54 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   emptyIconCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 22,
+    width: 64,
+    height: 64,
+    borderRadius: 20,
     backgroundColor: 'rgba(11, 97, 126, 0.06)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
   },
-  emptyTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#334155',
-    marginBottom: 6,
-  },
+  emptyTitle: { fontSize: 16, fontWeight: '600', color: '#334155', marginBottom: 5 },
   emptySubtitle: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#94a3b8',
     textAlign: 'center',
-    lineHeight: 21,
-    maxWidth: 260,
+    lineHeight: 19,
+    maxWidth: 240,
   },
+  // Search
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 16,
+    marginBottom: 4,
+    gap: 10,
+  },
+  searchInputWrap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    shadowColor: '#0B617E',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 1,
+  },
+  searchInput: { flex: 1, fontSize: 15, color: '#0f172a', fontWeight: '500', letterSpacing: 0 },
+  codeBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: 'rgba(11, 97, 126, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Detail modal
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.5)',
@@ -910,9 +1350,7 @@ const styles = StyleSheet.create({
     shadowRadius: 24,
     elevation: 16,
   },
-  modalScrollContent: {
-    paddingBottom: 36,
-  },
+  modalScrollContent: { paddingBottom: 36 },
   modalHandle: {
     alignSelf: 'center',
     width: 40,
@@ -959,19 +1397,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 20,
   },
-  modalBadgeText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  modalMetaMuted: {
-    fontSize: 14,
-    color: '#64748b',
-    fontWeight: '500',
-  },
+  modalBadgeText: { fontSize: 13, fontWeight: '600' },
+  modalMetaMuted: { fontSize: 14, color: '#64748b', fontWeight: '500' },
   modalSection: {
     marginHorizontal: 20,
     marginBottom: 16,
@@ -987,31 +1420,11 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginBottom: 10,
   },
-  modalBodyText: {
-    fontSize: 15,
-    color: '#334155',
-    lineHeight: 23,
-  },
-  modalPlaceholder: {
-    fontSize: 14,
-    color: '#94a3b8',
-    fontStyle: 'italic',
-  },
-  modalHintBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  modalHintText: {
-    flex: 1,
-    fontSize: 14,
-    color: '#64748b',
-    lineHeight: 20,
-  },
-  modalLoading: {
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  memberList: {},
+  modalBodyText: { fontSize: 15, color: '#334155', lineHeight: 23 },
+  modalPlaceholder: { fontSize: 14, color: '#94a3b8', fontStyle: 'italic' },
+  modalHintBox: { flexDirection: 'row', alignItems: 'center' },
+  modalHintText: { flex: 1, fontSize: 14, color: '#64748b', lineHeight: 20 },
+  modalLoading: { paddingVertical: 16, alignItems: 'center' },
   memberRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1035,17 +1448,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  memberAvatarInitials: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: PRIMARY,
-  },
-  memberName: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '500',
-    color: '#0f172a',
-  },
+  memberAvatarInitials: { fontSize: 14, fontWeight: '700', color: PRIMARY },
+  memberName: { flex: 1, fontSize: 15, fontWeight: '500', color: '#0f172a' },
   roleBadge: {
     paddingHorizontal: 10,
     paddingVertical: 4,
@@ -1073,11 +1477,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
-  modalPrimaryBtnText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
+  modalPrimaryBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
   modalCloseBtn: {
     marginHorizontal: 20,
     paddingVertical: 14,
@@ -1085,9 +1485,5 @@ const styles = StyleSheet.create({
     backgroundColor: '#f1f5f9',
     borderRadius: 14,
   },
-  modalCloseBtnText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#64748b',
-  },
+  modalCloseBtnText: { fontSize: 16, fontWeight: '600', color: '#64748b' },
 });
