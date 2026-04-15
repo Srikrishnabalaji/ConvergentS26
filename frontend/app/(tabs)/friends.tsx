@@ -48,11 +48,14 @@ export default function FriendsScreen() {
 
   const [myFriends, setMyFriends]     = useState<Friend[]>([]);
   const [addedMe, setAddedMe]         = useState<Friend[]>([]);
+  const [pendingOutgoing, setPendingOutgoing] = useState<Friend[]>([]);
   const [findFriends, setFindFriends] = useState<Friend[]>([]);
   const [addedIds, setAddedIds]       = useState<Set<string>>(new Set());
   // Tracks existing friends/pending so find-friends search can exclude them
   const [knownIds, setKnownIds]       = useState<Set<string>>(new Set());
   const [findLoading, setFindLoading] = useState(false);
+  /** Profile rows returned by the last find-friends query (before knownIds filter) */
+  const [findSearchRawCount, setFindSearchRawCount] = useState(0);
 
   // IDs of friends I am currently sharing MY pin with
   const [sharedWithIds, setSharedWithIds] = useState<Set<string>>(new Set());
@@ -92,10 +95,14 @@ export default function FriendsScreen() {
   // -------------------------------------------------------------------------
   // Fetch everything
   // -------------------------------------------------------------------------
-  const fetchAll = useCallback(async () => {
-    setLoading(true);
+  const fetchAll = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true;
+    if (!silent) setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setLoading(false); return; }
+    if (!user) {
+      if (!silent) setLoading(false);
+      return;
+    }
 
     try {
       // -- Accepted friends (both directions) --------------------------------
@@ -119,8 +126,8 @@ export default function FriendsScreen() {
       });
 
       const allFriends: Friend[] = [
-        ...(sentAccepted ?? []).map((r: any) => toFriend(r.profiles)),
-        ...(receivedAccepted ?? []).map((r: any) => toFriend(r.profiles)),
+        ...(sentAccepted ?? []).filter((r: any) => r.profiles?.id).map((r: any) => toFriend(r.profiles)),
+        ...(receivedAccepted ?? []).filter((r: any) => r.profiles?.id).map((r: any) => toFriend(r.profiles)),
       ];
       setMyFriends(allFriends);
 
@@ -149,25 +156,32 @@ export default function FriendsScreen() {
         .eq('friend_id', user.id)
         .eq('status', 'pending');
 
-      setAddedMe((pendingToMe ?? []).map((item: any) => ({
+      setAddedMe((pendingToMe ?? []).filter((item: any) => item.profiles?.id).map((item: any) => ({
         id: item.profiles.id,
         name: item.profiles.full_name ?? 'Unknown',
       })));
 
       // -- Find friends: just build the knownIds set here; actual search is query-driven --
       const knownIds = new Set<string>([
-        ...(sentAccepted ?? []).map((f: any) => f.profiles.id),
-        ...(receivedAccepted ?? []).map((f: any) => f.profiles.id),
-        ...(pendingToMe ?? []).map((f: any) => f.profiles.id),
+        ...(sentAccepted ?? []).map((f: any) => f.profiles?.id).filter(Boolean),
+        ...(receivedAccepted ?? []).map((f: any) => f.profiles?.id).filter(Boolean),
+        ...(pendingToMe ?? []).map((f: any) => f.profiles?.id).filter(Boolean),
       ]);
 
       const { data: pendingSent } = await supabase
         .from('friends')
-        .select('friend_id')
+        .select('friend_id, profiles!friend_id(id, full_name)')
         .eq('user_id', user.id)
         .eq('status', 'pending');
 
       (pendingSent ?? []).forEach((r: any) => knownIds.add(r.friend_id));
+
+      setPendingOutgoing(
+        (pendingSent ?? []).map((r: any) => ({
+          id: r.profiles?.id ?? r.friend_id,
+          name: r.profiles?.full_name ?? 'Unknown',
+        }))
+      );
       
       setKnownIds(knownIds);
       knownIdsRef.current = knownIds;
@@ -178,7 +192,7 @@ export default function FriendsScreen() {
     } catch (err) {
       console.error(err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
@@ -198,6 +212,7 @@ export default function FriendsScreen() {
     // Show nothing until the user starts typing
     if (!trimmed) {
       setFindFriends([]);
+      setFindSearchRawCount(0);
       setFindLoading(false);
       return;
     }
@@ -216,9 +231,10 @@ export default function FriendsScreen() {
         .ilike('full_name', `%${trimmed}%`)
         .limit(30);
 
+      const raw = data ?? [];
+      setFindSearchRawCount(raw.length);
       setFindFriends(
-        (data ?? [])
-          //.filter((u: any) => !knownIds.has(u.id))
+        raw
           .filter((u: any) => !knownIdsRef.current.has(u.id))
           .map((u: any) => ({ id: u.id, name: u.full_name ?? 'Unknown' }))
       );
@@ -230,12 +246,23 @@ export default function FriendsScreen() {
     };
   }, [search, activeTab]);
 
+  // When relationships finish loading (or change), drop people who are already friends / pending
+  // from find results — avoids stale rows if search ran before fetchAll completed.
+  useEffect(() => {
+    if (activeTab !== 'find_friends') return;
+    setFindFriends((prev) => prev.filter((u) => !knownIds.has(u.id)));
+  }, [knownIds, activeTab]);
+
   // -------------------------------------------------------------------------
   // Search filtering
   // -------------------------------------------------------------------------
   const q = search.trim().toLowerCase();
   const filteredMyFriends = useMemo(() => myFriends.filter(f => f.name.toLowerCase().includes(q)), [myFriends, q]);
   const filteredAddedMe   = useMemo(() => addedMe.filter(f   => f.name.toLowerCase().includes(q)), [addedMe, q]);
+  const filteredPendingOutgoing = useMemo(
+    () => pendingOutgoing.filter(f => f.name.toLowerCase().includes(q)),
+    [pendingOutgoing, q]
+  );
   // findFriends is already filtered server-side by the live search effect
 
   // -------------------------------------------------------------------------
@@ -249,6 +276,7 @@ export default function FriendsScreen() {
     if (accepted) setMyFriends(prev => [...prev, accepted]);
     const { error } = await supabase.from('friends').update({ status: 'accepted' }).match({ user_id: id, friend_id: user.id });
     if (error) Alert.alert('Error', 'Could not accept request.');
+    else void fetchAll({ silent: true });
   }
 
   async function handleDismiss(id: string) {
@@ -257,6 +285,7 @@ export default function FriendsScreen() {
     setAddedMe(prev => prev.filter(f => f.id !== id));
     const { error } = await supabase.from('friends').delete().match({ user_id: id, friend_id: user.id });
     if (error) Alert.alert('Error', 'Could not decline request.');
+    else void fetchAll({ silent: true });
   }
 
   async function handleAddFriend(id: string) {
@@ -267,7 +296,55 @@ export default function FriendsScreen() {
     if (error) {
       setAddedIds(prev => { const n = new Set(prev); n.delete(id); return n; });
       Alert.alert('Error', 'Could not send friend request.');
+      return;
     }
+    setFindFriends(prev => prev.filter(f => f.id !== id));
+    void fetchAll({ silent: true });
+  }
+
+  async function handleCancelOutgoingRequest(friend: Friend) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    setPendingOutgoing(prev => prev.filter(f => f.id !== friend.id));
+    setAddedIds(prev => { const n = new Set(prev); n.delete(friend.id); return n; });
+    const { error } = await supabase.from('friends').delete().match({ user_id: user.id, friend_id: friend.id });
+    if (error) Alert.alert('Error', 'Could not cancel request.');
+    void fetchAll({ silent: true });
+  }
+
+  function confirmRemoveFriend(friend: Friend) {
+    Alert.alert(
+      'Remove friend',
+      `Remove ${friend.name} from your friends? Location sharing with them will stop.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Remove', style: 'destructive', onPress: () => void handleRemoveFriend(friend.id) },
+      ]
+    );
+  }
+
+  async function handleRemoveFriend(friendId: string) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { error: errA } = await supabase
+      .from('friends')
+      .delete()
+      .match({ user_id: user.id, friend_id: friendId });
+    const { error: errB } = await supabase
+      .from('friends')
+      .delete()
+      .match({ user_id: friendId, friend_id: user.id });
+
+    if (errA && errB) {
+      Alert.alert('Error', 'Could not remove friend.');
+      return;
+    }
+
+    await supabase.from('location_shares').delete().match({ owner_id: user.id, viewer_id: friendId });
+    await supabase.from('location_shares').delete().match({ owner_id: friendId, viewer_id: user.id });
+
+    void fetchAll({ silent: true });
   }
 
 
@@ -332,7 +409,8 @@ export default function FriendsScreen() {
   function togglePinSelection(id: string) {
     setPinSelectedIds(prev => {
       const n = new Set(prev);
-      n.has(id) ? n.delete(id) : n.add(id);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
       return n;
     });
   }
@@ -365,7 +443,7 @@ export default function FriendsScreen() {
 
       setSharedWithIds(new Set(pinSelectedIds));
       setPinModalVisible(false);
-      fetchAll();
+      void fetchAll({ silent: true });
     } catch (err) {
       Alert.alert('Error', 'Could not save pin.');
       console.error(err);
@@ -384,7 +462,7 @@ export default function FriendsScreen() {
     setPinBuilding('');
     setPinRoom('');
     setPinModalVisible(false);
-    fetchAll();
+    void fetchAll({ silent: true });
   }
 
   // -------------------------------------------------------------------------
@@ -566,7 +644,10 @@ export default function FriendsScreen() {
               style={[styles.tabButton, activeTab === tab && styles.tabButtonActive]}
               //onPress={() => setActiveTab(tab)}
               onPress={() => {
-                if (tab !== 'find_friends') setFindFriends([]);
+                if (tab !== 'find_friends') {
+                  setFindFriends([]);
+                  setFindSearchRawCount(0);
+                }
                 setActiveTab(tab);
               }}
             >
@@ -582,6 +663,32 @@ export default function FriendsScreen() {
         {/* ── MY FRIENDS ── */}
         {!loading && activeTab === 'my_friends' && (
           <>
+            {filteredPendingOutgoing.length > 0 && (
+              <>
+                <Text style={styles.sectionTitle}>OUTGOING REQUESTS</Text>
+                <Text style={styles.sectionHint}>Waiting for them to accept — they are not in your friends list yet.</Text>
+                {filteredPendingOutgoing.map(friend => (
+                  <View key={friend.id} style={styles.friendCard}>
+                    <View style={styles.friendLeft}>
+                      <View style={styles.avatarMuted}>
+                        <Text style={styles.avatarMutedText}>{initials(friend.name)}</Text>
+                      </View>
+                      <View style={styles.friendDetails}>
+                        <Text style={styles.friendName}>{friend.name}</Text>
+                        <Text style={styles.friendSubtitle}>Request pending</Text>
+                      </View>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.cancelOutgoingBtn}
+                      onPress={() => handleCancelOutgoingRequest(friend)}
+                    >
+                      <Text style={styles.cancelOutgoingBtnText}>Cancel</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </>
+            )}
+
             <Text style={styles.sectionTitle}>MY FRIENDS</Text>
             {filteredMyFriends.map(friend => {
               const canSee = canSeeIds.has(friend.id) && !!friend.location_building;
@@ -617,16 +724,29 @@ export default function FriendsScreen() {
                       {iSharedWithThem && (
                         <View style={styles.sharingBadge}>
                           <MaterialIcons name="my-location" size={11} color="#0B617E" />
-                          <Text style={styles.sharingBadgeText}>You're sharing your pin</Text>
+                          <Text style={styles.sharingBadgeText}>{'You\'re sharing your pin'}</Text>
                         </View>
                       )}
                     </View>
                   </View>
+                  <TouchableOpacity
+                    style={styles.removeFriendButton}
+                    onPress={() => confirmRemoveFriend(friend)}
+                    accessibilityLabel={`Remove ${friend.name} from friends`}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <MaterialIcons name="person-remove" size={20} color="#ef4444" />
+                  </TouchableOpacity>
                 </View>
               );
             })}
-            {filteredMyFriends.length === 0 && (
-              <Text style={styles.emptyText}>No friends yet. Find some below!</Text>
+            {filteredMyFriends.length === 0 && filteredPendingOutgoing.length === 0 && (
+              <Text style={styles.emptyText}>
+                No friends yet. Open the Find friends tab to search for people by name.
+              </Text>
+            )}
+            {filteredMyFriends.length === 0 && filteredPendingOutgoing.length > 0 && (
+              <Text style={styles.emptyText}>No accepted friends yet — pending requests are above.</Text>
             )}
           </>
         )}
@@ -669,7 +789,13 @@ export default function FriendsScreen() {
             ) : !search.trim() ? (
               <Text style={styles.emptyText}>Type a name above to search all users.</Text>
             ) : findFriends.length === 0 ? (
-              <Text style={styles.emptyText}>No users found for "{search.trim()}".</Text>
+              findSearchRawCount > 0 ? (
+                <Text style={styles.emptyText}>
+                  {`Everyone matching "${search.trim()}" is already a friend or has a pending request with you. Use My Friends to see people you know.`}
+                </Text>
+              ) : (
+                <Text style={styles.emptyText}>{`No users found for "${search.trim()}".`}</Text>
+              )
             ) : (
               findFriends.map(friend => {
                 const isAdded = addedIds.has(friend.id);
@@ -690,7 +816,7 @@ export default function FriendsScreen() {
                       disabled={isAdded}
                     >
                       <Text style={[styles.addButtonText, isAdded && styles.addedButtonText]}>
-                        {isAdded ? 'Added' : 'Add'}
+                        {isAdded ? 'Requested' : 'Add'}
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -733,6 +859,7 @@ const styles = StyleSheet.create({
   tabButtonTextActive: { color: '#0B617E', fontWeight: '700' },
 
   sectionTitle: { fontSize: 13, fontWeight: '700', letterSpacing: 0.8, color: '#111111', marginBottom: 8, marginTop: 2 },
+  sectionHint: { fontSize: 12, color: '#6b7280', marginTop: -4, marginBottom: 10, lineHeight: 17 },
 
   friendCard: { borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff' },
   friendLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
@@ -756,6 +883,9 @@ const styles = StyleSheet.create({
   acceptButton: { backgroundColor: '#0B617E', borderRadius: 8, width: 68, height: 34, alignItems: 'center', justifyContent: 'center', marginRight: 6 },
   acceptText: { color: '#fff', fontWeight: '600', fontSize: 13 },
   dismissButton: { backgroundColor: '#fee2e2', borderWidth: 1, borderColor: '#fecaca', borderRadius: 8, width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  removeFriendButton: { backgroundColor: '#fee2e2', borderWidth: 1, borderColor: '#fecaca', borderRadius: 8, width: 40, height: 40, alignItems: 'center', justifyContent: 'center', marginLeft: 8 },
+  cancelOutgoingBtn: { borderWidth: 1, borderColor: '#fecaca', backgroundColor: '#fef2f2', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, marginLeft: 8 },
+  cancelOutgoingBtnText: { color: '#b91c1c', fontWeight: '600', fontSize: 13 },
 
   addButton: { borderWidth: 1, borderColor: '#d1d5db', backgroundColor: '#ffffff', borderRadius: 8, width: 76, height: 36, alignItems: 'center', justifyContent: 'center' },
   addButtonText: { color: '#0B617E', fontWeight: '600', fontSize: 13 },
