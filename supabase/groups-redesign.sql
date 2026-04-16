@@ -41,7 +41,7 @@ BEGIN
   IF NEW.is_private = true AND NEW.join_code IS NULL THEN
     -- Generate a unique 8-char uppercase alphanumeric code
     LOOP
-      v_code := upper(substring(md5(random()::text || clock_timestamp()::text) FROM 1 FOR 8));
+      v_code := upper(substring(md5(random()::text || clock_timestamp()::text) FROM 1 FOR 6));
       EXIT WHEN NOT EXISTS (
         SELECT 1 FROM public.groups WHERE join_code = v_code AND id IS DISTINCT FROM NEW.id
       );
@@ -281,7 +281,7 @@ BEGIN
   END IF;
 
   LOOP
-    v_new_code := upper(substring(md5(random()::text || clock_timestamp()::text) FROM 1 FOR 8));
+    v_new_code := upper(substring(md5(random()::text || clock_timestamp()::text) FROM 1 FOR 6));
     EXIT WHEN NOT EXISTS (
       SELECT 1 FROM public.groups WHERE join_code = v_new_code AND id <> p_group_id
     );

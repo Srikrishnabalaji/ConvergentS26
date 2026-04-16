@@ -26,14 +26,6 @@ type Friend = {
 
 type FriendsTab = 'my_friends' | 'added_me' | 'find_friends';
 
-const PRIMARY = '#0B617E';
-const PRIMARY_LIGHT = '#7FB3C5';
-const TEXT_PRIMARY = '#0D2838';
-const TEXT_SECONDARY = '#5D7280';
-const BG_COOL = '#F5F7F9';
-const BORDER_COOL = '#E8EDF0';
-const MUTED_COOL = '#8FA2AD';
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -44,7 +36,17 @@ function initials(name: string) {
   return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
 }
 
+const TAB_LABELS: Record<FriendsTab, string> = {
+  my_friends: 'My Friends',
+  added_me: 'Requests',
+  find_friends: 'Find Friends',
+};
 
+const SEARCH_PLACEHOLDERS: Record<FriendsTab, string> = {
+  my_friends: 'Search your friends…',
+  added_me: 'Search requests…',
+  find_friends: 'Search all users…',
+};
 
 // ---------------------------------------------------------------------------
 // Component
@@ -190,12 +192,10 @@ export default function FriendsScreen() {
           name: r.profiles?.full_name ?? 'Unknown',
         }))
       );
-      
+
       setKnownIds(knownIds);
       knownIdsRef.current = knownIds;
       setAddedIds(new Set((pendingSent ?? []).map((r: any) => r.friend_id)));
-      // Clear stale find-friends results whenever relationships change
-      //setFindFriends([]);
 
     } catch (err) {
       console.error(err);
@@ -272,13 +272,6 @@ export default function FriendsScreen() {
     [pendingOutgoing, q]
   );
   // findFriends is already filtered server-side by the live search effect
-
-  const searchPlaceholder =
-    activeTab === 'my_friends'
-      ? 'Search your friends...'
-      : activeTab === 'added_me'
-        ? 'Search incoming requests...'
-        : 'Search people by name...';
 
   // -------------------------------------------------------------------------
   // Friend request actions
@@ -416,7 +409,14 @@ export default function FriendsScreen() {
   // Pin drop
   // -------------------------------------------------------------------------
   function openPinModal() {
-    // Always reset selection to match current sharing state
+    // Cancel any in-flight debounce so it can't repopulate after open
+    if (pinBuildingDebounceRef.current) clearTimeout(pinBuildingDebounceRef.current);
+    // Reset all form state fresh every time
+    setPinBuilding('');
+    setPinRoom('');
+    setPinBuildingSuggestions([]);
+    setPinRoomSuggestions([]);
+    setPinBuildingSearching(false);
     setPinSelectedIds(new Set(sharedWithIds));
     setPinModalVisible(true);
   }
@@ -457,6 +457,10 @@ export default function FriendsScreen() {
       }
 
       setSharedWithIds(new Set(pinSelectedIds));
+      setPinBuilding('');
+      setPinRoom('');
+      setPinBuildingSuggestions([]);
+      setPinRoomSuggestions([]);
       setPinModalVisible(false);
       void fetchAll({ silent: true });
     } catch (err) {
@@ -481,11 +485,22 @@ export default function FriendsScreen() {
   }
 
   // -------------------------------------------------------------------------
+  // Tab switch — clear search
+  // -------------------------------------------------------------------------
+  function switchTab(tab: FriendsTab) {
+    if (tab !== 'find_friends') {
+      setFindFriends([]);
+      setFindSearchRawCount(0);
+    }
+    setSearch('');
+    setActiveTab(tab);
+  }
+
+  // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-
 
       {/* ── Pin-drop modal ──────────────────────────────────────────── */}
       <Modal visible={pinModalVisible} animationType="slide" transparent onRequestClose={() => setPinModalVisible(false)}>
@@ -498,12 +513,12 @@ export default function FriendsScreen() {
             <TextInput
               style={styles.pinInput}
               placeholder="e.g. GDC, PCL, ECJ..."
-              placeholderTextColor={MUTED_COOL}
+              placeholderTextColor="#9ca3af"
               value={pinBuilding}
               onChangeText={handlePinBuildingChange}
             />
             {pinBuildingSearching && (
-              <Text style={{ color: MUTED_COOL, fontSize: 12, marginBottom: 4 }}>Searching...</Text>
+              <Text style={{ color: '#9ca3af', fontSize: 12, marginBottom: 4 }}>Searching...</Text>
             )}
             {pinBuildingSuggestions.length > 0 && (
               <View style={styles.pinSuggestionList}>
@@ -518,11 +533,11 @@ export default function FriendsScreen() {
                       setPinBuildingSearching(false);
                     }}
                   >
-                    <MaterialIcons name="location-on" size={14} color={PRIMARY} style={{ marginRight: 6 }} />
+                    <MaterialIcons name="location-on" size={14} color="#0B617E" style={{ marginRight: 6 }} />
                     <View style={{ flex: 1 }}>
                       <Text style={styles.pinSuggestionText} numberOfLines={1}>{item.name}</Text>
                       {item.address ? (
-                        <Text style={{ fontSize: 11, color: TEXT_SECONDARY }} numberOfLines={1}>{item.address}</Text>
+                        <Text style={{ fontSize: 11, color: '#6b7280' }} numberOfLines={1}>{item.address}</Text>
                       ) : null}
                     </View>
                   </TouchableOpacity>
@@ -534,31 +549,24 @@ export default function FriendsScreen() {
             <TextInput
               style={[styles.pinInput, !pinBuilding.trim() && { opacity: 0.5 }]}
               placeholder="e.g. 2.216, 0132..."
-              placeholderTextColor={MUTED_COOL}
+              placeholderTextColor="#9ca3af"
               value={pinRoom}
               onChangeText={handlePinRoomChange}
               editable={!!pinBuilding.trim()}
             />
             {pinRoomSuggestions.length > 0 && (
               <View style={styles.pinSuggestionList}>
-                {pinBuildingSuggestions.map((item: any) => (
+                {pinRoomSuggestions.map((item: any) => (
                   <TouchableOpacity
                     key={item.id}
                     style={styles.pinSuggestionRow}
                     onPress={() => {
-                      if (pinBuildingDebounceRef.current) clearTimeout(pinBuildingDebounceRef.current);
-                      setPinBuilding(item.name);
-                      setPinBuildingSuggestions([]);
-                      setPinBuildingSearching(false);
+                      setPinRoom(item.label);
+                      setPinRoomSuggestions([]);
                     }}
                   >
-                    <MaterialIcons name="location-on" size={16} color={PRIMARY} style={{ marginRight: 8 }} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.pinSuggestionText} numberOfLines={1}>{item.name}</Text>
-                      {item.address ? (
-                        <Text style={styles.pinSuggestionAddress} numberOfLines={1}>{item.address}</Text>
-                      ) : null}
-                    </View>
+                    <MaterialIcons name="meeting-room" size={16} color="#0B617E" style={{ marginRight: 8 }} />
+                    <Text style={styles.pinSuggestionText} numberOfLines={1}>{item.label}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -588,7 +596,7 @@ export default function FriendsScreen() {
                       <MaterialIcons
                         name={selected ? 'check-circle' : 'radio-button-unchecked'}
                         size={22}
-                        color={selected ? PRIMARY : BORDER_COOL}
+                        color={selected ? '#0B617E' : '#d1d5db'}
                       />
                     </TouchableOpacity>
                   );
@@ -619,67 +627,179 @@ export default function FriendsScreen() {
         </View>
       </Modal>
 
+      {/* ── Blue header ─────────────────────────────────────────────── */}
       <View style={styles.banner}>
         <View style={styles.headerRow}>
           <Text style={styles.headerTitle}>Friends</Text>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <TouchableOpacity style={styles.iconBtn} onPress={openPinModal}>
-              <MaterialIcons name="add-location" size={22} color={PRIMARY} />
+              <MaterialIcons name="add-location" size={22} color="#fff" />
             </TouchableOpacity>
           </View>
         </View>
       </View>
 
       <View style={styles.contentContainer}>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <View style={styles.searchWrap}>
-          <MaterialIcons name="search" size={20} color={MUTED_COOL} />
-          <TextInput
-            value={search}
-            onChangeText={setSearch}
-            placeholder={searchPlaceholder}
-            placeholderTextColor={MUTED_COOL}
-            style={styles.searchInput}
-          />
-        </View>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
-        {/* Tabs */}
-        <View style={styles.tabsWrap}>
-          {(['my_friends', 'added_me', 'find_friends'] as FriendsTab[]).map(tab => (
-            <TouchableOpacity
-              key={tab}
-              style={[styles.tabButton, activeTab === tab && styles.tabButtonActive]}
-              //onPress={() => setActiveTab(tab)}
-              onPress={() => {
-                if (tab !== 'find_friends') {
-                  setFindFriends([]);
-                  setFindSearchRawCount(0);
-                }
-                setActiveTab(tab);
-              }}
-            >
-              <Text style={[styles.tabButtonText, activeTab === tab && styles.tabButtonTextActive]}>
-                {tab === 'my_friends' ? 'My Friends' : tab === 'added_me' ? 'Added me' : 'Find friends'}
-              </Text>
+          {/* ── Invite banner ── */}
+          <View style={styles.inviteBanner}>
+            <MaterialIcons name="mail-outline" size={20} color="#0B617E" />
+            <Text style={styles.inviteBannerText}>Invite your friends!</Text>
+            <TouchableOpacity style={styles.inviteButton}>
+              <Text style={styles.inviteButtonText}>Invite</Text>
             </TouchableOpacity>
-          ))}
-        </View>
+          </View>
 
-        {loading && <ActivityIndicator color={PRIMARY} style={{ marginTop: 24 }} />}
-
-        {/* ── MY FRIENDS ── */}
-        {!loading && activeTab === 'my_friends' && (
-          <>
-            {filteredPendingOutgoing.length > 0 && (
-              <>
-                <View style={styles.sectionHeaderRow}>
-                  <Text style={styles.sectionTitle}>OUTGOING REQUESTS</Text>
-                  <View style={styles.sectionCountPill}>
-                    <Text style={styles.sectionCountText}>{filteredPendingOutgoing.length}</Text>
-                  </View>
+          {/* ── Segment tabs ── */}
+          <View style={styles.tabsWrap}>
+            {(['my_friends', 'added_me', 'find_friends'] as FriendsTab[]).map(tab => (
+              <TouchableOpacity
+                key={tab}
+                style={[styles.tabButton, activeTab === tab && styles.tabButtonActive]}
+                onPress={() => switchTab(tab)}
+                activeOpacity={0.75}
+              >
+                <View style={styles.tabButtonInner}>
+                  <Text style={[styles.tabButtonText, activeTab === tab && styles.tabButtonTextActive]}>
+                    {TAB_LABELS[tab]}
+                  </Text>
+                  {tab === 'added_me' && addedMe.length > 0 && (
+                    <View style={[styles.tabBadge, activeTab === tab && styles.tabBadgeActive]}>
+                      <Text style={[styles.tabBadgeText, activeTab === tab && styles.tabBadgeTextActive]}>
+                        {addedMe.length}
+                      </Text>
+                    </View>
+                  )}
                 </View>
-                <Text style={styles.sectionHint}>Waiting for them to accept — they are not in your friends list yet.</Text>
-                {filteredPendingOutgoing.map(friend => (
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* ── Contextual search bar ── */}
+          <View style={styles.searchWrap}>
+            <MaterialIcons name="search" size={20} color="#9ca3af" />
+            <TextInput
+              value={search}
+              onChangeText={setSearch}
+              placeholder={SEARCH_PLACEHOLDERS[activeTab]}
+              placeholderTextColor="#9ca3af"
+              style={styles.searchInput}
+            />
+            {search.length > 0 && (
+              <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <MaterialIcons name="close" size={18} color="#9ca3af" />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {loading && <ActivityIndicator color="#0B617E" style={{ marginTop: 24 }} />}
+
+          {/* ── MY FRIENDS ── */}
+          {!loading && activeTab === 'my_friends' && (
+            <>
+              <Text style={styles.sectionTitle}>MY FRIENDS</Text>
+              {filteredMyFriends.map(friend => {
+                const canSee = canSeeIds.has(friend.id) && !!friend.location_building;
+                const iSharedWithThem = sharedWithIds.has(friend.id);
+
+                return (
+                  <View key={friend.id} style={styles.friendCard}>
+                    <View style={styles.friendLeft}>
+                      <View style={styles.avatar}>
+                        <Text style={styles.avatarText}>{initials(friend.name)}</Text>
+                      </View>
+                      <View style={styles.friendDetails}>
+                        <Text style={styles.friendName}>{friend.name}</Text>
+
+                        {/* Their location — tapping routes via the map tab */}
+                        {canSee ? (
+                          <TouchableOpacity
+                            style={styles.locationBadge}
+                            onPress={() => routeToFriend(friend)}
+                            activeOpacity={0.7}
+                          >
+                            <MaterialIcons name="location-pin" size={14} color="#059669" />
+                            <Text style={styles.locationText}>
+                              {friend.location_building}{friend.location_room ? ` - ${friend.location_room}` : ''}
+                            </Text>
+                            <MaterialIcons name="chevron-right" size={13} color="#059669" />
+                          </TouchableOpacity>
+                        ) : (
+                          <Text style={styles.friendSubtitle}>No location shared</Text>
+                        )}
+
+                        {/* Indicator that I'm sharing my pin with them */}
+                        {iSharedWithThem && (
+                          <View style={styles.sharingBadge}>
+                            <MaterialIcons name="my-location" size={11} color="#0B617E" />
+                            <Text style={styles.sharingBadgeText}>{'You\'re sharing your pin'}</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.removeFriendButton}
+                      onPress={() => confirmRemoveFriend(friend)}
+                      accessibilityLabel={`Remove ${friend.name} from friends`}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <MaterialIcons name="person-remove" size={20} color="#ef4444" />
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+              {filteredMyFriends.length === 0 && (
+                <Text style={styles.emptyText}>
+                  {search.trim()
+                    ? `No friends matching "${search.trim()}".`
+                    : 'No friends yet. Open the Find Friends tab to search for people by name.'}
+                </Text>
+              )}
+            </>
+          )}
+
+          {/* ── REQUESTS ── */}
+          {!loading && activeTab === 'added_me' && (
+            <>
+              {/* Incoming */}
+              <Text style={styles.sectionTitle}>INCOMING</Text>
+              {filteredAddedMe.length === 0 ? (
+                <Text style={styles.emptyText}>
+                  {search.trim() ? `No incoming requests matching "${search.trim()}".` : 'No incoming requests.'}
+                </Text>
+              ) : (
+                filteredAddedMe.map(friend => (
+                  <View key={friend.id} style={styles.friendCard}>
+                    <View style={styles.friendLeft}>
+                      <View style={styles.avatar}>
+                        <Text style={styles.avatarText}>{initials(friend.name)}</Text>
+                      </View>
+                      <View>
+                        <Text style={styles.friendName}>{friend.name}</Text>
+                        <Text style={styles.friendSubtitle}>Wants to be your friend</Text>
+                      </View>
+                    </View>
+                    <View style={styles.actionsRow}>
+                      <TouchableOpacity style={styles.acceptButton} onPress={() => handleAccept(friend.id)}>
+                        <Text style={styles.acceptText}>Accept</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.dismissButton} onPress={() => handleDismiss(friend.id)}>
+                        <MaterialIcons name="close" size={18} color="#ef4444" />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))
+              )}
+
+              {/* Outgoing */}
+              <Text style={[styles.sectionTitle, { marginTop: 16 }]}>OUTGOING</Text>
+              {filteredPendingOutgoing.length === 0 ? (
+                <Text style={styles.emptyText}>
+                  {search.trim() ? `No outgoing requests matching "${search.trim()}".` : 'No outgoing requests.'}
+                </Text>
+              ) : (
+                filteredPendingOutgoing.map(friend => (
                   <View key={friend.id} style={styles.friendCard}>
                     <View style={styles.friendLeft}>
                       <View style={styles.avatarMuted}>
@@ -697,162 +817,59 @@ export default function FriendsScreen() {
                       <Text style={styles.cancelOutgoingBtnText}>Cancel</Text>
                     </TouchableOpacity>
                   </View>
-                ))}
-              </>
-            )}
+                ))
+              )}
+            </>
+          )}
 
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>MY FRIENDS</Text>
-              <View style={styles.sectionCountPill}>
-                <Text style={styles.sectionCountText}>{filteredMyFriends.length}</Text>
-              </View>
-            </View>
-            {filteredMyFriends.map(friend => {
-              const canSee = canSeeIds.has(friend.id) && !!friend.location_building;
-              const iSharedWithThem = sharedWithIds.has(friend.id);
-
-              return (
-                <View key={friend.id} style={styles.friendCard}>
-                  <View style={styles.friendLeft}>
-                    <View style={styles.avatar}>
-                      <Text style={styles.avatarText}>{initials(friend.name)}</Text>
-                    </View>
-                    <View style={styles.friendDetails}>
-                      <Text style={styles.friendName}>{friend.name}</Text>
-
-                      {/* Their location — tapping routes via the map tab */}
-                      {canSee ? (
-                        <TouchableOpacity
-                          style={styles.locationBadge}
-                          onPress={() => routeToFriend(friend)}
-                          activeOpacity={0.7}
-                        >
-                          <MaterialIcons name="location-pin" size={14} color={PRIMARY} />
-                          <Text style={styles.locationText}>
-                            {friend.location_building}{friend.location_room ? ` - ${friend.location_room}` : ''}
-                          </Text>
-                          <MaterialIcons name="chevron-right" size={13} color={PRIMARY} />
-                        </TouchableOpacity>
-                      ) : (
-                        <Text style={styles.friendSubtitle}>No location shared</Text>
-                      )}
-
-                      {/* Indicator that I'm sharing my pin with them */}
-                      {iSharedWithThem && (
-                        <View style={styles.sharingBadge}>
-                          <MaterialIcons name="my-location" size={11} color={PRIMARY} />
-                          <Text style={styles.sharingBadgeText}>{'You\'re sharing your pin'}</Text>
-                        </View>
-                      )}
-                    </View>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.removeFriendButton}
-                    onPress={() => confirmRemoveFriend(friend)}
-                    accessibilityLabel={`Remove ${friend.name} from friends`}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <MaterialIcons name="person-remove" size={20} color="#ef4444" />
-                  </TouchableOpacity>
-                </View>
-              );
-            })}
-            {filteredMyFriends.length === 0 && filteredPendingOutgoing.length === 0 && (
-              <Text style={styles.emptyText}>
-                No friends yet. Open the Find friends tab to search for people by name.
-              </Text>
-            )}
-            {filteredMyFriends.length === 0 && filteredPendingOutgoing.length > 0 && (
-              <Text style={styles.emptyText}>No accepted friends yet — pending requests are above.</Text>
-            )}
-          </>
-        )}
-
-        {/* ── ADDED ME ── */}
-        {!loading && activeTab === 'added_me' && (
-          <>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>ADDED ME</Text>
-              <View style={styles.sectionCountPill}>
-                <Text style={styles.sectionCountText}>{filteredAddedMe.length}</Text>
-              </View>
-            </View>
-            {filteredAddedMe.map(friend => (
-              <View key={friend.id} style={styles.friendCard}>
-                <View style={styles.friendLeft}>
-                  <View style={styles.avatar}>
-                    <Text style={styles.avatarText}>{initials(friend.name)}</Text>
-                  </View>
-                  <View>
-                    <Text style={styles.friendName}>{friend.name}</Text>
-                    <Text style={styles.friendSubtitle}>Wants to be your friend</Text>
-                  </View>
-                </View>
-                <View style={styles.actionsRow}>
-                  <TouchableOpacity style={styles.acceptButton} onPress={() => handleAccept(friend.id)}>
-                    <Text style={styles.acceptText}>Accept</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.dismissButton} onPress={() => handleDismiss(friend.id)}>
-                    <MaterialIcons name="close" size={18} color="#ef4444" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))}
-            {filteredAddedMe.length === 0 && <Text style={styles.emptyText}>No pending requests.</Text>}
-          </>
-        )}
-
-        {/* ── FIND FRIENDS ── */}
-        {!loading && activeTab === 'find_friends' && (
-          <>
-            <View style={styles.sectionHeaderRow}>
+          {/* ── FIND FRIENDS ── */}
+          {!loading && activeTab === 'find_friends' && (
+            <>
               <Text style={styles.sectionTitle}>FIND FRIENDS</Text>
-              <View style={styles.sectionCountPill}>
-                <Text style={styles.sectionCountText}>{findFriends.length}</Text>
-              </View>
-            </View>
-            {findLoading ? (
-              <ActivityIndicator color={PRIMARY} style={{ marginTop: 16 }} />
-            ) : !search.trim() ? (
-              <Text style={styles.emptyText}>Type a name above to search all users.</Text>
-            ) : findFriends.length === 0 ? (
-              findSearchRawCount > 0 ? (
-                <Text style={styles.emptyText}>
-                  {`Everyone matching "${search.trim()}" is already a friend or has a pending request with you. Use My Friends to see people you know.`}
-                </Text>
+              {findLoading ? (
+                <ActivityIndicator color="#0B617E" style={{ marginTop: 16 }} />
+              ) : !search.trim() ? (
+                <Text style={styles.emptyText}>Type a name in the search bar to find people.</Text>
+              ) : findFriends.length === 0 ? (
+                findSearchRawCount > 0 ? (
+                  <Text style={styles.emptyText}>
+                    {`Everyone matching "${search.trim()}" is already a friend or has a pending request. Check `}
+                    <Text style={{ fontWeight: '700', color: '#6b7280' }}>My Friends</Text>
+                    {' to see people you know.'}
+                  </Text>
+                ) : (
+                  <Text style={styles.emptyText}>{`No users found for "${search.trim()}".`}</Text>
+                )
               ) : (
-                <Text style={styles.emptyText}>{`No users found for "${search.trim()}".`}</Text>
-              )
-            ) : (
-              findFriends.map(friend => {
-                const isAdded = addedIds.has(friend.id);
-                return (
-                  <View key={friend.id} style={styles.friendCard}>
-                    <View style={styles.friendLeft}>
-                      <View style={styles.avatarMuted}>
-                        <Text style={styles.avatarMutedText}>{initials(friend.name)}</Text>
+                findFriends.map(friend => {
+                  const isAdded = addedIds.has(friend.id);
+                  return (
+                    <View key={friend.id} style={styles.friendCard}>
+                      <View style={styles.friendLeft}>
+                        <View style={styles.avatarMuted}>
+                          <Text style={styles.avatarMutedText}>{initials(friend.name)}</Text>
+                        </View>
+                        <View>
+                          <Text style={styles.friendName}>{friend.name}</Text>
+                          <Text style={styles.friendSubtitle}>App user</Text>
+                        </View>
                       </View>
-                      <View>
-                        <Text style={styles.friendName}>{friend.name}</Text>
-                        <Text style={styles.friendSubtitle}>App user</Text>
-                      </View>
+                      <TouchableOpacity
+                        style={[styles.addButton, isAdded && styles.addedButton]}
+                        onPress={() => handleAddFriend(friend.id)}
+                        disabled={isAdded}
+                      >
+                        <Text style={[styles.addButtonText, isAdded && styles.addedButtonText]}>
+                          {isAdded ? 'Requested' : 'Add'}
+                        </Text>
+                      </TouchableOpacity>
                     </View>
-                    <TouchableOpacity
-                      style={[styles.addButton, isAdded && styles.addedButton]}
-                      onPress={() => handleAddFriend(friend.id)}
-                      disabled={isAdded}
-                    >
-                      <Text style={[styles.addButtonText, isAdded && styles.addedButtonText]}>
-                        {isAdded ? 'Requested' : 'Add'}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                );
-              })
-            )}
-          </>
-        )}
-      </ScrollView>
+                  );
+                })
+              )}
+            </>
+          )}
+        </ScrollView>
       </View>
     </SafeAreaView>
   );
@@ -862,112 +879,119 @@ export default function FriendsScreen() {
 // Styles
 // ---------------------------------------------------------------------------
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: PRIMARY },
-  banner: { backgroundColor: PRIMARY, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 10, shadowColor: '#04303f', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.15, shadowRadius: 10, elevation: 8, zIndex: 1 },
-  contentContainer: { flex: 1, backgroundColor: BG_COOL },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 22, paddingBottom: 40 },
+  safeArea: { flex: 1, backgroundColor: '#0B617E' },
+  banner: { backgroundColor: '#0B617E', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 10, shadowColor: '#04303f', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.15, shadowRadius: 10, elevation: 8, zIndex: 1 },
+  contentContainer: { flex: 1, backgroundColor: '#f5f7f9' },
+  scrollContent: { paddingHorizontal: 16, paddingTop: 18, paddingBottom: 40 },
 
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerTitle: { fontSize: 40, fontWeight: '800', color: '#fff', letterSpacing: -1 },
-  iconBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
+  iconBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.15)' },
 
-  searchWrap: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: BORDER_COOL, borderRadius: 14, backgroundColor: '#fff', paddingHorizontal: 12, height: 48, marginBottom: 12 },
-  searchInput: { flex: 1, marginLeft: 8, fontSize: 16, color: TEXT_PRIMARY },
+  inviteBanner: { backgroundColor: '#CEDFE5', borderWidth: 1, borderColor: '#c7e3de', borderRadius: 12, padding: 12, flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
+  inviteBannerText: { marginLeft: 8, flex: 1, fontSize: 15, fontWeight: '600', color: '#065f57' },
+  inviteButton: { backgroundColor: '#0B617E', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
+  inviteButtonText: { color: '#fff', fontWeight: '600', fontSize: 13 },
 
-  tabsWrap: { flexDirection: 'row', backgroundColor: 'rgba(127, 179, 197, 0.24)', borderRadius: 12, padding: 3, marginBottom: 14 },
-  tabButton: { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center' },
-  tabButtonActive: { backgroundColor: PRIMARY },
-  tabButtonText: { fontSize: 13, color: TEXT_SECONDARY, fontWeight: '500' },
-  tabButtonTextActive: { color: '#fff', fontWeight: '700' },
-  sectionTitle: { fontSize: 13, fontWeight: '700', letterSpacing: 0.8, color: MUTED_COOL, marginBottom: 8, marginTop: 2, textTransform: 'uppercase' },
-  sectionHint: { fontSize: 12, color: TEXT_SECONDARY, marginTop: -4, marginBottom: 10, lineHeight: 17 },
-  sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2, marginBottom: 8 },
-  sectionCountPill: {
-    marginLeft: 8,
-    backgroundColor: 'rgba(127, 179, 197, 0.3)',
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  sectionCountText: { fontSize: 12, fontWeight: '700', color: PRIMARY },
-
-  friendCard: {
-    borderWidth: 1,
-    borderColor: BORDER_COOL,
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 10,
+  // Segment control — matches Groups page style
+  tabsWrap: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#fff',
-    shadowColor: PRIMARY,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 1,
+    backgroundColor: '#e8edf0',
+    borderRadius: 10,
+    padding: 3,
+    marginBottom: 12,
   },
+  tabButton: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  tabButtonActive: {
+    backgroundColor: '#ffffff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.10,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  tabButtonInner: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  tabButtonText: { fontSize: 13, color: '#6b7280', fontWeight: '500' },
+  tabButtonTextActive: { color: '#0B617E', fontWeight: '700' },
+
+  // Badge on Requests tab
+  tabBadge: { backgroundColor: '#9ca3af', borderRadius: 10, minWidth: 18, height: 18, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center' },
+  tabBadgeActive: { backgroundColor: '#0B617E' },
+  tabBadgeText: { fontSize: 11, fontWeight: '700', color: '#fff' },
+  tabBadgeTextActive: { color: '#fff' },
+
+  searchWrap: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#d1d5db', borderRadius: 12, backgroundColor: '#f9fafb', paddingHorizontal: 12, height: 46, marginBottom: 16 },
+  searchInput: { flex: 1, marginLeft: 8, fontSize: 15, color: '#111827', letterSpacing: 0 },
+
+  sectionTitle: { fontSize: 12, fontWeight: '700', letterSpacing: 0.8, color: '#374151', marginBottom: 8, marginTop: 2 },
+  sectionHint: { fontSize: 12, color: '#6b7280', marginTop: -4, marginBottom: 10, lineHeight: 17 },
+
+  friendCard: { borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff' },
   friendLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   friendDetails: { flex: 1, paddingRight: 4 },
 
   avatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#0B617E', alignItems: 'center', justifyContent: 'center', marginRight: 10 },
   avatarText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-  avatarMuted: { width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(127, 179, 197, 0.24)', alignItems: 'center', justifyContent: 'center', marginRight: 10 },
-  avatarMutedText: { color: TEXT_PRIMARY, fontWeight: '700', fontSize: 14 },
+  avatarMuted: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#d1d5db', alignItems: 'center', justifyContent: 'center', marginRight: 10 },
+  avatarMutedText: { color: '#374151', fontWeight: '700', fontSize: 14 },
 
-  friendName: { fontSize: 16, fontWeight: '600', color: TEXT_PRIMARY },
-  friendSubtitle: { fontSize: 13, color: MUTED_COOL, marginTop: 1 },
+  friendName: { fontSize: 15, fontWeight: '600', color: '#111827' },
+  friendSubtitle: { fontSize: 13, color: '#9ca3af', marginTop: 1 },
 
-  locationBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(127, 179, 197, 0.2)', paddingVertical: 3, paddingHorizontal: 6, borderRadius: 8, marginTop: 4, alignSelf: 'flex-start' },
-  locationText: { fontSize: 12, color: PRIMARY, marginLeft: 2, fontWeight: '600' },
+  locationBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ecfdf5', paddingVertical: 3, paddingHorizontal: 6, borderRadius: 6, marginTop: 4, alignSelf: 'flex-start' },
+  locationText: { fontSize: 12, color: '#059669', marginLeft: 2, fontWeight: '500' },
 
   sharingBadge: { flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 3 },
-  sharingBadgeText: { fontSize: 11, color: PRIMARY, fontWeight: '500' },
+  sharingBadgeText: { fontSize: 11, color: '#0B617E', fontWeight: '500' },
 
   actionsRow: { flexDirection: 'row', alignItems: 'center' },
-  acceptButton: { backgroundColor: PRIMARY, borderRadius: 10, width: 68, height: 34, alignItems: 'center', justifyContent: 'center', marginRight: 6 },
+  acceptButton: { backgroundColor: '#0B617E', borderRadius: 8, width: 68, height: 34, alignItems: 'center', justifyContent: 'center', marginRight: 6 },
   acceptText: { color: '#fff', fontWeight: '600', fontSize: 13 },
   dismissButton: { backgroundColor: '#fee2e2', borderWidth: 1, borderColor: '#fecaca', borderRadius: 8, width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
-  removeFriendButton: { backgroundColor: '#fee2e2', borderWidth: 1, borderColor: '#fecaca', borderRadius: 10, width: 40, height: 40, alignItems: 'center', justifyContent: 'center', marginLeft: 8 },
-  cancelOutgoingBtn: { borderWidth: 1, borderColor: '#fecaca', backgroundColor: '#fef2f2', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginLeft: 8 },
+  removeFriendButton: { backgroundColor: '#fee2e2', borderWidth: 1, borderColor: '#fecaca', borderRadius: 8, width: 40, height: 40, alignItems: 'center', justifyContent: 'center', marginLeft: 8 },
+  cancelOutgoingBtn: { borderWidth: 1, borderColor: '#fecaca', backgroundColor: '#fef2f2', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, marginLeft: 8 },
   cancelOutgoingBtnText: { color: '#b91c1c', fontWeight: '600', fontSize: 13 },
 
-  addButton: { borderWidth: 1, borderColor: 'rgba(127, 179, 197, 0.4)', backgroundColor: 'rgba(127, 179, 197, 0.22)', borderRadius: 10, width: 76, height: 36, alignItems: 'center', justifyContent: 'center' },
-  addButtonText: { color: PRIMARY, fontWeight: '700', fontSize: 13 },
-  addedButton: { backgroundColor: BG_COOL, borderColor: BORDER_COOL },
-  addedButtonText: { color: MUTED_COOL },
+  addButton: { borderWidth: 1, borderColor: '#d1d5db', backgroundColor: '#ffffff', borderRadius: 8, width: 76, height: 36, alignItems: 'center', justifyContent: 'center' },
+  addButtonText: { color: '#0B617E', fontWeight: '600', fontSize: 13 },
+  addedButton: { backgroundColor: '#f3f4f6' },
+  addedButtonText: { color: '#9ca3af' },
 
-  emptyText: { color: MUTED_COOL, fontSize: 14, marginBottom: 14, fontStyle: 'italic' },
+  emptyText: { color: '#9ca3af', fontSize: 14, marginBottom: 14, fontStyle: 'italic' },
 
 
   // Pin-drop modal
   pinOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   pinSheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, paddingBottom: 36, maxHeight: '85%' },
-  pinSheetTitle: { fontSize: 20, fontWeight: '700', color: PRIMARY, marginBottom: 4 },
-  pinSheetSub: { fontSize: 13, color: TEXT_SECONDARY, marginBottom: 20 },
-  pinLabel: { fontSize: 13, fontWeight: '600', color: TEXT_PRIMARY, marginBottom: 4 },
-  pinInput: { borderWidth: 1, borderColor: BORDER_COOL, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: TEXT_PRIMARY, backgroundColor: BG_COOL, marginBottom: 14 },
+  pinSheetTitle: { fontSize: 20, fontWeight: '700', color: '#0B617E', marginBottom: 4 },
+  pinSheetSub: { fontSize: 13, color: '#6b7280', marginBottom: 20 },
+  pinLabel: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 4 },
+  pinInput: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: '#111827', backgroundColor: '#f9fafb', marginBottom: 14 },
 
   pinFriendList: { maxHeight: 180, marginBottom: 16 },
-  pinFriendRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 9, paddingHorizontal: 10, borderRadius: 10, marginBottom: 4, backgroundColor: BG_COOL },
-  pinFriendRowSelected: { backgroundColor: 'rgba(127, 179, 197, 0.24)' },
-  pinAvatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: BORDER_COOL, alignItems: 'center', justifyContent: 'center', marginRight: 10 },
-  pinAvatarSelected: { backgroundColor: PRIMARY },
+  pinFriendRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 9, paddingHorizontal: 10, borderRadius: 10, marginBottom: 4, backgroundColor: '#f9fafb' },
+  pinFriendRowSelected: { backgroundColor: '#EBF4F8' },
+  pinAvatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#d1d5db', alignItems: 'center', justifyContent: 'center', marginRight: 10 },
+  pinAvatarSelected: { backgroundColor: '#0B617E' },
   pinAvatarText: { color: '#fff', fontWeight: '700', fontSize: 12 },
-  pinFriendName: { flex: 1, fontSize: 15, color: TEXT_PRIMARY, fontWeight: '500' },
-  pinFriendNameSelected: { color: PRIMARY, fontWeight: '600' },
-  pinNoFriendsText: { fontSize: 13, color: MUTED_COOL, fontStyle: 'italic', marginBottom: 16 },
+  pinFriendName: { flex: 1, fontSize: 15, color: '#374151', fontWeight: '500' },
+  pinFriendNameSelected: { color: '#0B617E', fontWeight: '600' },
+  pinNoFriendsText: { fontSize: 13, color: '#9ca3af', fontStyle: 'italic', marginBottom: 16 },
 
-  pinSaveBtn: { backgroundColor: PRIMARY, borderRadius: 10, paddingVertical: 14, alignItems: 'center', marginBottom: 10 },
+  pinSaveBtn: { backgroundColor: '#0B617E', borderRadius: 10, paddingVertical: 14, alignItems: 'center', marginBottom: 10 },
   pinSaveBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-  pinClearBtn: { borderWidth: 1, borderColor: BORDER_COOL, borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginBottom: 6, backgroundColor: BG_COOL },
-  pinClearBtnText: { color: TEXT_SECONDARY, fontWeight: '600', fontSize: 14 },
+  pinClearBtn: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginBottom: 6 },
+  pinClearBtnText: { color: '#6b7280', fontWeight: '600', fontSize: 14 },
   pinCancelBtn: { marginTop: 8, alignItems: 'center' },
-  pinCancelText: { color: TEXT_SECONDARY, fontSize: 14 },
+  pinCancelText: { color: '#6b7280', fontSize: 14 },
 
-  pinSuggestionList: { marginTop: -10, borderWidth: 1, borderColor: BORDER_COOL, borderRadius: 12, backgroundColor: '#fff', marginBottom: 14, overflow: 'hidden' },
-  pinSuggestionRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER_COOL },
-  pinSuggestionText: { fontSize: 14, color: TEXT_PRIMARY, fontWeight: '600' },
-  pinSuggestionAddress: { fontSize: 12, color: MUTED_COOL, marginTop: 1 },
+  pinSuggestionList: { marginTop: -10, borderWidth: 1, borderColor: '#d1d5db', borderRadius: 12, backgroundColor: '#fff', marginBottom: 14, overflow: 'hidden' },
+  pinSuggestionRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#d1d5db' },
+  pinSuggestionText: { fontSize: 14, color: '#111827', fontWeight: '600' },
+  pinSuggestionAddress: { fontSize: 12, color: '#9ca3af', marginTop: 1 },
 });

@@ -63,6 +63,7 @@
         }
       ]
     ],
+    "platforms": ["ios", "android"],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true

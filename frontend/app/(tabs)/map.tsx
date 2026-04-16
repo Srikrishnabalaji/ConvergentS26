@@ -97,6 +97,9 @@ export default function MapScreen() {
   const [routeLoading, setRouteLoading] = useState(false);
   const [showOverview, setShowOverview] = useState(false);
   const [initialRoom, setInitialRoom] = useState<string | undefined>(undefined);
+  // Tracks whether the current roomQuery URL param is still "live". Set to false
+  // when the user exits indoor navigation so the same param isn't re-applied.
+  const [roomParamActive, setRoomParamActive] = useState(true);
   /** Calendar deep link: show overlay and avoid setting search query until resolved (prevents Nominatim races). */
   const [calendarNavBusy, setCalendarNavBusy] = useState(false);
   const [calendarNavLabel, setCalendarNavLabel] = useState<string | null>(null);
@@ -139,12 +142,17 @@ export default function MapScreen() {
     calNav?: string;
   }>();
 
+  // When a new calendar navigation arrives, re-activate the room param.
+  useEffect(() => {
+    if (calNav) setRoomParamActive(true);
+  }, [calNav]);
+
   const roomQuerySingle = useMemo(() => {
-    if (roomQuery == null) return undefined;
+    if (!roomParamActive || roomQuery == null) return undefined;
     const r = Array.isArray(roomQuery) ? roomQuery[0] : roomQuery;
     const t = typeof r === 'string' ? r.trim() : '';
     return t || undefined;
-  }, [roomQuery]);
+  }, [roomQuery, roomParamActive]);
 
   /** Prefer in-memory initialRoom; else calendar URL (survives resetToDefault). */
   const indoorDestinationRoom = useMemo(
@@ -561,6 +569,7 @@ export default function MapScreen() {
     setRouteWalkMin(0);
     setRouteLoading(false);
     setInitialRoom(undefined);
+    setRoomParamActive(false);
     // Delay clearing selectedPlace so PointAnnotation doesn't unmount mid-frame
     setTimeout(() => setSelectedPlace(null), 50);
   }, [stopLocationWatcher]);

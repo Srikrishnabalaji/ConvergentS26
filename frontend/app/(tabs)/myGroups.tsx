@@ -41,14 +41,6 @@ type DetailMember = {
 };
 
 const PRIMARY = '#0B617E';
-const PRIMARY_LIGHT = '#7FB3C5';
-const ACCENT = '#D9C2A3';
-const ACCENT_SOFT = '#EFE3D3';
-const TEXT_PRIMARY = '#0D2838';
-const TEXT_SECONDARY = '#5D7280';
-const BG_COOL = '#F5F7F9';
-const BORDER_COOL = '#E8EDF0';
-const MUTED_COOL = '#8FA2AD';
 
 function initialsFromName(name: string | null | undefined): string {
   if (!name?.trim()) return '?';
@@ -96,7 +88,6 @@ function GroupCard({
   const privateLabel = group.is_private ? ' · Private' : '';
   const metaLine = `${typeLabel}${privateLabel} · ${subtitle}`;
   const effectiveJoinLabel = joinLabel ?? 'Join';
-  const isRequestAction = effectiveJoinLabel === 'Request';
 
   const showJoinBtn = !!onJoin && !isPending;
   const showPendingState = isPending;
@@ -108,7 +99,7 @@ function GroupCard({
         <Image source={{ uri: group.image_url }} style={cardStyles.avatarImg} />
       ) : (
         <View style={cardStyles.avatarPlaceholder}>
-          <MaterialIcons name="groups" size={22} color={MUTED_COOL} />
+          <MaterialIcons name="groups" size={22} color="#94a3b8" />
         </View>
       )}
       <View style={cardStyles.cardTextCol}>
@@ -117,10 +108,10 @@ function GroupCard({
             {group.name}
           </Text>
           {group.is_private && (
-            <MaterialIcons name="lock" size={13} color={MUTED_COOL} style={{ marginLeft: 5, marginTop: 1 }} />
+            <MaterialIcons name="lock" size={13} color="#94a3b8" style={{ marginLeft: 5, marginTop: 1 }} />
           )}
           {!group.is_private && group.has_join_password && (
-            <MaterialIcons name="key" size={13} color={MUTED_COOL} style={{ marginLeft: 5, marginTop: 1 }} />
+            <MaterialIcons name="key" size={13} color="#94a3b8" style={{ marginLeft: 5, marginTop: 1 }} />
           )}
         </View>
         <Text style={cardStyles.cardMeta} numberOfLines={1}>{metaLine}</Text>
@@ -158,7 +149,7 @@ function GroupCard({
               )}
               {onLeave && (
                 <TouchableOpacity
-                  style={cardStyles.btnCompactLeave}
+                  style={[cardStyles.btnCompact, cardStyles.btnCompactLeave]}
                   onPress={onLeave}
                   disabled={leaving}
                   activeOpacity={0.7}
@@ -185,23 +176,16 @@ function GroupCard({
                   activeOpacity={0.85}
                 >
                   {joinLoading ? (
-                    <ActivityIndicator size="small" color={isRequestAction ? TEXT_PRIMARY : '#fff'} />
+                    <ActivityIndicator size="small" color="#fff" />
                   ) : (
                     <>
                       <MaterialIcons
                         name={effectiveJoinLabel === 'Request' ? 'send' : 'group-add'}
                         size={14}
-                        color={isRequestAction ? TEXT_PRIMARY : '#fff'}
+                        color="#fff"
                         style={{ marginRight: 4 }}
                       />
-                      <Text
-                        style={[
-                          cardStyles.btnCompactJoinText,
-                          isRequestAction && cardStyles.btnCompactRequestText,
-                        ]}
-                      >
-                        {effectiveJoinLabel}
-                      </Text>
+                      <Text style={cardStyles.btnCompactJoinText}>{effectiveJoinLabel}</Text>
                     </>
                   )}
                 </TouchableOpacity>
@@ -267,24 +251,24 @@ const cardStyles = StyleSheet.create({
   cardTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: TEXT_PRIMARY,
+    color: '#0f172a',
     lineHeight: 22,
     flexShrink: 1,
   },
-  cardMeta: { fontSize: 13, color: TEXT_SECONDARY, fontWeight: '500' },
+  cardMeta: { fontSize: 13, color: '#64748b', fontWeight: '500' },
   avatarImg: {
     width: 50,
     height: 50,
     borderRadius: 15,
     marginRight: 14,
-    backgroundColor: BG_COOL,
+    backgroundColor: '#f1f5f9',
   },
   avatarPlaceholder: {
     width: 50,
     height: 50,
     borderRadius: 15,
     marginRight: 14,
-    backgroundColor: 'rgba(127, 179, 197, 0.18)',
+    backgroundColor: 'rgba(11, 97, 126, 0.07)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -294,21 +278,10 @@ const cardStyles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: 10,
-    backgroundColor: 'rgba(127, 179, 197, 0.22)',
-    borderWidth: 1,
-    borderColor: 'rgba(127, 179, 197, 0.4)',
+    backgroundColor: 'rgba(11, 97, 126, 0.07)',
   },
   btnCompactText: { color: PRIMARY, fontSize: 13, fontWeight: '600' },
-  btnCompactLeave: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    backgroundColor: '#fef2f2',
-    borderWidth: 1,
-    borderColor: '#fecaca',
-  },
+  btnCompactLeave: { backgroundColor: '#fef2f2' },
   btnCompactLeaveText: { color: '#dc2626', fontSize: 13, fontWeight: '600' },
   btnCompactJoin: {
     flexDirection: 'row',
@@ -318,13 +291,8 @@ const cardStyles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: PRIMARY,
   },
-  btnCompactRequest: {
-    backgroundColor: PRIMARY_LIGHT,
-    borderWidth: 1,
-    borderColor: 'rgba(11, 97, 126, 0.26)',
-  },
+  btnCompactRequest: { backgroundColor: PRIMARY },
   btnCompactJoinText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  btnCompactRequestText: { color: TEXT_PRIMARY },
   pendingWrap: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   btnPending: {
     flexDirection: 'row',
@@ -332,20 +300,16 @@ const cardStyles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 10,
     borderRadius: 10,
-    backgroundColor: ACCENT_SOFT,
-    borderWidth: 1,
-    borderColor: ACCENT,
+    backgroundColor: '#fef3c7',
   },
-  btnPendingText: { color: TEXT_PRIMARY, fontSize: 12, fontWeight: '700' },
+  btnPendingText: { color: '#92400e', fontSize: 12, fontWeight: '700' },
   btnCancelRequest: {
     paddingVertical: 5,
     paddingHorizontal: 8,
     borderRadius: 8,
-    backgroundColor: BG_COOL,
-    borderWidth: 1,
-    borderColor: BORDER_COOL,
+    backgroundColor: '#f1f5f9',
   },
-  btnCancelRequestText: { color: TEXT_SECONDARY, fontSize: 11, fontWeight: '600' },
+  btnCancelRequestText: { color: '#64748b', fontSize: 11, fontWeight: '600' },
 });
 
 // ---------------------------------------------------------------------------
@@ -365,6 +329,7 @@ function InputModal({
   onCancel,
   secureText,
   icon,
+  otpLength,
 }: {
   visible: boolean;
   title: string;
@@ -378,7 +343,10 @@ function InputModal({
   onCancel: () => void;
   secureText?: boolean;
   icon?: React.ComponentProps<typeof MaterialIcons>['name'];
+  otpLength?: number;
 }) {
+  const hiddenRef = useRef<TextInput>(null);
+
   return (
     <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={onCancel}>
       <Pressable style={modalInputStyles.overlay} onPress={onCancel}>
@@ -394,18 +362,63 @@ function InputModal({
             )}
             <Text style={modalInputStyles.title}>{title}</Text>
             {subtitle && <Text style={modalInputStyles.subtitle}>{subtitle}</Text>}
-            <TextInput
-              style={modalInputStyles.input}
-              placeholder={placeholder}
-              placeholderTextColor={MUTED_COOL}
-              value={value}
-              onChangeText={onChangeText}
-              secureTextEntry={secureText}
-              autoCapitalize={secureText ? 'none' : 'characters'}
-              returnKeyType="done"
-              onSubmitEditing={onConfirm}
-              autoFocus
-            />
+
+            {otpLength ? (
+              /* OTP box input */
+              <TouchableOpacity
+                activeOpacity={1}
+                style={modalInputStyles.otpWrapper}
+                onPress={() => hiddenRef.current?.focus()}
+              >
+                <View style={modalInputStyles.otpRow}>
+                  {Array.from({ length: otpLength }).map((_, i) => {
+                    const char = value[i];
+                    const isCursor = i === value.length;
+                    return (
+                      <View
+                        key={i}
+                        style={[
+                          modalInputStyles.otpBox,
+                          char ? modalInputStyles.otpBoxFilled : undefined,
+                          isCursor ? modalInputStyles.otpBoxCursor : undefined,
+                        ]}
+                      >
+                        <Text style={modalInputStyles.otpChar}>{char ?? ''}</Text>
+                      </View>
+                    );
+                  })}
+                </View>
+                <TextInput
+                  ref={hiddenRef}
+                  style={modalInputStyles.otpHidden}
+                  value={value}
+                  onChangeText={(t) =>
+                    onChangeText(t.toUpperCase().replace(/[^A-F0-9]/g, '').slice(0, otpLength))
+                  }
+                  autoCapitalize="characters"
+                  maxLength={otpLength}
+                  autoFocus
+                  returnKeyType="done"
+                  onSubmitEditing={onConfirm}
+                  caretHidden
+                />
+              </TouchableOpacity>
+            ) : (
+              /* Regular text input */
+              <TextInput
+                style={modalInputStyles.input}
+                placeholder={placeholder}
+                placeholderTextColor="#94a3b8"
+                value={value}
+                onChangeText={onChangeText}
+                secureTextEntry={secureText}
+                autoCapitalize={secureText ? 'none' : 'characters'}
+                returnKeyType="done"
+                onSubmitEditing={onConfirm}
+                autoFocus
+              />
+            )}
+
             <TouchableOpacity
               style={[modalInputStyles.confirmBtn, confirming && { opacity: 0.7 }]}
               onPress={onConfirm}
@@ -455,7 +468,7 @@ const modalInputStyles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 18,
-    backgroundColor: 'rgba(127, 179, 197, 0.22)',
+    backgroundColor: 'rgba(11, 97, 126, 0.08)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
@@ -464,14 +477,14 @@ const modalInputStyles = StyleSheet.create({
   title: {
     fontSize: 21,
     fontWeight: '700',
-    color: TEXT_PRIMARY,
+    color: '#0f172a',
     textAlign: 'center',
     marginBottom: 8,
     letterSpacing: -0.3,
   },
   subtitle: {
     fontSize: 14,
-    color: TEXT_SECONDARY,
+    color: '#64748b',
     textAlign: 'center',
     lineHeight: 21,
     marginBottom: 20,
@@ -479,13 +492,13 @@ const modalInputStyles = StyleSheet.create({
   },
   input: {
     borderWidth: 1.5,
-    borderColor: BORDER_COOL,
+    borderColor: '#e2e8f0',
     borderRadius: 14,
     paddingHorizontal: 16,
     paddingVertical: 15,
     fontSize: 18,
-    color: TEXT_PRIMARY,
-    backgroundColor: BG_COOL,
+    color: '#0f172a',
+    backgroundColor: '#f8fafc',
     textAlign: 'center',
     letterSpacing: 3,
     marginBottom: 20,
@@ -500,12 +513,35 @@ const modalInputStyles = StyleSheet.create({
   },
   confirmBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
   cancelBtn: {
-    backgroundColor: BG_COOL,
+    backgroundColor: '#f1f5f9',
     borderRadius: 14,
     paddingVertical: 15,
     alignItems: 'center',
   },
-  cancelBtnText: { color: TEXT_SECONDARY, fontSize: 15, fontWeight: '600' },
+  cancelBtnText: { color: '#64748b', fontSize: 15, fontWeight: '600' },
+  // OTP boxes
+  otpWrapper: { width: '100%', marginBottom: 20 },
+  otpRow: { flexDirection: 'row', gap: 8 },
+  otpBox: {
+    flex: 1,
+    height: 48,
+    borderWidth: 1.5,
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f8fafc',
+  },
+  otpBoxFilled: {
+    backgroundColor: 'rgba(11, 97, 126, 0.06)',
+    borderColor: PRIMARY,
+  },
+  otpBoxCursor: {
+    borderColor: PRIMARY,
+    borderWidth: 2,
+  },
+  otpChar: { fontSize: 18, fontWeight: '800', color: '#0f172a' },
+  otpHidden: { position: 'absolute', width: 1, height: 1, opacity: 0 },
 });
 
 // ---------------------------------------------------------------------------
@@ -514,7 +550,6 @@ const modalInputStyles = StyleSheet.create({
 
 export default function MyGroupsScreen() {
   const router = useRouter();
-  const listRef = useRef<ScrollView | null>(null);
   const [activePanel, setActivePanel] = useState<PanelType>('my_groups');
 
   // Groups data
@@ -524,6 +559,7 @@ export default function MyGroupsScreen() {
   const [editorGroupIds, setEditorGroupIds] = useState<Set<string>>(new Set());
   const [pendingRequestIds, setPendingRequestIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const scrollRef = useRef<ScrollView>(null);
 
   // Action loading states
   const [joiningId, setJoiningId] = useState<string | null>(null);
@@ -548,6 +584,12 @@ export default function MyGroupsScreen() {
   const [passwordGroup, setPasswordGroup] = useState<Group | null>(null);
   const [passwordInput, setPasswordInput] = useState('');
   const [joiningWithPassword, setJoiningWithPassword] = useState(false);
+
+  // My-groups section collapse state
+  const [collapsedMyGroups, setCollapsedMyGroups] = useState<Set<'friends' | 'campus'>>(new Set());
+
+  // Discover type filter
+  const [discoverFilter, setDiscoverFilter] = useState<'all' | 'friends' | 'campus'>('all');
 
   // -------------------------------------------------------------------------
   // isMemberOfSelected: used to gate the member list in the detail modal
@@ -651,17 +693,9 @@ export default function MyGroupsScreen() {
   }, []);
 
   useFocusEffect(useCallback(() => {
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
     fetchGroups();
-    requestAnimationFrame(() => {
-      listRef.current?.scrollTo({ y: 0, animated: false });
-    });
   }, [fetchGroups]));
-
-  useEffect(() => {
-    requestAnimationFrame(() => {
-      listRef.current?.scrollTo({ y: 0, animated: false });
-    });
-  }, [activePanel]);
 
   // -------------------------------------------------------------------------
   // Join routing: decide the right path based on group type + settings
@@ -804,7 +838,11 @@ export default function MyGroupsScreen() {
   const discoverCampusGroups = useMemo(() => searchedDiscover.filter((g) => g.type === 'campus_org'), [searchedDiscover]);
 
   const hasDiscoverSearch = discoverSearch.trim().length > 0;
-  const noSearchResults = hasDiscoverSearch && discoverFriendGroups.length === 0 && discoverCampusGroups.length === 0;
+  const noSearchResults = hasDiscoverSearch && (
+    discoverFilter === 'friends' ? discoverFriendGroups.length === 0 :
+    discoverFilter === 'campus'  ? discoverCampusGroups.length === 0 :
+    discoverFriendGroups.length === 0 && discoverCampusGroups.length === 0
+  );
 
   // -------------------------------------------------------------------------
   // Render
@@ -816,7 +854,7 @@ export default function MyGroupsScreen() {
       <InputModal
         visible={showCodeModal}
         title="Join with Code"
-        subtitle="Enter the private group's unique code to join it."
+        subtitle="Enter the private group's unique code to join."
         placeholder="e.g. A3BF19CD"
         value={codeInput}
         onChangeText={setCodeInput}
@@ -825,6 +863,7 @@ export default function MyGroupsScreen() {
         confirming={joiningByCode}
         onCancel={() => { setShowCodeModal(false); setCodeInput(''); }}
         icon="key"
+        otpLength={6}
       />
 
       {/* Password prompt modal */}
@@ -872,24 +911,24 @@ export default function MyGroupsScreen() {
                       style={[
                         styles.modalBadge,
                         selectedGroup.type === 'campus_org'
-                          ? { backgroundColor: 'rgba(127, 179, 197, 0.26)' }
-                          : { backgroundColor: BG_COOL },
+                          ? { backgroundColor: 'rgba(11, 97, 126, 0.12)' }
+                          : { backgroundColor: '#f1f5f9' },
                         { marginRight: 8, marginBottom: 4 },
                       ]}
                     >
                       <Text
                         style={[
                           styles.modalBadgeText,
-                          { color: selectedGroup.type === 'campus_org' ? PRIMARY : TEXT_SECONDARY },
+                          { color: selectedGroup.type === 'campus_org' ? PRIMARY : '#64748b' },
                         ]}
                       >
                         {selectedGroup.type === 'campus_org' ? 'Campus org' : 'Friend group'}
                       </Text>
                     </View>
                     {selectedGroup.is_private && (
-                      <View style={[styles.modalBadge, { backgroundColor: BG_COOL, marginRight: 8, marginBottom: 4 }]}>
-                        <MaterialIcons name="lock" size={12} color={TEXT_SECONDARY} style={{ marginRight: 4 }} />
-                        <Text style={[styles.modalBadgeText, { color: TEXT_SECONDARY }]}>Private</Text>
+                      <View style={[styles.modalBadge, { backgroundColor: '#f1f5f9', marginRight: 8, marginBottom: 4 }]}>
+                        <MaterialIcons name="lock" size={12} color="#64748b" style={{ marginRight: 4 }} />
+                        <Text style={[styles.modalBadgeText, { color: '#64748b' }]}>Private</Text>
                       </View>
                     )}
                     <Text style={[styles.modalMetaMuted, { marginBottom: 4 }]}>
@@ -911,7 +950,7 @@ export default function MyGroupsScreen() {
                   <Text style={styles.modalSectionTitle}>Members</Text>
                   {!isMemberOfSelected ? (
                     <View style={styles.modalHintBox}>
-                        <MaterialIcons name="lock-outline" size={18} color={MUTED_COOL} style={{ marginRight: 8 }} />
+                      <MaterialIcons name="lock-outline" size={18} color="#94a3b8" style={{ marginRight: 8 }} />
                       <Text style={styles.modalHintText}>Join this group to see who is in it.</Text>
                     </View>
                   ) : detailMembersLoading ? (
@@ -997,44 +1036,31 @@ export default function MyGroupsScreen() {
 
       {/* ── Main content ── */}
       <View style={styles.contentContainer}>
-        {/* Single toggle for panels */}
+        {/* 2-tab segment */}
         <View style={styles.segmentWrap}>
-          <TouchableOpacity
-            style={styles.panelToggle}
-            onPress={() => setActivePanel((prev) => (prev === 'my_groups' ? 'discover' : 'my_groups'))}
-            activeOpacity={0.9}
-            accessibilityRole="button"
-            accessibilityLabel={`Switch to ${activePanel === 'my_groups' ? 'Discover' : 'Your Groups'}`}
-          >
-            <View
-              style={[
-                styles.panelToggleThumb,
-                activePanel === 'discover' && styles.panelToggleThumbRight,
-              ]}
-            />
-            <View style={styles.panelToggleTrackLabels}>
-              <Text
-                style={[
-                  styles.panelToggleLabel,
-                  activePanel === 'my_groups' && styles.panelToggleLabelActive,
-                ]}
+          {(['my_groups', 'discover'] as const).map((panel) => {
+            const labels: Record<PanelType, string> = {
+              my_groups: 'Your Groups',
+              discover: 'Discover',
+            };
+            const active = activePanel === panel;
+            return (
+              <TouchableOpacity
+                key={panel}
+                style={[styles.segmentItem, active && styles.segmentItemActive]}
+                onPress={() => setActivePanel(panel)}
+                activeOpacity={0.85}
               >
-                Your Groups
-              </Text>
-              <Text
-                style={[
-                  styles.panelToggleLabel,
-                  activePanel === 'discover' && styles.panelToggleLabelActive,
-                ]}
-              >
-                Discover
-              </Text>
-            </View>
-          </TouchableOpacity>
+                <Text style={[styles.segmentLabel, active && styles.segmentLabelActive]}>
+                  {labels[panel]}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
         <ScrollView
-          ref={listRef}
+          ref={scrollRef}
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
@@ -1055,49 +1081,72 @@ export default function MyGroupsScreen() {
               ) : (
                 <>
                   {/* Friend Groups sub-section */}
-                  <SectionHeader title="Friend Groups" count={myFriendGroups.length} />
-                  {myFriendGroups.length === 0 ? (
-                    <EmptyCard
-                      icon="people"
-                      title="No friend groups yet"
-                      subtitle="Create one with the + button or join one in Discover."
-                    />
-                  ) : (
-                    myFriendGroups.map((group) => (
-                      <GroupCard
-                        key={group.id}
-                        group={group}
-                        subtitle={`${group.member_count ?? 0} members`}
-                        canEdit={adminGroupIds.has(group.id) || editorGroupIds.has(group.id)}
-                        onEdit={() => router.push(`/edit-group/${group.id}` as never)}
-                        onPress={() => setSelectedGroup(group)}
-                        onLeave={!adminGroupIds.has(group.id) ? () => !leavingId && handleLeave(group.id) : undefined}
-                        leaving={leavingId === group.id}
+                  <SectionHeader
+                    title="Friend Groups"
+                    count={myFriendGroups.length}
+                    collapsed={collapsedMyGroups.has('friends')}
+                    onToggle={() => setCollapsedMyGroups(prev => {
+                      const n = new Set(prev);
+                      n.has('friends') ? n.delete('friends') : n.add('friends');
+                      return n;
+                    })}
+                  />
+                  {!collapsedMyGroups.has('friends') && (
+                    myFriendGroups.length === 0 ? (
+                      <EmptyCard
+                        icon="people"
+                        title="No friend groups yet"
+                        subtitle="Create one with the + button or join one in Discover."
                       />
-                    ))
+                    ) : (
+                      myFriendGroups.map((group) => (
+                        <GroupCard
+                          key={group.id}
+                          group={group}
+                          subtitle={`${group.member_count ?? 0} members`}
+                          canEdit={adminGroupIds.has(group.id) || editorGroupIds.has(group.id)}
+                          onEdit={() => router.push(`/edit-group/${group.id}` as never)}
+                          onPress={() => setSelectedGroup(group)}
+                          onLeave={!adminGroupIds.has(group.id) ? () => !leavingId && handleLeave(group.id) : undefined}
+                          leaving={leavingId === group.id}
+                        />
+                      ))
+                    )
                   )}
 
                   {/* Campus Groups sub-section */}
-                  <SectionHeader title="Campus Groups" count={myCampusGroups.length} topSpacing />
-                  {myCampusGroups.length === 0 ? (
-                    <EmptyCard
-                      icon="school"
-                      title="No campus groups yet"
-                      subtitle="Request to join a campus org in Discover."
-                    />
-                  ) : (
-                    myCampusGroups.map((group) => (
-                      <GroupCard
-                        key={group.id}
-                        group={group}
-                        subtitle={`${group.member_count ?? 0} members`}
-                        canEdit={adminGroupIds.has(group.id) || editorGroupIds.has(group.id)}
-                        onEdit={() => router.push(`/edit-group/${group.id}` as never)}
-                        onPress={() => setSelectedGroup(group)}
-                        onLeave={!adminGroupIds.has(group.id) ? () => !leavingId && handleLeave(group.id) : undefined}
-                        leaving={leavingId === group.id}
+                  <SectionHeader
+                    title="Campus Groups"
+                    count={myCampusGroups.length}
+                    topSpacing
+                    collapsed={collapsedMyGroups.has('campus')}
+                    onToggle={() => setCollapsedMyGroups(prev => {
+                      const n = new Set(prev);
+                      n.has('campus') ? n.delete('campus') : n.add('campus');
+                      return n;
+                    })}
+                  />
+                  {!collapsedMyGroups.has('campus') && (
+                    myCampusGroups.length === 0 ? (
+                      <EmptyCard
+                        icon="school"
+                        title="No campus groups yet"
+                        subtitle="Request to join a campus org in Discover."
                       />
-                    ))
+                    ) : (
+                      myCampusGroups.map((group) => (
+                        <GroupCard
+                          key={group.id}
+                          group={group}
+                          subtitle={`${group.member_count ?? 0} members`}
+                          canEdit={adminGroupIds.has(group.id) || editorGroupIds.has(group.id)}
+                          onEdit={() => router.push(`/edit-group/${group.id}` as never)}
+                          onPress={() => setSelectedGroup(group)}
+                          onLeave={!adminGroupIds.has(group.id) ? () => !leavingId && handleLeave(group.id) : undefined}
+                          leaving={leavingId === group.id}
+                        />
+                      ))
+                    )
                   )}
                 </>
               )}
@@ -1112,11 +1161,11 @@ export default function MyGroupsScreen() {
               {/* Search bar + join-by-code */}
               <View style={styles.searchRow}>
                 <View style={styles.searchInputWrap}>
-                  <MaterialIcons name="search" size={20} color={MUTED_COOL} style={{ marginRight: 8 }} />
+                  <MaterialIcons name="search" size={20} color="#94a3b8" style={{ marginRight: 8 }} />
                   <TextInput
                     style={styles.searchInput}
                     placeholder="Search groups…"
-                    placeholderTextColor={MUTED_COOL}
+                    placeholderTextColor="#94a3b8"
                     value={discoverSearch}
                     onChangeText={setDiscoverSearch}
                     returnKeyType="search"
@@ -1133,6 +1182,26 @@ export default function MyGroupsScreen() {
                 </TouchableOpacity>
               </View>
 
+              {/* Type filter chips */}
+              <View style={styles.discoverFilterRow}>
+                {(['all', 'friends', 'campus'] as const).map(f => {
+                  const label = f === 'all' ? 'All' : f === 'friends' ? 'Friend Groups' : 'Campus Groups';
+                  const active = discoverFilter === f;
+                  return (
+                    <TouchableOpacity
+                      key={f}
+                      style={[styles.discoverFilterChip, active && styles.discoverFilterChipActive]}
+                      onPress={() => setDiscoverFilter(f)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[styles.discoverFilterChipText, active && styles.discoverFilterChipTextActive]}>
+                        {label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
               {loading && discoverGroups.length === 0 ? (
                 <View style={styles.loadingBlock}>
                   <ActivityIndicator color={PRIMARY} size="large" />
@@ -1143,9 +1212,57 @@ export default function MyGroupsScreen() {
                   title={`No results for "${discoverSearch.trim()}"`}
                   subtitle="Try a different search term."
                 />
+              ) : discoverFilter === 'friends' ? (
+                /* ── Friend groups only ── */
+                discoverFriendGroups.length === 0 ? (
+                  <EmptyCard
+                    icon="people-outline"
+                    title="No friend groups to join"
+                    subtitle="All available friend groups will appear here."
+                  />
+                ) : (
+                  <>{discoverFriendGroups.map((group) => (
+                    <GroupCard
+                      key={group.id}
+                      group={group}
+                      subtitle={`${group.member_count ?? 0} members`}
+                      onJoin={() => handleJoinPress(group)}
+                      joinLabel="Join"
+                      joinLoading={joiningId === group.id}
+                      onPress={() => setSelectedGroup(group)}
+                    />
+                  ))}</>
+                )
+              ) : discoverFilter === 'campus' ? (
+                /* ── Campus groups only ── */
+                discoverCampusGroups.length === 0 ? (
+                  <EmptyCard
+                    icon="school"
+                    title="No campus orgs to join"
+                    subtitle="Available campus organizations will appear here."
+                  />
+                ) : (
+                  <>{discoverCampusGroups.map((group) => {
+                    const isPending = pendingRequestIds.has(group.id);
+                    return (
+                      <GroupCard
+                        key={group.id}
+                        group={group}
+                        subtitle={`${group.member_count ?? 0} members`}
+                        onJoin={!isPending ? () => handleJoinPress(group) : undefined}
+                        joinLabel="Request"
+                        joinLoading={requestingId === group.id}
+                        isPending={isPending}
+                        onCancelRequest={isPending ? () => handleCancelRequest(group.id) : undefined}
+                        cancellingRequest={cancellingRequestId === group.id}
+                        onPress={() => setSelectedGroup(group)}
+                      />
+                    );
+                  })}</>
+                )
               ) : (
+                /* ── All (both sections) ── */
                 <>
-                  {/* Friend groups in discover */}
                   {(!hasDiscoverSearch || discoverFriendGroups.length > 0) && (
                     <>
                       <SectionHeader title="Friend Groups" count={discoverFriendGroups.length} />
@@ -1171,7 +1288,6 @@ export default function MyGroupsScreen() {
                     </>
                   )}
 
-                  {/* Campus orgs in discover */}
                   {(!hasDiscoverSearch || discoverCampusGroups.length > 0) && (
                     <>
                       <SectionHeader title="Campus Groups" count={discoverCampusGroups.length} topSpacing={!hasDiscoverSearch || discoverFriendGroups.length > 0} />
@@ -1216,15 +1332,45 @@ export default function MyGroupsScreen() {
 // Small helper components
 // ---------------------------------------------------------------------------
 
-function SectionHeader({ title, count, topSpacing }: { title: string; count: number; topSpacing?: boolean }) {
+function SectionHeader({
+  title, count, topSpacing, collapsed, onToggle,
+}: {
+  title: string; count: number; topSpacing?: boolean; collapsed?: boolean; onToggle?: () => void;
+}) {
+  const inner = (
+    <>
+      <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+        <Text style={styles.sectionTitle}>{title}</Text>
+        {count > 0 && (
+          <View style={styles.countPill}>
+            <Text style={styles.countPillText}>{count}</Text>
+          </View>
+        )}
+      </View>
+      {onToggle && (
+        <MaterialIcons
+          name={collapsed ? 'keyboard-arrow-down' : 'keyboard-arrow-up'}
+          size={20}
+          color="#b0bec5"
+        />
+      )}
+    </>
+  );
+
+  if (onToggle) {
+    return (
+      <TouchableOpacity
+        style={[styles.sectionHeader, topSpacing && { marginTop: 8 }]}
+        onPress={onToggle}
+        activeOpacity={0.7}
+      >
+        {inner}
+      </TouchableOpacity>
+    );
+  }
   return (
     <View style={[styles.sectionHeader, topSpacing && { marginTop: 8 }]}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {count > 0 && (
-        <View style={styles.countPill}>
-          <Text style={styles.countPillText}>{count}</Text>
-        </View>
-      )}
+      {inner}
     </View>
   );
 }
@@ -1237,7 +1383,7 @@ function EmptyCard({ icon, title, subtitle }: {
   return (
     <View style={styles.emptyCard}>
       <View style={styles.emptyIconCircle}>
-        <MaterialIcons name={icon} size={30} color={PRIMARY_LIGHT} />
+        <MaterialIcons name={icon} size={30} color="#85b0bf" />
       </View>
       <Text style={styles.emptyTitle}>{title}</Text>
       <Text style={styles.emptySubtitle}>{subtitle}</Text>
@@ -1250,9 +1396,9 @@ function EmptyCard({ icon, title, subtitle }: {
 // ---------------------------------------------------------------------------
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: PRIMARY },
+  safeArea: { flex: 1, backgroundColor: '#0B617E' },
   banner: {
-    backgroundColor: PRIMARY,
+    backgroundColor: '#0B617E',
     paddingHorizontal: 20,
     paddingTop: 20,
     paddingBottom: 10,
@@ -1263,7 +1409,7 @@ const styles = StyleSheet.create({
     elevation: 8,
     zIndex: 1,
   },
-  contentContainer: { flex: 1, backgroundColor: BG_COOL },
+  contentContainer: { flex: 1, backgroundColor: '#f5f7f9' },
   scrollView: { flex: 1 },
   scrollContent: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 48 },
   headerBlock: {
@@ -1286,52 +1432,30 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   segmentWrap: {
-    backgroundColor: BG_COOL,
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 4,
-  },
-  panelToggle: {
-    position: 'relative',
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: 'rgba(127, 179, 197, 0.24)',
-    padding: 3,
-    justifyContent: 'center',
-  },
-  panelToggleThumb: {
-    position: 'absolute',
-    top: 3,
-    left: 3,
-    width: '50%',
-    height: 38,
-    borderRadius: 11,
-    backgroundColor: PRIMARY,
-    shadowColor: PRIMARY,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  panelToggleThumbRight: {
-    left: '50%',
-  },
-  panelToggleTrackLabels: {
     flexDirection: 'row',
+    backgroundColor: '#e8edf0',
+    marginHorizontal: 20,
+    marginTop: 16,
+    marginBottom: 4,
+    borderRadius: 14,
+    padding: 3,
+  },
+  segmentItem: {
+    flex: 1,
+    paddingVertical: 10,
     alignItems: 'center',
-    justifyContent: 'space-between',
+    borderRadius: 11,
   },
-  panelToggleLabel: {
-    width: '50%',
-    textAlign: 'center',
-    fontSize: 14,
-    fontWeight: '600',
-    color: TEXT_SECONDARY,
-    zIndex: 1,
+  segmentItemActive: {
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  panelToggleLabelActive: {
-    color: '#fff',
-  },
+  segmentLabel: { fontSize: 14, fontWeight: '600', color: '#64748b' },
+  segmentLabelActive: { color: PRIMARY, fontWeight: '700' },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1341,13 +1465,13 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 13,
     fontWeight: '700',
-    color: MUTED_COOL,
+    color: '#94a3b8',
     letterSpacing: 0.8,
     textTransform: 'uppercase',
   },
   countPill: {
     marginLeft: 8,
-    backgroundColor: 'rgba(127, 179, 197, 0.3)',
+    backgroundColor: 'rgba(11, 97, 126, 0.1)',
     paddingHorizontal: 9,
     paddingVertical: 3,
     borderRadius: 10,
@@ -1371,15 +1495,15 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 20,
-    backgroundColor: 'rgba(127, 179, 197, 0.22)',
+    backgroundColor: 'rgba(11, 97, 126, 0.06)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
   },
-  emptyTitle: { fontSize: 16, fontWeight: '600', color: TEXT_PRIMARY, marginBottom: 5 },
+  emptyTitle: { fontSize: 16, fontWeight: '600', color: '#334155', marginBottom: 5 },
   emptySubtitle: {
     fontSize: 13,
-    color: MUTED_COOL,
+    color: '#94a3b8',
     textAlign: 'center',
     lineHeight: 19,
     maxWidth: 240,
@@ -1406,7 +1530,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 1,
   },
-  searchInput: { flex: 1, fontSize: 15, color: TEXT_PRIMARY, fontWeight: '500', letterSpacing: 0 },
+  searchInput: { flex: 1, fontSize: 15, color: '#0f172a', fontWeight: '500', letterSpacing: 0 },
   codeBtn: {
     width: 46,
     height: 46,
@@ -1454,14 +1578,14 @@ const styles = StyleSheet.create({
     width: 100,
     height: 100,
     borderRadius: 24,
-    backgroundColor: BG_COOL,
+    backgroundColor: '#f1f5f9',
     marginBottom: 16,
   },
   modalHeroPlaceholder: {
     width: 100,
     height: 100,
     borderRadius: 24,
-    backgroundColor: 'rgba(127, 179, 197, 0.24)',
+    backgroundColor: 'rgba(11, 97, 126, 0.08)',
     marginBottom: 16,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1469,7 +1593,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 24,
     fontWeight: '700',
-    color: TEXT_PRIMARY,
+    color: '#0f172a',
     textAlign: 'center',
     marginBottom: 12,
     letterSpacing: -0.3,
@@ -1488,57 +1612,57 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   modalBadgeText: { fontSize: 13, fontWeight: '600' },
-  modalMetaMuted: { fontSize: 14, color: TEXT_SECONDARY, fontWeight: '500' },
+  modalMetaMuted: { fontSize: 14, color: '#64748b', fontWeight: '500' },
   modalSection: {
     marginHorizontal: 20,
     marginBottom: 16,
-    backgroundColor: BG_COOL,
+    backgroundColor: '#f8fafb',
     borderRadius: 16,
     padding: 16,
   },
   modalSectionTitle: {
     fontSize: 12,
     fontWeight: '700',
-    color: MUTED_COOL,
+    color: '#94a3b8',
     letterSpacing: 0.8,
     textTransform: 'uppercase',
     marginBottom: 10,
   },
-  modalBodyText: { fontSize: 15, color: TEXT_PRIMARY, lineHeight: 23 },
-  modalPlaceholder: { fontSize: 14, color: MUTED_COOL, fontStyle: 'italic' },
+  modalBodyText: { fontSize: 15, color: '#334155', lineHeight: 23 },
+  modalPlaceholder: { fontSize: 14, color: '#94a3b8', fontStyle: 'italic' },
   modalHintBox: { flexDirection: 'row', alignItems: 'center' },
-  modalHintText: { flex: 1, fontSize: 14, color: TEXT_SECONDARY, lineHeight: 20 },
+  modalHintText: { flex: 1, fontSize: 14, color: '#64748b', lineHeight: 20 },
   modalLoading: { paddingVertical: 16, alignItems: 'center' },
   memberRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: BORDER_COOL,
+    borderBottomColor: '#edf1f5',
   },
   memberAvatarImg: {
     width: 40,
     height: 40,
     borderRadius: 14,
     marginRight: 12,
-    backgroundColor: BORDER_COOL,
+    backgroundColor: '#e2e8f0',
   },
   memberAvatarFallback: {
     width: 40,
     height: 40,
     borderRadius: 14,
     marginRight: 12,
-    backgroundColor: 'rgba(127, 179, 197, 0.24)',
+    backgroundColor: 'rgba(11, 97, 126, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   memberAvatarInitials: { fontSize: 14, fontWeight: '700', color: PRIMARY },
-  memberName: { flex: 1, fontSize: 15, fontWeight: '500', color: TEXT_PRIMARY },
+  memberName: { flex: 1, fontSize: 15, fontWeight: '500', color: '#0f172a' },
   roleBadge: {
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 8,
-    backgroundColor: 'rgba(127, 179, 197, 0.2)',
+    backgroundColor: 'rgba(11, 97, 126, 0.06)',
   },
   roleBadgeText: {
     fontSize: 11,
@@ -1566,8 +1690,41 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     paddingVertical: 14,
     alignItems: 'center',
-    backgroundColor: BG_COOL,
+    backgroundColor: '#f1f5f9',
     borderRadius: 14,
   },
-  modalCloseBtnText: { fontSize: 16, fontWeight: '600', color: TEXT_SECONDARY },
+  modalCloseBtnText: { fontSize: 16, fontWeight: '600', color: '#64748b' },
+
+  // Discover filter chips
+  discoverFilterRow: {
+    flexDirection: 'row',
+    marginTop: 12,
+    marginBottom: 16,
+    gap: 8,
+  },
+  discoverFilterChip: {
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  discoverFilterChipActive: {
+    backgroundColor: PRIMARY,
+    borderColor: PRIMARY,
+  },
+  discoverFilterChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  discoverFilterChipTextActive: {
+    color: '#fff',
+  },
 });

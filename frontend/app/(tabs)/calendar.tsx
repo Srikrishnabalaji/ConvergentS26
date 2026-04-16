@@ -11,7 +11,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Switch,
   Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -19,77 +18,98 @@ import { Calendar } from 'react-native-calendars';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import * as Notifications from 'expo-notifications'; 
+import * as Notifications from 'expo-notifications';
 import { supabase } from '../../lib/supabase';
-import { switchTrackColors, switchThumbColor } from '@/lib/switchTheme';
 import { geocodeSearch, type SearchItem, GeocodingNetworkError } from '@/lib/services/geocoding';
 import { DEFAULT_USER_LOCATION } from '@/constants/map';
 import { searchRooms } from '@/lib/services/indoor-navigation';
 import gdcGraphData from '@/assets/gdc_graph.json';
 import type { BuildingGraph, GraphNode } from '@/lib/services/indoor-navigation';
-import { parseLocationString, findBuilding, UT_BUILDINGS } from '@/lib/data/utBuildings';
+import { parseLocationString, UT_BUILDINGS } from '@/lib/data/utBuildings';
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 const getTodayString = () => {
   const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, '0');
-  const day = String(today.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return [
+    today.getFullYear(),
+    String(today.getMonth() + 1).padStart(2, '0'),
+    String(today.getDate()).padStart(2, '0'),
+  ].join('-');
 };
 
 const parseTimeString = (timeStr: string) => {
   if (!timeStr || timeStr.toLowerCase() === 'now') return new Date();
-  
   try {
     const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
-    
-    if (!match) 
-      return new Date();
-    
-    let [, hoursStr, minutesStr, period] = match;
+    if (!match) return new Date();
+    const [, hoursStr, minutesStr, period] = match;
     let hours = parseInt(hoursStr, 10);
-    let minutes = parseInt(minutesStr, 10);
-    
+    const minutes = parseInt(minutesStr, 10);
     if (period.toUpperCase() === 'PM' && hours < 12) hours += 12;
     if (period.toUpperCase() === 'AM' && hours === 12) hours = 0;
-    
     const d = new Date();
     d.setHours(hours, minutes, 0, 0);
     return d;
-
-  } catch (e) {
-    return new Date(); 
+  } catch {
+    return new Date();
   }
 };
 
-const extractBuilding = (location: string): string => {
-  return location
+const extractBuilding = (location: string): string =>
+  location
     .replace(/[-–]\s*(room|rm|suite|ste|floor|fl|#)\s*[\w.]+/gi, '')
     .replace(/\s+(room|rm|suite|ste|floor|fl|#)\s*[\w.]+/gi, '')
     .trim();
-};
 
 const validateBuilding = async (location: string): Promise<boolean> => {
-  if (!location.trim()) return true; // location is optional, blank is fine
+  if (!location.trim()) return true;
   const building = extractBuilding(location);
   if (!building) return true;
   try {
     const results = await geocodeSearch(building, DEFAULT_USER_LOCATION);
     return results.length > 0;
   } catch (e) {
-    if (e instanceof GeocodingNetworkError) return true; // don't block save if offline
+    if (e instanceof GeocodingNetworkError) return true;
     return false;
   }
 };
 
+function formatUpcomingDate(dateStr: string): string {
+  const today = getTodayString();
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  const tomorrow = [
+    d.getFullYear(),
+    String(d.getMonth() + 1).padStart(2, '0'),
+    String(d.getDate()).padStart(2, '0'),
+  ].join('-');
+  if (dateStr === today) return 'Today';
+  if (dateStr === tomorrow) return 'Tomorrow';
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric',
+  });
+}
+
+function formatSelectedDate(dateStr: string): string {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  });
+}
+
+function eventGroupId(e: { groupId?: unknown; group_id?: unknown }): string | null {
+  const g = e.groupId ?? e.group_id;
+  if (g == null || g === '') return null;
+  return String(g);
+}
+
 const TODAY = getTodayString();
 const PRIMARY = '#0B617E';
-const PRIMARY_LIGHT = '#7FB3C5';
-const TEXT_PRIMARY = '#0D2838';
-const TEXT_SECONDARY = '#5D7280';
-const BG_COOL = '#F5F7F9';
-const BORDER_COOL = '#E8EDF0';
-const MUTED_COOL = '#8FA2AD';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -101,21 +121,19 @@ Notifications.setNotificationHandler({
   }),
 });
 
-//dummy data 
-const DUMMY_EVENTS: Record<string, any[]> = {
-  [TODAY]: [
-    { id: '2', title: 'CS313E Class', location: 'ECJ - Room 0132', time: '1:00 PM', notify: false },
-    { id: '1', title: 'test', location: 'gdc', time: '8:00 AM', notify: true },
-  ],
-  '2026-03-26': [
-    { id: '3', title: 'Study Group', location: 'PCL Library', time: '3:00 PM', notify: true }
-  ]
-};
-
+// ---------------------------------------------------------------------------
+// Main screen
+// ---------------------------------------------------------------------------
 export default function CalendarScreen() {
+  const router = useRouter();
+  const { groupId: paramGroupId } = useLocalSearchParams<{ groupId?: string }>();
+  const paramGroupIdSingle = Array.isArray(paramGroupId) ? paramGroupId[0] : paramGroupId;
+
   const [selectedDate, setSelectedDate] = useState(TODAY);
   const [events, setEvents] = useState<Record<string, any[]>>({});
-  const [groups, setGroups] = useState<{id: any, name: string}[]>([]);
+  const [groups, setGroups] = useState<{ id: string; name: string }[]>([]);
+  const [selectedGroupFilterId, setSelectedGroupFilterId] = useState<string | null>(null);
+
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
 
@@ -126,12 +144,10 @@ export default function CalendarScreen() {
   const [locationSearching, setLocationSearching] = useState(false);
   const locationDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const roomDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [roomValidating, setRoomValidating] = useState(false);
-  const [roomError, setRoomError] = useState<string | null>(null);
-
   const [roomSuggestions, setRoomSuggestions] = useState<GraphNode[]>([]);
   const [roomSearching, setRoomSearching] = useState(false);
+  const [roomError, setRoomError] = useState<string | null>(null);
+  const roomDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [newEvent, setNewEvent] = useState<{
     title: string;
@@ -140,7 +156,7 @@ export default function CalendarScreen() {
     time: string;
     notify: boolean;
     notifyInAdvance: number | null;
-    groupId: any | null;
+    groupId: string | null;
   }>({
     title: '',
     building: '',
@@ -150,28 +166,32 @@ export default function CalendarScreen() {
     notifyInAdvance: null,
     groupId: null,
   });
-  const router = useRouter();
-  const { groupId: paramGroupId, groupName } = useLocalSearchParams<{
-    groupId?: string;
-    groupName?: string;
-  }>();
-  const groupNameDisplay = Array.isArray(groupName) ? groupName[0] : groupName;
-  const paramGroupIdSingle = Array.isArray(paramGroupId) ? paramGroupId[0] : paramGroupId;
 
-  const [groupEventsOnly, setGroupEventsOnly] = useState(false);
-  const [selectedGroupFilterId, setSelectedGroupFilterId] = useState<string | null>(null);
-
+  // -------------------------------------------------------------------------
+  // Fetch data
+  // -------------------------------------------------------------------------
   const fetchEvents = async () => {
-    //groups
-    const { data: groupData } = await supabase.from('groups').select('id, name');
-    if (groupData) setGroups(groupData);
-
-    //events
     const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    // Only fetch groups the current user belongs to
+    const { data: memberData } = await supabase
+      .from('group_members')
+      .select('groups(id, name)')
+      .eq('user_id', user.id);
+
+    if (memberData) {
+      const userGroups = memberData
+        .map((r: any) => r.groups)
+        .filter(Boolean)
+        .sort((a: any, b: any) => a.name.localeCompare(b.name));
+      setGroups(userGroups);
+    }
+
     const { data: eventData, error } = await supabase
       .from('events')
       .select('*')
-      .eq('user_id', user?.id);
+      .eq('user_id', user.id);
 
     if (error) {
       console.error('Error fetching events:', error);
@@ -180,10 +200,8 @@ export default function CalendarScreen() {
 
     if (eventData) {
       const formattedEvents: Record<string, any[]> = {};
-      eventData.forEach((event:any) => {
-        if (!formattedEvents[event.event_date]) {
-          formattedEvents[event.event_date] = [];
-        }
+      eventData.forEach((event: any) => {
+        if (!formattedEvents[event.event_date]) formattedEvents[event.event_date] = [];
         formattedEvents[event.event_date].push({
           id: event.id,
           title: event.title,
@@ -191,117 +209,132 @@ export default function CalendarScreen() {
           time: event.time,
           notify: event.notify,
           notifyInAdvance: event.notify_in_advance,
-          groupId: event.group_id
+          groupId: event.group_id,
         });
       });
       setEvents(formattedEvents);
     }
   };
 
-
   useEffect(() => {
     fetchEvents();
     (async () => {
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
-      let finalStatus = existingStatus;
       if (existingStatus !== 'granted') {
-        const { status } = await Notifications.requestPermissionsAsync();
-        finalStatus = status;
+        await Notifications.requestPermissionsAsync();
       }
-      if (finalStatus !== 'granted') console.log('Notification permissions not granted!');
     })();
   }, []);
 
+  // Deep-link: auto-select a group's chip when navigating from the Groups tab
   useEffect(() => {
     if (paramGroupIdSingle) {
-      setGroupEventsOnly(true);
       setSelectedGroupFilterId(paramGroupIdSingle);
     }
   }, [paramGroupIdSingle]);
 
-
-  function eventGroupId(e: { groupId?: unknown; group_id?: unknown }): string | null {
-    const g = e.groupId ?? e.group_id;
-    if (g == null || g === '') return null;
-    return String(g);
-  }
-
+  // -------------------------------------------------------------------------
+  // Derived state
+  // -------------------------------------------------------------------------
   const eventsVisibleByFilter = useMemo(() => {
-    if (!groupEventsOnly) {
-      return events;
-    }
-    if (!selectedGroupFilterId) {
-      return {};
-    }
+    if (!selectedGroupFilterId) return events;
     const out: Record<string, any[]> = {};
     Object.keys(events).forEach((date) => {
-      const list = events[date] ?? [];
-      const filtered = list.filter(
+      const filtered = (events[date] ?? []).filter(
         (e) => eventGroupId(e) === selectedGroupFilterId
       );
       if (filtered.length) out[date] = filtered;
     });
     return out;
-  }, [events, groupEventsOnly, selectedGroupFilterId]);
+  }, [events, selectedGroupFilterId]);
 
   const markedDates = useMemo(() => {
     const marked: Record<string, any> = {};
     Object.keys(eventsVisibleByFilter).forEach((date) => {
-      if(events[date] && events[date].length > 0) {
+      if ((eventsVisibleByFilter[date]?.length ?? 0) > 0) {
         marked[date] = { marked: true, dotColor: PRIMARY };
       }
     });
-
     marked[selectedDate] = {
-      ...(marked[selectedDate] || {}),
+      ...(marked[selectedDate] ?? {}),
       selected: true,
       selectedColor: PRIMARY,
     };
     return marked;
   }, [selectedDate, eventsVisibleByFilter]);
 
+  const sortedEvents = useMemo(() => {
+    const dayEvents = eventsVisibleByFilter[selectedDate] ?? [];
+    return [...dayEvents].sort(
+      (a, b) => parseTimeString(a.time).getTime() - parseTimeString(b.time).getTime()
+    );
+  }, [eventsVisibleByFilter, selectedDate]);
+
+  const upcomingEvents = useMemo(() => {
+    const now = new Date();
+    const todayStr = getTodayString();
+    const result: Array<{ date: string; event: any }> = [];
+    const sortedDates = Object.keys(eventsVisibleByFilter).sort();
+    for (const date of sortedDates) {
+      if (date < todayStr) continue;
+      for (const event of eventsVisibleByFilter[date] ?? []) {
+        if (date === todayStr) {
+          if (parseTimeString(event.time) < now) continue;
+        }
+        result.push({ date, event });
+      }
+    }
+    result.sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      return parseTimeString(a.event.time).getTime() - parseTimeString(b.event.time).getTime();
+    });
+    return result.slice(0, 3);
+  }, [eventsVisibleByFilter]);
+
+  // -------------------------------------------------------------------------
+  // Navigation
+  // -------------------------------------------------------------------------
   const handleEventPress = (location: string) => {
-    if (!location || !location.trim()) return;
-    // Parse "GDC 2.204" / "GDC - 2.204" / "ECJ - Room 0132" / etc.
+    if (!location?.trim()) return;
     const { building, room } = parseLocationString(location);
-    // Pass the canonical building code (e.g. "GDC") so the map's geocoder can
-    // expand it to the full UT building name. The room is held in the
-    // background until the user reaches the building.
     router.push({
       pathname: '/(tabs)/map',
       params: {
         searchQuery: building || location,
         ...(room ? { roomQuery: room } : {}),
-        // Fresh navigation each tap — same params alone may not re-run map listeners.
         calNav: String(Date.now()),
       },
     });
   };
 
-  const onTimeChange = (event: any, selectedTime?: Date) => {
-    if (Platform.OS === 'android') {
-      setShowTimePicker(false);
-    }
-    
+  // -------------------------------------------------------------------------
+  // Time picker
+  // -------------------------------------------------------------------------
+  const onTimeChange = (_event: any, selectedTime?: Date) => {
+    if (Platform.OS === 'android') setShowTimePicker(false);
     if (selectedTime) {
       setTimeValue(selectedTime);
-      const formattedTime = selectedTime.toLocaleTimeString([], { 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      });
-      setNewEvent(prev => ({ ...prev, time: formattedTime }));
+      setNewEvent(prev => ({
+        ...prev,
+        time: selectedTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      }));
     }
   };
 
+  // -------------------------------------------------------------------------
+  // Modal open/close
+  // -------------------------------------------------------------------------
   const handleOpenAddModal = () => {
     setEditingEventId(null);
-    setNewEvent({ title: '', building: '', room: '', time: '', notify: false, notifyInAdvance: null, groupId: null});
+    setNewEvent({ title: '', building: '', room: '', time: '', notify: false, notifyInAdvance: null, groupId: null });
     setTimeValue(new Date());
+    setShowTimePicker(false);
     setShowAddModal(true);
     setLocationSuggestions([]);
     setLocationSearching(false);
     setRoomSuggestions([]);
     setRoomSearching(false);
+    setRoomError(null);
   };
 
   const handleOpenEditModal = (event: any) => {
@@ -320,15 +353,18 @@ export default function CalendarScreen() {
       groupId: event.groupId ?? event.group_id ?? null,
     });
     setTimeValue(parseTimeString(event.time));
+    setShowTimePicker(false);
     setShowAddModal(true);
     setLocationSuggestions([]);
     setLocationSearching(false);
-    setRoomError(null);
     setRoomSuggestions([]);
     setRoomSearching(false);
+    setRoomError(null);
   };
 
-
+  // -------------------------------------------------------------------------
+  // Location / room autocomplete
+  // -------------------------------------------------------------------------
   const handleBuildingChange = (text: string) => {
     setNewEvent(prev => ({ ...prev, building: text, room: '' }));
     setRoomError(null);
@@ -349,13 +385,7 @@ export default function CalendarScreen() {
 
     if (utMatches.length > 0) {
       setLocationSuggestions(
-        utMatches.map(b => ({
-          id: b.code,
-          name: b.code,
-          address: b.displayName,
-          latitude: 0,
-          longitude: 0,
-        }))
+        utMatches.map(b => ({ id: b.code, name: b.code, address: b.displayName, latitude: 0, longitude: 0 }))
       );
       setLocationSearching(false);
     } else {
@@ -386,9 +416,7 @@ export default function CalendarScreen() {
     setNewEvent(prev => ({ ...prev, room: text }));
     setRoomError(null);
     setRoomSuggestions([]);
-
     if (!text.trim()) { setRoomSearching(false); return; }
-
     if (roomDebounceRef.current) clearTimeout(roomDebounceRef.current);
     setRoomSearching(true);
     roomDebounceRef.current = setTimeout(() => {
@@ -405,13 +433,16 @@ export default function CalendarScreen() {
     Keyboard.dismiss();
   };
 
-  const handleSaveEvent = async () => { 
+  // -------------------------------------------------------------------------
+  // Save / delete
+  // -------------------------------------------------------------------------
+  const handleSaveEvent = async () => {
     if (!newEvent.title.trim()) {
-      Alert.alert('Error', 'Please enter an event title');
+      Alert.alert('Missing title', 'Please enter an event title.');
       return;
     }
     if (!newEvent.time) {
-      Alert.alert('Error', 'Please select a time');
+      Alert.alert('Missing time', 'Please select a time for this event.');
       return;
     }
 
@@ -419,9 +450,8 @@ export default function CalendarScreen() {
       const isValid = await validateBuilding(newEvent.building);
       if (!isValid) {
         Alert.alert(
-          'Unknown Building',
-          `"${newEvent.building}" wasn't found on campus. Please check the building name.`,
-          [{ text: 'OK' }]
+          'Unknown building',
+          `"${newEvent.building}" wasn't found on campus. Please check the building name.`
         );
         return;
       }
@@ -430,13 +460,12 @@ export default function CalendarScreen() {
     if (newEvent.room.trim()) {
       const roomResults = searchRooms(gdcGraphData as BuildingGraph, newEvent.room);
       const exactMatch = roomResults.some(
-        (n) => n.label.toLowerCase() === newEvent.room.trim().toLowerCase()
+        n => n.label.toLowerCase() === newEvent.room.trim().toLowerCase()
       );
       if (!exactMatch) {
         Alert.alert(
-          'Unknown Room',
-          `"${newEvent.room}" wasn't found in this building. Please select a room from the suggestions.`,
-          [{ text: 'OK' }]
+          'Unknown room',
+          `"${newEvent.room}" wasn't found in this building. Please select a room from the suggestions.`
         );
         return;
       }
@@ -451,32 +480,27 @@ export default function CalendarScreen() {
     if (newEvent.notify && newEvent.notifyInAdvance != null) {
       const [year, month, day] = selectedDate.split('-');
       const eventTime = new Date(
-        parseInt(year),
-        parseInt(month) - 1, 
-        parseInt(day),
-        timeValue.getHours(),
-        timeValue.getMinutes()
+        parseInt(year), parseInt(month) - 1, parseInt(day),
+        timeValue.getHours(), timeValue.getMinutes()
       );
-
       const triggerDate = new Date(eventTime.getTime() - newEvent.notifyInAdvance * 60000);
-
       if (triggerDate > new Date()) {
         await Notifications.scheduleNotificationAsync({
           content: {
-            title: `${newEvent.title}`,
-            body: combinedLocation ? `Head to ${combinedLocation}` : 'Your event is starting now!',
+            title: newEvent.title,
+            body: combinedLocation ? `Head to ${combinedLocation}` : 'Your event is starting!',
             sound: true,
           },
           trigger: { type: 'date', date: triggerDate } as Notifications.DateTriggerInput,
         });
       } else {
-        Alert.alert("Note", "The time you selected is in the past, so you will not be notified");
+        Alert.alert('Note', 'The notification time is in the past — you won\'t be notified for this event.');
       }
     }
 
-    const eventId = editingEventId ? editingEventId : Date.now().toString();
+    const eventId = editingEventId ?? Date.now().toString();
     const { data: { user } } = await supabase.auth.getUser();
-    const dbEventData = {
+    const { error } = await supabase.from('events').upsert({
       id: eventId,
       user_id: user?.id,
       event_date: selectedDate,
@@ -485,18 +509,16 @@ export default function CalendarScreen() {
       time: newEvent.time,
       notify: newEvent.notify,
       notify_in_advance: newEvent.notifyInAdvance,
-      group_id: newEvent.groupId
-    };
-
-    const { error } = await supabase.from('events').upsert(dbEventData);
+      group_id: newEvent.groupId,
+    });
 
     if (error) {
-      Alert.alert('Database Error', 'Could not save event.');
+      Alert.alert('Error', 'Could not save event. Please try again.');
       console.error('Supabase error:', error);
       return;
     }
 
-    const localEventData = {
+    const localEvent = {
       id: eventId,
       title: newEvent.title,
       location: combinedLocation,
@@ -508,182 +530,159 @@ export default function CalendarScreen() {
     };
 
     setEvents(prev => {
-      const currentDayEvents = prev[selectedDate] || [];
-      if (editingEventId) {
-        return {
-          ...prev,
-          [selectedDate]: currentDayEvents.map(e => e.id === editingEventId ? localEventData : e)
-        };
-      } else {
-        return {
-          ...prev,
-          [selectedDate]: [...currentDayEvents, localEventData]
-        };
-      }
+      const current = prev[selectedDate] ?? [];
+      return {
+        ...prev,
+        [selectedDate]: editingEventId
+          ? current.map(e => e.id === editingEventId ? localEvent : e)
+          : [...current, localEvent],
+      };
     });
 
-    setNewEvent({ title: '', building: '', room: '', time: '', notify: false, notifyInAdvance: null, groupId: null});
+    setNewEvent({ title: '', building: '', room: '', time: '', notify: false, notifyInAdvance: null, groupId: null });
     setTimeValue(new Date());
     setEditingEventId(null);
     setShowTimePicker(false);
     setShowAddModal(false);
   };
 
-
   const handleDeleteEvent = () => {
     if (!editingEventId) return;
-
-    Alert.alert('Delete Event', 'Are you sure you want to delete this event?', [
+    Alert.alert('Delete event', 'Are you sure you want to delete this event?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-        
-          const { error } = await supabase
-            .from('events')
-            .delete()
-            .eq('id', editingEventId);
-
+          const { error } = await supabase.from('events').delete().eq('id', editingEventId);
           if (error) {
-            Alert.alert('Error', 'Could not delete event from database');
-            console.error('Supabase delete error:', error);
+            Alert.alert('Error', 'Could not delete event.');
             return;
           }
-
           setEvents(prev => ({
             ...prev,
-            [selectedDate]: prev[selectedDate].filter(e => e.id !== editingEventId)
+            [selectedDate]: (prev[selectedDate] ?? []).filter(e => e.id !== editingEventId),
           }));
           setShowAddModal(false);
           setEditingEventId(null);
-        }
-      }
+        },
+      },
     ]);
   };
 
+  // -------------------------------------------------------------------------
+  // Event card
+  // -------------------------------------------------------------------------
+  const renderEventCard = (item: any) => {
+    const groupName = item.groupId
+      ? groups.find(g => String(g.id) === String(item.groupId))?.name
+      : null;
 
-  const renderEventCard = ({ item }: { item: any }) => (
-    <View style={styles.eventCardWrap}>
-      <TouchableOpacity
-        style={styles.eventCardTouchable}
-        onPress={() => handleEventPress(item.location)}
-        activeOpacity={0.72}
-      >
-        <View style={styles.eventTextCol}>
-          <View style={styles.eventMetaRow}>
-            <View style={styles.eventTimePill}>
-              <MaterialIcons name="schedule" size={12} color={PRIMARY} style={{ marginRight: 4 }} />
-              <Text style={styles.eventTime}>{item.time}</Text>
-            </View>
+    return (
+      <View key={String(item.id)} style={styles.eventCardWrap}>
+        <TouchableOpacity
+          style={styles.eventCardTouchable}
+          onPress={() => handleEventPress(item.location)}
+          activeOpacity={0.72}
+        >
+          <View style={styles.eventTimeCol}>
+            <Text style={styles.eventTime}>{item.time}</Text>
           </View>
-          <Text style={styles.eventTitle} numberOfLines={2}>
-            {item.title}
-          </Text>
-          {item.location ? (
-            <View style={styles.eventLocationRow}>
-              <MaterialIcons name="location-on" size={13} color={MUTED_COOL} style={{ marginRight: 3 }} />
-              <Text style={styles.eventSubtitle} numberOfLines={1}>
-                {item.location}
-              </Text>
-            </View>
-          ) : (
-            <Text style={styles.eventSubtitleMuted}>No location</Text>
-          )}
-        </View>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={styles.eventEditBtn}
-        onPress={() => handleOpenEditModal(item)}
-        accessibilityRole="button"
-        accessibilityLabel="Edit event"
-      >
-        <MaterialIcons name="edit" size={15} color={PRIMARY} style={{ marginRight: 3 }} />
-        <Text style={styles.eventEditBtnText}>Edit</Text>
-      </TouchableOpacity>
-    </View>
-  );
+          <View style={styles.eventTextCol}>
+            <Text style={styles.eventTitle} numberOfLines={2}>{item.title}</Text>
+            {item.location ? (
+              <Text style={styles.eventSubtitle} numberOfLines={1}>{item.location}</Text>
+            ) : null}
+            {groupName ? (
+              <View style={styles.eventGroupBadge}>
+                <MaterialIcons name="groups" size={11} color={PRIMARY} style={{ marginRight: 3 }} />
+                <Text style={styles.eventGroupBadgeText}>{groupName}</Text>
+              </View>
+            ) : null}
+          </View>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.eventEditBtn}
+          onPress={() => handleOpenEditModal(item)}
+          accessibilityLabel="Edit event"
+        >
+          <MaterialIcons name="edit" size={15} color={PRIMARY} style={{ marginRight: 3 }} />
+          <Text style={styles.eventEditBtnText}>Edit</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
 
-  const sortedEvents = useMemo(() => {
-    const dayEvents = events[selectedDate] || [];
-    let list = dayEvents;
-    if (groupEventsOnly && selectedGroupFilterId) {
-      list = dayEvents.filter((e) => eventGroupId(e) === selectedGroupFilterId);
-    } else if (groupEventsOnly && !selectedGroupFilterId) {
-      list = [];
-    }
-    return [...list].sort((a, b) => {
-      const timeA = parseTimeString(a.time).getTime();
-      const timeB = parseTimeString(b.time).getTime();
-      return timeA - timeB;
-    });
-  }, [events, selectedDate, groupEventsOnly, selectedGroupFilterId]);
-
+  // -------------------------------------------------------------------------
+  // Render
+  // -------------------------------------------------------------------------
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
+
+      {/* ── Add / Edit event modal ── */}
       <Modal visible={showAddModal} transparent animationType="slide" onRequestClose={() => setShowAddModal(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
           <Pressable style={styles.modalOverlay} onPress={() => setShowAddModal(false)}>
-            <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
-              
+            <Pressable style={styles.modalContent} onPress={e => e.stopPropagation()}>
+
+              <View style={styles.modalHandle} />
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>{editingEventId ? 'Edit Event' : 'Add Event'}</Text>
-                <Text style={styles.modalDate}>{selectedDate}</Text>
+                <Text style={styles.modalTitle}>{editingEventId ? 'Edit Event' : 'New Event'}</Text>
+                <Text style={styles.modalDate}>{formatSelectedDate(selectedDate)}</Text>
               </View>
 
-              <ScrollView style={styles.formContainer} showsVerticalScrollIndicator={false}>
+              <ScrollView style={styles.formContainer} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+
+                {/* Group */}
                 <Text style={styles.label}>Group</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
                   <TouchableOpacity
                     style={[styles.chip, !newEvent.groupId && styles.chipSelected]}
                     onPress={() => setNewEvent(prev => ({ ...prev, groupId: null }))}
                   >
-                    <Text style={[styles.chipText, !newEvent.groupId && styles.chipTextSelected]}>
-                      None
-                    </Text>
+                    <Text style={[styles.chipText, !newEvent.groupId && styles.chipTextSelected]}>None</Text>
                   </TouchableOpacity>
-
-                  {groups.map((group) => {
-                    const isSelected = newEvent.groupId === group.id;
+                  {groups.map(group => {
+                    const isSelected = String(newEvent.groupId) === String(group.id);
                     return (
                       <TouchableOpacity
                         key={group.id}
                         style={[styles.chip, isSelected && styles.chipSelected]}
-                        onPress={() => setNewEvent(prev => ({ ...prev, groupId: group.id }))}
+                        onPress={() => setNewEvent(prev => ({ ...prev, groupId: String(group.id) }))}
                       >
-                        <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
-                          {group.name}
-                        </Text>
+                        <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>{group.name}</Text>
                       </TouchableOpacity>
                     );
                   })}
                 </ScrollView>
 
+                {/* Title */}
                 <Text style={styles.label}>Event Title *</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="e.g., CS313E Class"
+                  placeholder="e.g. CS313E Class"
                   value={newEvent.title}
-                  onChangeText={(text) => setNewEvent(prev => ({...prev, title: text }))}
-                  placeholderTextColor={MUTED_COOL}
+                  onChangeText={text => setNewEvent(prev => ({ ...prev, title: text }))}
+                  placeholderTextColor="#999"
                 />
 
+                {/* Location */}
                 <Text style={styles.label}>Location</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
                   <View style={{ flex: 1 }}>
                     <TextInput
                       style={styles.input}
-                      placeholder="Building (GDC, PCL...)"
+                      placeholder="Building (GDC, PCL…)"
                       value={newEvent.building}
                       onChangeText={handleBuildingChange}
-                      placeholderTextColor={MUTED_COOL}
+                      placeholderTextColor="#999"
                     />
                     {locationSearching && (
-                      <Text style={{ color: MUTED_COOL, fontSize: 12, marginTop: 4 }}>Searching...</Text>
+                      <Text style={styles.searchingHint}>Searching…</Text>
                     )}
                     {locationSuggestions.length > 0 && (
                       <View style={styles.suggestionsContainer}>
-                        {locationSuggestions.map((item) => (
+                        {locationSuggestions.map(item => (
                           <TouchableOpacity
                             key={item.id}
                             style={styles.suggestionRow}
@@ -703,19 +702,17 @@ export default function CalendarScreen() {
                   </View>
                   <View style={{ width: 90 }}>
                     <TextInput
-                      style={[styles.input, !newEvent.building.trim() && { opacity: 1 }]}
+                      style={[styles.input, !newEvent.building.trim() && { opacity: 0.5 }]}
                       placeholder="Room"
                       value={newEvent.room}
                       onChangeText={handleRoomChange}
-                      placeholderTextColor={MUTED_COOL}
+                      placeholderTextColor="#999"
                       editable={!!newEvent.building.trim()}
                     />
-                    {roomSearching && (
-                      <Text style={{ color: MUTED_COOL, fontSize: 12, marginTop: 4 }}>...</Text>
-                    )}
+                    {roomSearching && <Text style={styles.searchingHint}>…</Text>}
                     {roomSuggestions.length > 0 && (
                       <View style={styles.suggestionsContainer}>
-                        {roomSuggestions.map((node) => (
+                        {roomSuggestions.map(node => (
                           <TouchableOpacity
                             key={node.id}
                             style={styles.suggestionRow}
@@ -726,52 +723,45 @@ export default function CalendarScreen() {
                         ))}
                       </View>
                     )}
-                    {roomError ? (
-                      <Text style={{ color: '#dc2626', fontSize: 12, marginTop: 4 }}>{roomError}</Text>
-                    ) : null}
+                    {roomError ? <Text style={styles.errorHint}>{roomError}</Text> : null}
                   </View>
                 </View>
 
+                {/* Time */}
                 <Text style={styles.label}>Time *</Text>
-                <TouchableOpacity 
-                  style={styles.timeSelector}
-                  onPress={() => setShowTimePicker(true)}
-                >
+                <TouchableOpacity style={styles.timeSelector} onPress={() => setShowTimePicker(true)}>
                   <MaterialIcons name="access-time" size={20} color={PRIMARY} style={{ marginRight: 8 }} />
-                  <Text style={[styles.timeSelectorText, !newEvent.time && { color: MUTED_COOL }]}>
+                  <Text style={[styles.timeSelectorText, !newEvent.time && { color: '#999' }]}>
                     {newEvent.time || 'Tap to select time'}
                   </Text>
                 </TouchableOpacity>
-
                 {showTimePicker && (
-                  <View style={Platform.OS === 'ios' ? styles.iosPickerContainer : null}>
+                  <View style={Platform.OS === 'ios' ? styles.iosPickerContainer : undefined}>
                     <DateTimePicker
                       value={timeValue}
                       mode="time"
                       display={Platform.OS === 'ios' ? 'spinner' : 'default'}
                       onChange={onTimeChange}
-                      textColor={TEXT_PRIMARY}
+                      textColor="#000000"
                       themeVariant="light"
                     />
                     {Platform.OS === 'ios' && (
-                      <TouchableOpacity 
-                        style={styles.iosPickerDoneButton}
-                        onPress={() => setShowTimePicker(false)}
-                      >
+                      <TouchableOpacity style={styles.iosPickerDoneButton} onPress={() => setShowTimePicker(false)}>
                         <Text style={styles.iosPickerDoneText}>Done</Text>
                       </TouchableOpacity>
                     )}
                   </View>
                 )}
 
+                {/* Alert */}
                 <Text style={styles.label}>Alert</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
                   {[
                     { label: 'None', value: null },
                     { label: 'At start', value: 0 },
                     { label: '10 min before', value: 10 },
-                    { label: '1 hour before', value: 60 }
-                  ].map((option) => {
+                    { label: '1 hour before', value: 60 },
+                  ].map(option => {
                     const isSelected = newEvent.notifyInAdvance === option.value;
                     return (
                       <TouchableOpacity
@@ -780,32 +770,29 @@ export default function CalendarScreen() {
                         onPress={() => setNewEvent(prev => ({
                           ...prev,
                           notifyInAdvance: option.value,
-                          notify: option.value !== null
+                          notify: option.value !== null,
                         }))}
                       >
-                        <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
-                          {option.label}
-                        </Text>
+                        <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>{option.label}</Text>
                       </TouchableOpacity>
                     );
                   })}
                 </ScrollView>
 
-
                 {editingEventId && (
                   <TouchableOpacity style={styles.deleteFormButton} onPress={handleDeleteEvent}>
+                    <MaterialIcons name="delete-outline" size={18} color="#dc2626" style={{ marginRight: 6 }} />
                     <Text style={styles.deleteFormText}>Delete Event</Text>
                   </TouchableOpacity>
                 )}
-                
               </ScrollView>
 
               <View style={styles.modalButtons}>
                 <TouchableOpacity style={styles.cancelButton} onPress={() => setShowAddModal(false)}>
                   <Text style={styles.cancelButtonText}>Cancel</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.addButton} onPress={handleSaveEvent}>
-                  <Text style={styles.addButtonText}>{editingEventId ? 'Update Event' : 'Save Event'}</Text>
+                <TouchableOpacity style={styles.saveButton} onPress={handleSaveEvent}>
+                  <Text style={styles.saveButtonText}>{editingEventId ? 'Update' : 'Save'}</Text>
                 </TouchableOpacity>
               </View>
 
@@ -814,162 +801,167 @@ export default function CalendarScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* ── Header ── */}
       <View style={styles.banner}>
         <View style={styles.headerBlock}>
           <Text style={styles.pageTitle}>Calendar</Text>
-          <TouchableOpacity
-            style={styles.headerAddBtn}
-            onPress={handleOpenAddModal}
-            accessibilityRole="button"
-            accessibilityLabel="Add event"
-          >
+          <TouchableOpacity style={styles.headerAddBtn} onPress={handleOpenAddModal} accessibilityLabel="Add event">
             <MaterialIcons name="add" size={22} color={PRIMARY} />
           </TouchableOpacity>
         </View>
       </View>
 
       <View style={styles.contentContainer}>
-      <ScrollView
-        style={styles.scrollPage}
-        contentContainerStyle={styles.scrollPageContent}
-        showsVerticalScrollIndicator
-        keyboardShouldPersistTaps="handled"
-        nestedScrollEnabled
-      >
-        {groupNameDisplay ? (
-          <View style={styles.groupContextRow}>
-            <MaterialIcons name="groups" size={20} color={PRIMARY} style={{ marginRight: 8 }} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.groupContextLabel}>Opened from group</Text>
-              <Text style={styles.groupContextName} numberOfLines={2}>
-                {groupNameDisplay}
-              </Text>
-            </View>
-          </View>
-        ) : null}
+        <ScrollView
+          style={styles.scrollPage}
+          contentContainerStyle={styles.scrollPageContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+        >
 
-        <View style={styles.filterCard}>
-          <View style={styles.filterRow}>
-            <View style={styles.filterLabelCol}>
-              <Text style={styles.filterTitle}>Group events only</Text>
-              <Text style={styles.filterHint}>
-                Show calendar and list for one group
-              </Text>
-            </View>
-            <View style={styles.switchSlot}>
-              <Switch
-                value={groupEventsOnly}
-                onValueChange={(on) => {
-                  setGroupEventsOnly(on);
-                  if (!on) setSelectedGroupFilterId(null);
-                  else if (groups.length === 1) setSelectedGroupFilterId(String(groups[0].id));
-                }}
-                trackColor={switchTrackColors}
-                thumbColor={switchThumbColor(groupEventsOnly, PRIMARY)}
-                ios_backgroundColor={switchTrackColors.false}
-              />
-            </View>
+          {/* ── Group filter chip bar ── */}
+          {groups.length > 0 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.filterChipScroll}
+              style={styles.filterChipBar}
+            >
+              <TouchableOpacity
+                style={[styles.filterChip, !selectedGroupFilterId && styles.filterChipSelected]}
+                onPress={() => setSelectedGroupFilterId(null)}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.filterChipText, !selectedGroupFilterId && styles.filterChipTextSelected]}>
+                  All
+                </Text>
+              </TouchableOpacity>
+              {groups.map(g => {
+                const selected = selectedGroupFilterId === String(g.id);
+                return (
+                  <TouchableOpacity
+                    key={g.id}
+                    style={[styles.filterChip, selected && styles.filterChipSelected]}
+                    onPress={() => setSelectedGroupFilterId(String(g.id))}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.filterChipText, selected && styles.filterChipTextSelected]}>
+                      {g.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          )}
+
+          {/* ── Calendar ── */}
+          <View style={styles.calendarCard}>
+            <Calendar
+              current={TODAY}
+              onDayPress={(day: any) => setSelectedDate(day.dateString)}
+              markedDates={markedDates}
+              theme={{
+                todayTextColor: PRIMARY,
+                arrowColor: PRIMARY,
+                selectedDayBackgroundColor: PRIMARY,
+                selectedDayTextColor: '#ffffff',
+                dotColor: PRIMARY,
+                monthTextColor: '#334155',
+                textDayFontWeight: '500',
+                textMonthFontWeight: '700',
+                textDayHeaderFontWeight: '600',
+              }}
+            />
           </View>
-          {groupEventsOnly ? (
-            <View style={styles.filterChipsWrap}>
+
+          {/* ── Upcoming strip ── */}
+          {upcomingEvents.length > 0 && (
+            <View style={styles.upcomingSection}>
+              <Text style={styles.upcomingSectionLabel}>UPCOMING</Text>
               <ScrollView
                 horizontal
-                nestedScrollEnabled
                 showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.groupChipScroll}
+                contentContainerStyle={styles.upcomingScroll}
               >
-                {groups.length === 0 ? (
-                  <Text style={styles.filterNoGroups}>No groups available</Text>
-                ) : (
-                  groups.map((g) => {
-                    const id = String(g.id);
-                    const selected = selectedGroupFilterId === id;
-                    return (
-                      <TouchableOpacity
-                        key={id}
-                        style={[styles.filterChip, selected && styles.filterChipSelected]}
-                        onPress={() => setSelectedGroupFilterId(id)}
-                        activeOpacity={0.85}
-                      >
-                        <Text style={[styles.filterChipText, selected && styles.filterChipTextSelected]}>
-                          {g.name}
+                {upcomingEvents.map(({ date, event }) => {
+                  const groupName = event.groupId
+                    ? groups.find(g => String(g.id) === String(event.groupId))?.name
+                    : null;
+                  const isToday = date === TODAY;
+                  return (
+                    <TouchableOpacity
+                      key={`${date}-${event.id}`}
+                      style={[styles.upcomingCard, selectedDate === date && styles.upcomingCardSelected]}
+                      onPress={() => setSelectedDate(date)}
+                      activeOpacity={0.75}
+                    >
+                      <View style={[styles.upcomingDateBadge, isToday && styles.upcomingDateBadgeToday]}>
+                        <Text style={[styles.upcomingDateBadgeText, isToday && styles.upcomingDateBadgeTextToday]}>
+                          {formatUpcomingDate(date)}
                         </Text>
-                      </TouchableOpacity>
-                    );
-                  })
-                )}
+                      </View>
+                      <Text style={styles.upcomingCardTime}>{event.time}</Text>
+                      <Text style={styles.upcomingCardTitle} numberOfLines={2}>{event.title}</Text>
+                      {event.location ? (
+                        <Text style={styles.upcomingCardLocation} numberOfLines={1}>{event.location}</Text>
+                      ) : null}
+                      {groupName ? (
+                        <View style={styles.upcomingCardGroupBadge}>
+                          <MaterialIcons name="groups" size={10} color={PRIMARY} style={{ marginRight: 3 }} />
+                          <Text style={styles.upcomingCardGroupText}>{groupName}</Text>
+                        </View>
+                      ) : null}
+                    </TouchableOpacity>
+                  );
+                })}
               </ScrollView>
             </View>
-          ) : null}
-        </View>
+          )}
 
-        <View style={styles.calendarCard}>
-          <Calendar
-            current={TODAY}
-            onDayPress={(day: any) => setSelectedDate(day.dateString)}
-            markedDates={markedDates}
-            theme={{
-              todayTextColor: PRIMARY,
-              arrowColor: PRIMARY,
-              selectedDayBackgroundColor: PRIMARY,
-              selectedDayTextColor: '#ffffff',
-              dotColor: PRIMARY,
-              monthTextColor: '#334155',
-              textDayFontWeight: '500',
-              textMonthFontWeight: '700',
-              textDayHeaderFontWeight: '600',
-            }}
-          />
-        </View>
-
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Events</Text>
-          {sortedEvents.length > 0 ? (
-            <View style={styles.countPill}>
-              <Text style={styles.countPillText}>{sortedEvents.length}</Text>
-            </View>
-          ) : null}
-        </View>
-        <Text style={styles.dateSubline}>{selectedDate}</Text>
-
-        {groupEventsOnly && !selectedGroupFilterId ? (
-          <View style={styles.emptyCard}>
-            <View style={styles.emptyIconCircle}>
-              <MaterialIcons name="groups" size={30} color={PRIMARY_LIGHT} />
-            </View>
-            <Text style={styles.emptyTitle}>Select a group</Text>
-            <Text style={styles.emptySubtitle}>
-              Choose which group&apos;s events to show using the chips above.
-            </Text>
+          {/* ── Events list ── */}
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Events</Text>
+            {sortedEvents.length > 0 && (
+              <View style={styles.countPill}>
+                <Text style={styles.countPillText}>{sortedEvents.length}</Text>
+              </View>
+            )}
           </View>
-        ) : sortedEvents.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <View style={styles.emptyIconCircle}>
-              <MaterialIcons name="event-available" size={30} color={PRIMARY_LIGHT} />
+          <Text style={styles.dateSubline}>{formatSelectedDate(selectedDate)}</Text>
+
+          {sortedEvents.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <View style={styles.emptyIconCircle}>
+                <MaterialIcons name="event-available" size={30} color="#cbd5e1" />
+              </View>
+              <Text style={styles.emptyTitle}>No events</Text>
+              <Text style={styles.emptySubtitle}>
+                {selectedGroupFilterId
+                  ? 'No events for this group on this day. Tap + to add one.'
+                  : 'Nothing scheduled for this day. Tap + to add an event.'}
+              </Text>
             </View>
-            <Text style={styles.emptyTitle}>No events this day</Text>
-            <Text style={styles.emptySubtitle}>
-              Tap + to add one, or choose another date on the calendar.
-            </Text>
-          </View>
-        ) : (
-          sortedEvents.map((item) => (
-            <View key={String(item.id)}>{renderEventCard({ item })}</View>
-          ))
-        )}
-      </ScrollView>
+          ) : (
+            sortedEvents.map(item => renderEventCard(item))
+          )}
+
+        </ScrollView>
       </View>
     </SafeAreaView>
   );
 }
 
+// ---------------------------------------------------------------------------
+// Styles
+// ---------------------------------------------------------------------------
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: PRIMARY,
+    backgroundColor: '#0B617E',
   },
   banner: {
-    backgroundColor: PRIMARY,
+    backgroundColor: '#0B617E',
     paddingHorizontal: 20,
     paddingTop: 20,
     paddingBottom: 10,
@@ -982,90 +974,15 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     flex: 1,
-    backgroundColor: BG_COOL,
+    backgroundColor: '#f5f7f9',
   },
   scrollPage: {
     flex: 1,
   },
   scrollPageContent: {
     paddingHorizontal: 20,
-    paddingTop: 22,
+    paddingTop: 16,
     paddingBottom: 48,
-  },
-  filterCard: {
-    backgroundColor: 'rgba(127, 179, 197, 0.22)',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(127, 179, 197, 0.4)',
-    padding: 14,
-    marginBottom: 16,
-    shadowColor: PRIMARY,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 1,
-  },
-  filterRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 0,
-  },
-  filterLabelCol: {
-    flex: 1,
-    marginRight: 12,
-  },
-  switchSlot: {
-    width: 58,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 4,
-  },
-  filterTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: TEXT_PRIMARY,
-  },
-  filterHint: {
-    fontSize: 12,
-    color: TEXT_SECONDARY,
-    marginTop: 2,
-  },
-  filterChipsWrap: {
-    marginTop: 12,
-    borderRadius: 12,
-  },
-  groupChipScroll: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-  },
-  filterChip: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    backgroundColor: BG_COOL,
-    borderRadius: 10,
-    marginRight: 8,
-    borderWidth: 1,
-    borderColor: BORDER_COOL,
-  },
-  filterChipSelected: {
-    backgroundColor: PRIMARY,
-    borderColor: PRIMARY,
-  },
-  filterChipText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: TEXT_SECONDARY,
-  },
-  filterChipTextSelected: {
-    color: '#fff',
-  },
-  filterNoGroups: {
-    fontSize: 13,
-    color: MUTED_COOL,
-    paddingVertical: 8,
   },
   headerBlock: {
     flexDirection: 'row',
@@ -1091,33 +1008,49 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 3,
   },
-  groupContextRow: {
+
+  // ── Group filter chip bar ──
+  filterChipBar: {
+    marginBottom: 16,
+  },
+  filterChipScroll: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    backgroundColor: 'rgba(127, 179, 197, 0.22)',
-    borderRadius: 12,
+    paddingVertical: 2,
+  },
+  filterChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    marginRight: 8,
     borderWidth: 1,
-    borderColor: 'rgba(127, 179, 197, 0.4)',
+    borderColor: '#d1d5db',
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
   },
-  groupContextLabel: {
-    fontSize: 12,
+  filterChipSelected: {
+    backgroundColor: PRIMARY,
+    borderColor: PRIMARY,
+  },
+  filterChipText: {
+    fontSize: 13,
     fontWeight: '600',
-    color: PRIMARY,
-    marginBottom: 2,
+    color: '#64748b',
   },
-  groupContextName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: TEXT_PRIMARY,
+  filterChipTextSelected: {
+    color: '#fff',
   },
+
+  // ── Calendar ──
   calendarCard: {
     backgroundColor: '#fff',
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: BORDER_COOL,
+    borderColor: '#e8eef2',
     paddingBottom: 8,
     marginBottom: 20,
     shadowColor: '#0f172a',
@@ -1127,6 +1060,8 @@ const styles = StyleSheet.create({
     elevation: 1,
     overflow: 'hidden',
   },
+
+  // ── Events section ──
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1135,13 +1070,13 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 12,
     fontWeight: '700',
-    color: MUTED_COOL,
+    color: '#475569',
     letterSpacing: 1.2,
     textTransform: 'uppercase',
   },
   countPill: {
     marginLeft: 8,
-    backgroundColor: 'rgba(127, 179, 197, 0.3)',
+    backgroundColor: 'rgba(11, 97, 126, 0.12)',
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 8,
@@ -1153,52 +1088,42 @@ const styles = StyleSheet.create({
   },
   dateSubline: {
     fontSize: 14,
-    color: MUTED_COOL,
+    color: '#94a3b8',
     marginBottom: 12,
     fontWeight: '500',
   },
+
+  // ── Event card ──
   eventCardWrap: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     backgroundColor: '#fff',
-    borderRadius: 18,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: BORDER_COOL,
-    marginBottom: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    shadowColor: PRIMARY,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    elevation: 2,
+    borderColor: '#e8eef2',
+    marginBottom: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
   },
   eventCardTouchable: {
     flex: 1,
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     minWidth: 0,
-    marginRight: 10,
+    marginRight: 8,
   },
-  eventMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  eventTimePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(127, 179, 197, 0.22)',
-    borderWidth: 1,
-    borderColor: 'rgba(127, 179, 197, 0.4)',
-    borderRadius: 999,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    alignSelf: 'flex-start',
+  eventTimeCol: {
+    minWidth: 64,
+    marginRight: 12,
   },
   eventTime: {
     fontWeight: '700',
-    fontSize: 12,
+    fontSize: 13,
     color: PRIMARY,
   },
   eventTextCol: {
@@ -1206,34 +1131,34 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   eventTitle: {
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '600',
-    color: TEXT_PRIMARY,
-    marginBottom: 4,
-  },
-  eventLocationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    color: '#0f172a',
+    marginBottom: 2,
   },
   eventSubtitle: {
     fontSize: 13,
-    color: MUTED_COOL,
-    flexShrink: 1,
+    color: '#94a3b8',
   },
-  eventSubtitleMuted: {
-    fontSize: 13,
-    color: MUTED_COOL,
-    fontStyle: 'italic',
+  eventGroupBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  eventGroupBadgeText: {
+    fontSize: 11,
+    color: PRIMARY,
+    fontWeight: '600',
   },
   eventEditBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 10,
-    backgroundColor: 'rgba(127, 179, 197, 0.2)',
+    paddingVertical: 5,
+    paddingHorizontal: 9,
+    borderRadius: 8,
+    backgroundColor: '#fff',
     borderWidth: 1,
-    borderColor: 'rgba(127, 179, 197, 0.42)',
+    borderColor: '#e2e8f0',
     flexShrink: 0,
   },
   eventEditBtnText: {
@@ -1241,13 +1166,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+
+  // ── Empty state ──
   emptyCard: {
     backgroundColor: '#fff',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: BORDER_COOL,
+    borderColor: '#e8eef2',
     borderStyle: 'dashed',
-    paddingVertical: 28,
+    paddingVertical: 32,
     paddingHorizontal: 20,
     alignItems: 'center',
     marginTop: 4,
@@ -1256,7 +1183,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: 'rgba(127, 179, 197, 0.22)',
+    backgroundColor: '#f8fafc',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
@@ -1264,16 +1191,18 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: TEXT_PRIMARY,
+    color: '#334155',
     marginBottom: 6,
   },
   emptySubtitle: {
     fontSize: 14,
-    color: MUTED_COOL,
+    color: '#94a3b8',
     textAlign: 'center',
     lineHeight: 20,
     maxWidth: 260,
   },
+
+  // ── Modal ──
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.45)',
@@ -1281,75 +1210,92 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingTop: 12,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     maxHeight: '88%',
-    borderWidth: 1,
-    borderColor: BORDER_COOL,
+  },
+  modalHandle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: '#d4d8de',
+    marginTop: 12,
+    marginBottom: 4,
   },
   modalHeader: {
     paddingHorizontal: 20,
     paddingBottom: 14,
+    paddingTop: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: BORDER_COOL,
+    borderBottomColor: '#e8eef2',
   },
   modalTitle: {
     fontSize: 22,
     fontWeight: '700',
     color: PRIMARY,
-    marginBottom: 4,
+    marginBottom: 2,
   },
   modalDate: {
-    fontSize: 14,
-    color: TEXT_SECONDARY,
+    fontSize: 13,
+    color: '#64748b',
     fontWeight: '500',
   },
   formContainer: {
     paddingHorizontal: 20,
-    paddingTop: 8,
+    paddingTop: 4,
   },
   label: {
     fontSize: 11,
     fontWeight: '700',
-    color: TEXT_SECONDARY,
+    color: '#64748b',
     marginBottom: 8,
-    marginTop: 14,
+    marginTop: 16,
     letterSpacing: 0.8,
     textTransform: 'uppercase',
   },
   input: {
     borderWidth: 1,
-    borderColor: BORDER_COOL,
+    borderColor: '#e2e8f0',
     borderRadius: 12,
     padding: 14,
     fontSize: 16,
-    backgroundColor: BG_COOL,
-    color: TEXT_PRIMARY,
+    backgroundColor: '#f8fafc',
+    color: '#0f172a',
+  },
+  searchingHint: {
+    color: '#94a3b8',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  errorHint: {
+    color: '#dc2626',
+    fontSize: 12,
+    marginTop: 4,
   },
   timeSelector: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: BORDER_COOL,
+    borderColor: '#e2e8f0',
     borderRadius: 12,
     padding: 14,
-    backgroundColor: BG_COOL,
+    backgroundColor: '#f8fafc',
   },
   timeSelectorText: {
     fontSize: 16,
-    color: TEXT_PRIMARY,
+    color: '#0f172a',
   },
   iosPickerContainer: {
-    backgroundColor: BG_COOL,
+    backgroundColor: '#f8fafc',
     borderRadius: 12,
     marginTop: 8,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: BORDER_COOL,
+    borderColor: '#e2e8f0',
   },
   iosPickerDoneButton: {
-    backgroundColor: BORDER_COOL,
+    backgroundColor: '#e2e8f0',
     padding: 12,
     alignItems: 'center',
   },
@@ -1358,69 +1304,18 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: PRIMARY,
   },
-  deleteFormButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#fff1f2',
-    paddingVertical: 14,
-    borderRadius: 12,
-    marginBottom: 16,
-    marginTop: 8,
-    borderWidth: 1,
-    borderColor: '#fecdd3',
-  },
-  deleteFormText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#dc2626',
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    padding: 20,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: BORDER_COOL,
-  },
-  cancelButton: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: BG_COOL,
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: TEXT_SECONDARY,
-  },
-  addButton: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: PRIMARY,
-    alignItems: 'center',
-    marginLeft: 8,
-  },
-  addButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#fff',
-  },
   chipRow: {
-    flexDirection: 'row',
-    marginTop: 8,
-    marginBottom: 16,
+    marginTop: 4,
+    marginBottom: 4,
   },
   chip: {
     paddingVertical: 8,
     paddingHorizontal: 14,
-    backgroundColor: BG_COOL,
+    backgroundColor: '#f1f5f9',
     borderRadius: 10,
     marginRight: 8,
     borderWidth: 1,
-    borderColor: BORDER_COOL,
+    borderColor: '#e2e8f0',
   },
   chipSelected: {
     backgroundColor: PRIMARY,
@@ -1429,16 +1324,15 @@ const styles = StyleSheet.create({
   chipText: {
     fontSize: 13,
     fontWeight: '600',
-    color: TEXT_SECONDARY,
+    color: '#64748b',
   },
   chipTextSelected: {
     color: '#fff',
   },
-
   suggestionsContainer: {
     marginTop: 4,
     borderWidth: 1,
-    borderColor: BORDER_COOL,
+    borderColor: '#e2e8f0',
     borderRadius: 12,
     backgroundColor: '#fff',
     overflow: 'hidden',
@@ -1449,16 +1343,152 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: BORDER_COOL,
+    borderBottomColor: '#e2e8f0',
   },
   suggestionName: {
     fontSize: 14,
     fontWeight: '600',
-    color: TEXT_PRIMARY,
+    color: '#0f172a',
   },
   suggestionAddress: {
     fontSize: 12,
-    color: MUTED_COOL,
+    color: '#94a3b8',
     marginTop: 1,
+  },
+  deleteFormButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff1f2',
+    paddingVertical: 14,
+    borderRadius: 12,
+    marginBottom: 8,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#fecdd3',
+  },
+  deleteFormText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#dc2626',
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    padding: 20,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+  },
+  cancelButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#f1f5f9',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  saveButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: PRIMARY,
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  saveButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+  },
+
+  // ── Upcoming strip ──
+  upcomingSection: {
+    marginBottom: 20,
+  },
+  upcomingSectionLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#475569',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    marginBottom: 10,
+  },
+  upcomingScroll: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingRight: 4,
+  },
+  upcomingCard: {
+    width: 150,
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e8eef2',
+    padding: 12,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
+  },
+  upcomingCardSelected: {
+    borderColor: PRIMARY,
+    borderWidth: 1.5,
+  },
+  upcomingDateBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#f1f5f9',
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    marginBottom: 8,
+  },
+  upcomingDateBadgeToday: {
+    backgroundColor: 'rgba(11, 97, 126, 0.12)',
+  },
+  upcomingDateBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  upcomingDateBadgeTextToday: {
+    color: PRIMARY,
+  },
+  upcomingCardTime: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: PRIMARY,
+    marginBottom: 3,
+  },
+  upcomingCardTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0f172a',
+    lineHeight: 19,
+  },
+  upcomingCardLocation: {
+    fontSize: 11,
+    color: '#94a3b8',
+    marginTop: 3,
+  },
+  upcomingCardGroupBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+    backgroundColor: 'rgba(11, 97, 126, 0.08)',
+    borderRadius: 5,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    alignSelf: 'flex-start',
+  },
+  upcomingCardGroupText: {
+    fontSize: 10,
+    color: PRIMARY,
+    fontWeight: '600',
   },
 });

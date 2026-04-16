@@ -213,7 +213,7 @@ export default function CreateGroupScreen() {
         <View style={styles.toggleRow}>
           <View style={styles.toggleTextCol}>
             <Text style={styles.toggleTitle}>Private group</Text>
-            <Text style={styles.toggleSubtitle}>Not discoverable — members join with a unique code</Text>
+            <Text style={styles.toggleSubtitle}>Not discoverable — members join with a code</Text>
           </View>
           <Switch
             value={isPrivate}
