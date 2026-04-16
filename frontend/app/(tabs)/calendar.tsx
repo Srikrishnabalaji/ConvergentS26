@@ -13,6 +13,8 @@ import {
   View,
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
+import type { CalendarProps, DateData } from 'react-native-calendars';
+import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -20,15 +22,63 @@ import * as Notifications from 'expo-notifications';
 import { supabase } from '@/lib/supabase';
 import { geocodeSearch, type SearchItem, GeocodingNetworkError } from '@/lib/services/geocoding';
 import { DEFAULT_USER_LOCATION } from '@/constants/map';
-import { searchRooms } from '@/lib/services/indoor-navigation';
 import gdcGraphData from '@/assets/gdc_graph.json';
-import type { BuildingGraph, GraphNode } from '@/lib/services/indoor-navigation';
+import {
+  searchRooms,
+  type BuildingGraph,
+  type GraphNode,
+} from '@/lib/services/indoor-navigation';
 import { parseLocationString, UT_BUILDINGS } from '@/lib/data/utBuildings';
 import { Chip, IconButton, PageShell, SectionLabel } from '@/components/ui';
 import { shadows } from '@/constants/shadows';
 import { cn } from '@/lib/cn';
 
 const PRIMARY = '#0B617E';
+
+type MarkedDatesMap = NonNullable<CalendarProps['markedDates']>;
+
+type GroupRow = { id: string; name: string };
+
+function unwrapGroup(g: unknown): GroupRow | null {
+  if (g == null) return null;
+  const row = Array.isArray(g) ? g[0] : g;
+  if (row && typeof row === 'object' && 'id' in row && 'name' in row) {
+    const o = row as { id: unknown; name: unknown };
+    return { id: String(o.id), name: String(o.name) };
+  }
+  return null;
+}
+
+type EventRow = {
+  id: string;
+  title: string;
+  location: string | null;
+  time: string;
+  notify: boolean;
+  notify_in_advance: number | null;
+  event_date: string;
+  group_id: string | null;
+};
+
+type CalendarEventItem = {
+  id: string;
+  title: string;
+  location: string;
+  time: string;
+  notify: boolean;
+  notifyInAdvance: number | null;
+  groupId: string | null;
+};
+
+type NewEventForm = {
+  title: string;
+  building: string;
+  room: string;
+  time: string;
+  notify: boolean;
+  notifyInAdvance: number | null;
+  groupId: string | null;
+};
 
 const getTodayString = () => {
   const today = new Date();
@@ -128,8 +178,8 @@ export default function CalendarScreen() {
   const paramGroupIdSingle = Array.isArray(paramGroupId) ? paramGroupId[0] : paramGroupId;
 
   const [selectedDate, setSelectedDate] = useState(TODAY);
-  const [events, setEvents] = useState<Record<string, any[]>>({});
-  const [groups, setGroups] = useState<{ id: string; name: string }[]>([]);
+  const [events, setEvents] = useState<Record<string, CalendarEventItem[]>>({});
+  const [groups, setGroups] = useState<GroupRow[]>([]);
   const [selectedGroupFilterId, setSelectedGroupFilterId] = useState<string | null>(null);
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -147,15 +197,7 @@ export default function CalendarScreen() {
   const [roomError, setRoomError] = useState<string | null>(null);
   const roomDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [newEvent, setNewEvent] = useState<{
-    title: string;
-    building: string;
-    room: string;
-    time: string;
-    notify: boolean;
-    notifyInAdvance: number | null;
-    groupId: string | null;
-  }>({
+  const [newEvent, setNewEvent] = useState<NewEventForm>({
     title: '',
     building: '',
     room: '',
@@ -176,9 +218,9 @@ export default function CalendarScreen() {
 
     if (memberData) {
       const userGroups = memberData
-        .map((r: any) => r.groups)
-        .filter(Boolean)
-        .sort((a: any, b: any) => a.name.localeCompare(b.name));
+        .map((r) => unwrapGroup(r.groups))
+        .filter((g): g is GroupRow => g != null)
+        .sort((a, b) => a.name.localeCompare(b.name));
       setGroups(userGroups);
     }
 
@@ -188,18 +230,18 @@ export default function CalendarScreen() {
       .eq('user_id', user.id);
 
     if (error) {
-      console.error('Error fetching events:', error);
+      if (__DEV__) console.error('Error fetching events:', error);
       return;
     }
 
     if (eventData) {
-      const formattedEvents: Record<string, any[]> = {};
-      eventData.forEach((event: any) => {
+      const formattedEvents: Record<string, CalendarEventItem[]> = {};
+      (eventData as EventRow[]).forEach((event) => {
         if (!formattedEvents[event.event_date]) formattedEvents[event.event_date] = [];
         formattedEvents[event.event_date].push({
           id: event.id,
           title: event.title,
-          location: event.location,
+          location: event.location ?? '',
           time: event.time,
           notify: event.notify,
           notifyInAdvance: event.notify_in_advance,
@@ -226,7 +268,7 @@ export default function CalendarScreen() {
 
   const eventsVisibleByFilter = useMemo(() => {
     if (!selectedGroupFilterId) return events;
-    const out: Record<string, any[]> = {};
+    const out: Record<string, CalendarEventItem[]> = {};
     Object.keys(events).forEach((date) => {
       const filtered = (events[date] ?? []).filter((e) => eventGroupId(e) === selectedGroupFilterId);
       if (filtered.length) out[date] = filtered;
@@ -235,7 +277,7 @@ export default function CalendarScreen() {
   }, [events, selectedGroupFilterId]);
 
   const markedDates = useMemo(() => {
-    const marked: Record<string, any> = {};
+    const marked: MarkedDatesMap = {};
     Object.keys(eventsVisibleByFilter).forEach((date) => {
       if ((eventsVisibleByFilter[date]?.length ?? 0) > 0) {
         marked[date] = { marked: true, dotColor: PRIMARY };
@@ -259,7 +301,7 @@ export default function CalendarScreen() {
   const upcomingEvents = useMemo(() => {
     const now = new Date();
     const todayStr = getTodayString();
-    const result: { date: string; event: any }[] = [];
+    const result: { date: string; event: CalendarEventItem }[] = [];
     const sortedDates = Object.keys(eventsVisibleByFilter).sort();
     for (const date of sortedDates) {
       if (date < todayStr) continue;
@@ -290,7 +332,7 @@ export default function CalendarScreen() {
     });
   };
 
-  const onTimeChange = (_event: any, selectedTime?: Date) => {
+  const onTimeChange = (_event: DateTimePickerEvent, selectedTime?: Date) => {
     if (Platform.OS === 'android') setShowTimePicker(false);
     if (selectedTime) {
       setTimeValue(selectedTime);
@@ -314,7 +356,7 @@ export default function CalendarScreen() {
     setRoomError(null);
   };
 
-  const handleOpenEditModal = (event: any) => {
+  const handleOpenEditModal = (event: CalendarEventItem) => {
     setEditingEventId(event.id);
     const stored: string = event.location ?? '';
     const dashIdx = stored.indexOf(' - ');
@@ -327,7 +369,7 @@ export default function CalendarScreen() {
       time: event.time,
       notify: event.notify,
       notifyInAdvance: event.notifyInAdvance ?? null,
-      groupId: event.groupId ?? event.group_id ?? null,
+      groupId: event.groupId ?? null,
     });
     setTimeValue(parseTimeString(event.time));
     setShowTimePicker(false);
@@ -492,7 +534,7 @@ export default function CalendarScreen() {
 
     if (error) {
       Alert.alert('Error', 'Could not save event. Please try again.');
-      console.error('Supabase error:', error);
+      if (__DEV__) console.error('Supabase error:', error);
       return;
     }
 
@@ -620,7 +662,7 @@ export default function CalendarScreen() {
         >
           <Calendar
             current={TODAY}
-            onDayPress={(day: any) => setSelectedDate(day.dateString)}
+            onDayPress={(day: DateData) => setSelectedDate(day.dateString)}
             markedDates={markedDates}
             theme={{
               todayTextColor: PRIMARY,
@@ -744,8 +786,8 @@ function EventCard({
   onOpen,
   onEdit,
 }: {
-  item: any;
-  groups: { id: string; name: string }[];
+  item: CalendarEventItem;
+  groups: GroupRow[];
   onOpen: () => void;
   onEdit: () => void;
 }) {
@@ -800,13 +842,13 @@ type EventFormModalProps = {
   onClose: () => void;
   editingEventId: string | null;
   selectedDate: string;
-  groups: { id: string; name: string }[];
-  newEvent: any;
-  setNewEvent: React.Dispatch<React.SetStateAction<any>>;
+  groups: GroupRow[];
+  newEvent: NewEventForm;
+  setNewEvent: React.Dispatch<React.SetStateAction<NewEventForm>>;
   timeValue: Date;
   showTimePicker: boolean;
   setShowTimePicker: (v: boolean) => void;
-  onTimeChange: (_e: any, selectedTime?: Date) => void;
+  onTimeChange: (e: DateTimePickerEvent, selectedTime?: Date) => void;
   onSave: () => void;
   onDelete: () => void;
   locationSuggestions: SearchItem[];
@@ -858,9 +900,7 @@ function EventFormModal(props: EventFormModalProps) {
             style={shadows.sheet}
             className="bg-white rounded-t-3xl"
           >
-            <View
-              style={{ maxHeight: '88%' as any }}
-            >
+            <View style={{ maxHeight: '88%' }}>
               <View className="self-center w-10 h-[5px] rounded-[3px] bg-[#d4d8de] mt-3 mb-1" />
               <View className="px-5 pb-3.5 pt-2 border-b border-line">
                 <Text className="text-[22px] font-bold text-primary mb-0.5">
@@ -881,14 +921,14 @@ function EventFormModal(props: EventFormModalProps) {
                   <FormChip
                     label="None"
                     active={!newEvent.groupId}
-                    onPress={() => setNewEvent((prev: any) => ({ ...prev, groupId: null }))}
+                    onPress={() => setNewEvent((prev) => ({ ...prev, groupId: null }))}
                   />
                   {groups.map((group) => (
                     <FormChip
                       key={group.id}
                       label={group.name}
                       active={String(newEvent.groupId) === String(group.id)}
-                      onPress={() => setNewEvent((prev: any) => ({ ...prev, groupId: String(group.id) }))}
+                      onPress={() => setNewEvent((prev) => ({ ...prev, groupId: String(group.id) }))}
                     />
                   ))}
                 </ScrollView>
@@ -897,7 +937,7 @@ function EventFormModal(props: EventFormModalProps) {
                 <FormInput
                   placeholder="e.g. CS313E Class"
                   value={newEvent.title}
-                  onChangeText={(text) => setNewEvent((prev: any) => ({ ...prev, title: text }))}
+                  onChangeText={(text) => setNewEvent((prev) => ({ ...prev, title: text }))}
                 />
 
                 <FormLabel>Location</FormLabel>
@@ -1008,7 +1048,7 @@ function EventFormModal(props: EventFormModalProps) {
                       label={option.label}
                       active={newEvent.notifyInAdvance === option.value}
                       onPress={() =>
-                        setNewEvent((prev: any) => ({
+                        setNewEvent((prev) => ({
                           ...prev,
                           notifyInAdvance: option.value,
                           notify: option.value !== null,

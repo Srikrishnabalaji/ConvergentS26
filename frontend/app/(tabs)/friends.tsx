@@ -12,11 +12,14 @@ import { router } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { parseLocationString, UT_BUILDINGS } from '@/lib/data/utBuildings';
 import { supabase } from '@/lib/supabase';
-import { geocodeSearch } from '@/lib/services/geocoding';
+import { geocodeSearch, type SearchItem } from '@/lib/services/geocoding';
 import { DEFAULT_USER_LOCATION } from '@/constants/map';
-import { searchRooms } from '@/lib/services/indoor-navigation';
 import gdcGraphData from '@/assets/gdc_graph.json';
-import type { BuildingGraph } from '@/lib/services/indoor-navigation';
+import {
+  searchRooms,
+  type BuildingGraph,
+  type GraphNode,
+} from '@/lib/services/indoor-navigation';
 import {
   Avatar,
   BottomSheet,
@@ -37,6 +40,26 @@ type Friend = {
 };
 
 type FriendsTab = 'my_friends' | 'added_me' | 'find_friends';
+
+type ProfileSnippet = {
+  id: string;
+  full_name: string | null;
+  location_building?: string | null;
+  location_room?: string | null;
+};
+
+/** Supabase may type embedded relations as T | T[] depending on client inference. */
+function unwrapProfile(p: unknown): ProfileSnippet | null {
+  if (p == null) return null;
+  const row = Array.isArray(p) ? p[0] : p;
+  if (row && typeof row === 'object' && 'id' in row && typeof (row as { id: unknown }).id === 'string') {
+    return row as ProfileSnippet;
+  }
+  return null;
+}
+
+/** Building picker in the pin modal — subset of geocoder results (no coordinates required). */
+type PinBuildingSuggestion = Pick<SearchItem, 'id' | 'name' | 'address'>;
 
 const SEARCH_PLACEHOLDERS: Record<FriendsTab, string> = {
   my_friends: 'Search your friends…',
@@ -82,9 +105,9 @@ export default function FriendsScreen() {
   const [pinRoom, setPinRoom] = useState('');
   const [pinSaving, setPinSaving] = useState(false);
   const [pinSelectedIds, setPinSelectedIds] = useState<Set<string>>(new Set());
-  const [pinBuildingSuggestions, setPinBuildingSuggestions] = useState<any[]>([]);
+  const [pinBuildingSuggestions, setPinBuildingSuggestions] = useState<PinBuildingSuggestion[]>([]);
   const [pinBuildingSearching, setPinBuildingSearching] = useState(false);
-  const [pinRoomSuggestions, setPinRoomSuggestions] = useState<any[]>([]);
+  const [pinRoomSuggestions, setPinRoomSuggestions] = useState<GraphNode[]>([]);
   const pinBuildingDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const knownIdsRef = useRef<Set<string>>(new Set());
@@ -111,16 +134,22 @@ export default function FriendsScreen() {
         .eq('friend_id', user.id)
         .eq('status', 'accepted');
 
-      const toFriend = (p: any): Friend => ({
+      const toFriend = (p: ProfileSnippet): Friend => ({
         id: p.id,
         name: p.full_name ?? 'Unknown',
-        location_building: p.location_building,
-        location_room: p.location_room,
+        location_building: p.location_building ?? undefined,
+        location_room: p.location_room ?? undefined,
       });
 
       const allFriends: Friend[] = [
-        ...(sentAccepted ?? []).filter((r: any) => r.profiles?.id).map((r: any) => toFriend(r.profiles)),
-        ...(receivedAccepted ?? []).filter((r: any) => r.profiles?.id).map((r: any) => toFriend(r.profiles)),
+        ...(sentAccepted ?? [])
+          .map((r) => unwrapProfile(r.profiles))
+          .filter((p): p is ProfileSnippet => p != null)
+          .map(toFriend),
+        ...(receivedAccepted ?? [])
+          .map((r) => unwrapProfile(r.profiles))
+          .filter((p): p is ProfileSnippet => p != null)
+          .map(toFriend),
       ];
       setMyFriends(allFriends);
 
@@ -129,7 +158,7 @@ export default function FriendsScreen() {
         .select('viewer_id')
         .eq('owner_id', user.id);
 
-      const sharedSet = new Set<string>((myShares ?? []).map((r: any) => r.viewer_id));
+      const sharedSet = new Set<string>((myShares ?? []).map((r) => r.viewer_id));
       setSharedWithIds(sharedSet);
       setPinSelectedIds(new Set(sharedSet));
 
@@ -138,7 +167,7 @@ export default function FriendsScreen() {
         .select('owner_id')
         .eq('viewer_id', user.id);
 
-      setCanSeeIds(new Set<string>((visibleToMe ?? []).map((r: any) => r.owner_id)));
+      setCanSeeIds(new Set<string>((visibleToMe ?? []).map((r) => r.owner_id)));
 
       const { data: pendingToMe } = await supabase
         .from('friends')
@@ -146,15 +175,26 @@ export default function FriendsScreen() {
         .eq('friend_id', user.id)
         .eq('status', 'pending');
 
-      setAddedMe((pendingToMe ?? []).filter((item: any) => item.profiles?.id).map((item: any) => ({
-        id: item.profiles.id,
-        name: item.profiles.full_name ?? 'Unknown',
-      })));
+      setAddedMe(
+        (pendingToMe ?? [])
+          .map((item) => unwrapProfile(item.profiles))
+          .filter((p): p is ProfileSnippet => p != null)
+          .map((p) => ({ id: p.id, name: p.full_name ?? 'Unknown' })),
+      );
 
       const known = new Set<string>([
-        ...(sentAccepted ?? []).map((f: any) => f.profiles?.id).filter(Boolean),
-        ...(receivedAccepted ?? []).map((f: any) => f.profiles?.id).filter(Boolean),
-        ...(pendingToMe ?? []).map((f: any) => f.profiles?.id).filter(Boolean),
+        ...(sentAccepted ?? []).flatMap((f) => {
+          const p = unwrapProfile(f.profiles);
+          return p?.id ? [p.id] : [];
+        }),
+        ...(receivedAccepted ?? []).flatMap((f) => {
+          const p = unwrapProfile(f.profiles);
+          return p?.id ? [p.id] : [];
+        }),
+        ...(pendingToMe ?? []).flatMap((f) => {
+          const p = unwrapProfile(f.profiles);
+          return p?.id ? [p.id] : [];
+        }),
       ]);
 
       const { data: pendingSent } = await supabase
@@ -163,20 +203,23 @@ export default function FriendsScreen() {
         .eq('user_id', user.id)
         .eq('status', 'pending');
 
-      (pendingSent ?? []).forEach((r: any) => known.add(r.friend_id));
+      (pendingSent ?? []).forEach((r) => known.add(r.friend_id));
 
       setPendingOutgoing(
-        (pendingSent ?? []).map((r: any) => ({
-          id: r.profiles?.id ?? r.friend_id,
-          name: r.profiles?.full_name ?? 'Unknown',
-        }))
+        (pendingSent ?? []).map((r) => {
+          const p = unwrapProfile(r.profiles);
+          return {
+            id: p?.id ?? r.friend_id,
+            name: p?.full_name ?? 'Unknown',
+          };
+        }),
       );
 
       setKnownIds(known);
       knownIdsRef.current = known;
-      setAddedIds(new Set((pendingSent ?? []).map((r: any) => r.friend_id)));
+      setAddedIds(new Set((pendingSent ?? []).map((r) => r.friend_id)));
     } catch (err) {
-      console.error(err);
+      if (__DEV__) console.error(err);
     } finally {
       if (!silent) setLoading(false);
     }
@@ -219,8 +262,8 @@ export default function FriendsScreen() {
       setFindSearchRawCount(raw.length);
       setFindFriends(
         raw
-          .filter((u: any) => !knownIdsRef.current.has(u.id))
-          .map((u: any) => ({ id: u.id, name: u.full_name ?? 'Unknown' }))
+          .filter((u) => !knownIdsRef.current.has(u.id))
+          .map((u) => ({ id: u.id, name: u.full_name ?? 'Unknown' })),
       );
       setFindLoading(false);
     }, 400);
@@ -368,8 +411,8 @@ export default function FriendsScreen() {
     ).slice(0, 6);
 
     if (utMatches.length > 0) {
-      setPinBuildingSuggestions(
-        utMatches.map((b) => ({ id: b.code, name: b.code, address: b.displayName }))
+           setPinBuildingSuggestions(
+        utMatches.map((b) => ({ id: b.code, name: b.code, address: b.displayName })),
       );
       setPinBuildingSearching(false);
     } else {
@@ -453,7 +496,7 @@ export default function FriendsScreen() {
       void fetchAll({ silent: true });
     } catch (err) {
       Alert.alert('Error', 'Could not save pin.');
-      console.error(err);
+      if (__DEV__) console.error(err);
     } finally {
       setPinSaving(false);
     }
@@ -518,7 +561,7 @@ export default function FriendsScreen() {
         )}
         {pinBuildingSuggestions.length > 0 && (
           <View className="-mt-2.5 border border-line-muted rounded-xl bg-white mb-3.5 overflow-hidden">
-            {pinBuildingSuggestions.map((item: any) => (
+            {pinBuildingSuggestions.map((item) => (
               <TouchableOpacity
                 key={item.id}
                 className="flex-row items-center py-2.5 px-3.5 border-b border-line-muted"
@@ -559,7 +602,7 @@ export default function FriendsScreen() {
         />
         {pinRoomSuggestions.length > 0 && (
           <View className="-mt-2.5 border border-line-muted rounded-xl bg-white mb-3.5 overflow-hidden">
-            {pinRoomSuggestions.map((item: any) => (
+            {pinRoomSuggestions.map((item) => (
               <TouchableOpacity
                 key={item.id}
                 className="flex-row items-center py-2.5 px-3.5 border-b border-line-muted"

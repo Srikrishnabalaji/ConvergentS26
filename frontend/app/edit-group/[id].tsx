@@ -49,6 +49,8 @@ export default function EditGroupScreen() {
 
   const [enablePassword, setEnablePassword] = useState(false);
   const [passwordValue, setPasswordValue] = useState('');
+  /** True if group already had a join password when the screen loaded (value is not fetched for security). */
+  const [hadJoinPasswordOnLoad, setHadJoinPasswordOnLoad] = useState(false);
 
   const [joinCode, setJoinCode] = useState<string | null>(null);
   const [regeneratingCode, setRegeneratingCode] = useState(false);
@@ -122,7 +124,7 @@ export default function EditGroupScreen() {
 
       const { data: groupRow, error: gErr } = await supabase
         .from('groups')
-        .select('id, name, description, image_url, type, is_private, has_join_password, join_code, join_password')
+        .select('id, name, description, image_url, type, is_private, has_join_password, join_code')
         .eq('id', id)
         .single();
 
@@ -154,8 +156,10 @@ export default function EditGroupScreen() {
       setDescription(groupRow.description ?? '');
       setIsCampusOrg(groupRow.type === 'campus_org');
       setIsPrivate(groupRow.is_private ?? false);
-      setEnablePassword(groupRow.has_join_password ?? false);
-      setPasswordValue(groupRow.join_password ?? '');
+      const hadPwd = groupRow.has_join_password ?? false;
+      setHadJoinPasswordOnLoad(hadPwd);
+      setEnablePassword(hadPwd);
+      setPasswordValue('');
       setJoinCode(groupRow.join_code ?? null);
       if (groupRow.image_url) setImageUri(groupRow.image_url);
 
@@ -264,7 +268,7 @@ export default function EditGroupScreen() {
       return;
     }
 
-    if (showPasswordOption && enablePassword && !passwordValue.trim()) {
+    if (showPasswordOption && enablePassword && !passwordValue.trim() && !hadJoinPasswordOnLoad) {
       Alert.alert('Error', 'Please enter a join password or disable the password option.');
       return;
     }
@@ -286,18 +290,25 @@ export default function EditGroupScreen() {
       }
 
       const type = isCampusOrg ? 'campus_org' : 'friends';
-      const effectivePassword =
-        !isPrivate && type === 'friends' && enablePassword && passwordValue.trim()
-          ? passwordValue.trim()
-          : null;
+      const friendsUnlocked = !isPrivate && type === 'friends';
+      let joinPasswordUpdate: string | null | undefined;
+      if (!friendsUnlocked || !enablePassword) {
+        joinPasswordUpdate = null;
+      } else if (passwordValue.trim()) {
+        joinPasswordUpdate = passwordValue.trim();
+      } else {
+        joinPasswordUpdate = undefined;
+      }
 
       const updatePayload: Record<string, unknown> = {
         name: name.trim(),
         type,
         description: description.trim() || null,
         is_private: isPrivate,
-        join_password: effectivePassword,
       };
+      if (joinPasswordUpdate !== undefined) {
+        updatePayload.join_password = joinPasswordUpdate;
+      }
       if (imageUrl !== null) updatePayload.image_url = imageUrl;
 
       const { error: updateError } = await supabase.from('groups').update(updatePayload).eq('id', id);
@@ -493,7 +504,11 @@ export default function EditGroupScreen() {
                 {enablePassword && (
                   <TextField
                     label="Join password"
-                    placeholder="Password members must enter to join"
+                    placeholder={
+                      hadJoinPasswordOnLoad
+                        ? 'Enter a new password to change it (leave blank to keep current)'
+                        : 'Password members must enter to join'
+                    }
                     value={passwordValue}
                     onChangeText={setPasswordValue}
                     autoCapitalize="none"

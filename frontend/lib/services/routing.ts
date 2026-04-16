@@ -125,19 +125,24 @@ export async function fetchWalkingRoute(
   ];
 
   for (const url of endpoints) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10_000);
-
       const res = await fetch(url, {
         signal: controller.signal,
         headers: { 'User-Agent': 'WavePointApp/1.0 (university-project)' },
       });
-      clearTimeout(timeout);
 
       if (!res.ok) continue;
 
-      const data = await res.json();
+      const data = (await res.json()) as {
+        code?: string;
+        routes?: {
+          distance?: number;
+          duration?: number;
+          geometry?: { coordinates?: [number, number][] };
+        }[];
+      };
       if (data.code !== 'Ok') continue;
 
       const route = data.routes?.[0];
@@ -147,15 +152,17 @@ export async function fetchWalkingRoute(
         ([lng, lat]: [number, number]) => ({ latitude: lat, longitude: lng }),
       );
 
-      const distanceMi = (route.distance / 1000) * 0.621371;
+      const distanceMi = ((route.distance ?? 0) / 1000) * 0.621371;
       const isFoot = url.includes('routed-foot');
       const durationMin = isFoot
-        ? Math.max(1, Math.round(route.duration / 60))
+        ? Math.max(1, Math.round((route.duration ?? 0) / 60))
         : Math.max(1, Math.round((distanceMi / 3.1) * 60));
 
       return { coords, distanceMi, durationMin, isFallback: false };
     } catch {
       continue;
+    } finally {
+      clearTimeout(timeout);
     }
   }
 

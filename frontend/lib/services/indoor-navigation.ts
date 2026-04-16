@@ -25,7 +25,9 @@ export interface GraphEdge {
   id: string;
   from: string;
   to: string;
-  weight: number;
+  /** Prefer `weight`; older graph JSON may only define `distance`. */
+  weight?: number;
+  distance?: number;
   interFloor: boolean;
   path?: [number, number][];
 }
@@ -70,8 +72,7 @@ export function astar(
     adj.set(n.id, []);
   }
   for (const e of graph.edges) {
-    // Use 'distance' field if 'weight' is undefined (newer graphs use distance)
-    const w = (e as any).weight ?? (e as any).distance ?? 1;
+    const w = e.weight ?? e.distance ?? 1;
     adj.get(e.from)?.push({ neighborId: e.to, weight: w, edgeId: e.id });
     adj.get(e.to)?.push({ neighborId: e.from, weight: w, edgeId: e.id });
   }
@@ -93,8 +94,10 @@ export function astar(
   const inOpen = new Set<string>([startId]);
   const closed = new Set<string>();
 
-  console.log(`[A*] Search from "${startNode.label}" (${startId}) to "${endNode.label}" (${endId})`);
-  console.log(`[A*] Start neighbors: ${adj.get(startId)?.length ?? 0} edges`);
+  if (__DEV__) {
+    console.log(`[A*] Search from "${startNode.label}" (${startId}) to "${endNode.label}" (${endId})`);
+    console.log(`[A*] Start neighbors: ${adj.get(startId)?.length ?? 0} edges`);
+  }
 
   const popMin = (): string | undefined => {
     let minIdx = 0;
@@ -146,7 +149,11 @@ export function astar(
     }
   }
 
-  console.log(`[A*] FAILED: No path found. Explored ${closed.size} nodes, ${openSet.length} remaining in queue`);
+  if (__DEV__) {
+    console.log(
+      `[A*] FAILED: No path found. Explored ${closed.size} nodes, ${openSet.length} remaining in queue`,
+    );
+  }
   return null; // No path found
 }
 

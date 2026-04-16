@@ -44,7 +44,7 @@ export interface OccupancyGrid {
 }
 
 /** Raw JSON shape produced by export_grids.py. */
-interface RawGridData {
+export interface RawGridData {
   floorId: string;
   pageIndex: number;
   width: number;

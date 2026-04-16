@@ -14,6 +14,14 @@ export type SearchItem = {
 
 type LatLng = { latitude: number; longitude: number };
 
+/** Minimal Nominatim search result shape (format=json). */
+type NominatimPlace = {
+  place_id: number | string;
+  display_name: string;
+  lat: string;
+  lon: string;
+};
+
 const HEADERS = { 'User-Agent': 'WavePointApp/1.0 (university-project)' };
 
 export class GeocodingNetworkError extends Error {
@@ -47,9 +55,9 @@ function viewboxAround(center: LatLng, halfDeg: number): string {
   ].join(',');
 }
 
-function parseResults(data: any[]): SearchItem[] {
+function parseResults(data: NominatimPlace[]): SearchItem[] {
   return data.map((place) => {
-    const parts = (place.display_name as string).split(',').map((s: string) => s.trim());
+    const parts = place.display_name.split(',').map((s) => s.trim());
     return {
       id: String(place.place_id),
       name: parts[0],
@@ -95,8 +103,7 @@ export async function geocodeSearch(
   signal?: AbortSignal,
 ): Promise<SearchItem[]> {
   const trimmed = query.trim();
-  const firstToken = trimmed.split(/\s+/)[0] ?? '';
-  const matchedBuilding = findBuilding(trimmed) ?? findBuilding(firstToken);
+  if (!trimmed) return [];
 
   // Instant path: known campus building → skip Nominatim (avoids 1 req/s limits &
   // races with the map search debouncer when opening from Calendar).
@@ -105,6 +112,8 @@ export async function geocodeSearch(
     if (local) return [local];
   }
 
+  const firstToken = trimmed.split(/\s+/)[0] ?? '';
+  const matchedBuilding = findBuilding(trimmed) ?? findBuilding(firstToken);
   const friendlyName = matchedBuilding?.displayName;
   const expanded = expandBuildingQuery(query);
   const effectiveQuery = expanded || query;
@@ -141,7 +150,7 @@ export async function geocodeSearch(
         if (!res.ok) continue;
         allRequestsFailed = false;
 
-        const data: any[] = await res.json();
+        const data = (await res.json()) as NominatimPlace[];
         if (data.length >= MIN_GOOD_RESULTS) return finalize(parseResults(data));
         if (data.length > 0 && r === radii[radii.length - 1]) return finalize(parseResults(data));
       } catch (e) {
@@ -176,7 +185,7 @@ export async function geocodeSearch(
       if (allRequestsFailed) throw new GeocodingNetworkError();
       return [];
     }
-    const data: any[] = await res.json();
+    const data = (await res.json()) as NominatimPlace[];
     const parsed = finalize(parseResults(data));
     if (parsed.length > 0) return parsed;
     const local = localCampusSearchItem(trimmed);

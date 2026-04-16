@@ -5,9 +5,14 @@ import { supabase } from '@/lib/supabase';
 
 export default function IndexScreen() {
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      router.replace(session ? '/(tabs)/myGroups' : '/(auth)/login');
-    });
+    supabase.auth
+      .getSession()
+      .then(({ data: { session } }) => {
+        router.replace(session ? '/(tabs)/myGroups' : '/(auth)/login');
+      })
+      .catch(() => {
+        router.replace('/(auth)/login');
+      });
 
     const {
       data: { subscription },

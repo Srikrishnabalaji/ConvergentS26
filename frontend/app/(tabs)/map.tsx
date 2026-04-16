@@ -141,103 +141,6 @@ export default function MapScreen() {
     [initialRoom, roomQuerySingle],
   );
 
-  useEffect(() => {
-    if (!searchQuery) return;
-    const q = Array.isArray(searchQuery) ? searchQuery[0] : searchQuery;
-    const r = Array.isArray(roomQuery) ? roomQuery[0] : roomQuery;
-    if (!q.trim()) return;
-
-    setCalendarNavLabel(q);
-    setCalendarNavBusy(true);
-    const roomTrim = r && r.trim() ? r.trim() : undefined;
-    setInitialRoom(roomTrim);
-
-    let cancelled = false;
-
-    const resolveOrigin = async () => {
-      try {
-        const { status } = await Location.getForegroundPermissionsAsync();
-        if (status === 'granted') {
-          const loc = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
-          });
-          return { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
-        }
-      } catch {}
-      return DEFAULT_USER_LOCATION;
-    };
-
-    (async () => {
-      try {
-        const [firstResults, origin] = await Promise.all([
-          geocodeSearch(q, DEFAULT_USER_LOCATION),
-          resolveOrigin(),
-        ]);
-        if (cancelled) return;
-        setUserLocation(origin);
-
-        let place = firstResults[0];
-        if (!place) {
-          const second = await geocodeSearch(q, origin);
-          if (cancelled) return;
-          place = second[0];
-        }
-
-        if (cancelled) return;
-        if (place) {
-          await handleSelectPlace(place, origin);
-        } else {
-          const local = localCampusSearchItem(q);
-          if (local) {
-            await handleSelectPlace(local, origin);
-          } else {
-            setQuery(q);
-            transitionToSearch();
-            Alert.alert('Location not found', `Could not find "${q}". Try typing the building in search.`);
-          }
-        }
-      } catch (e) {
-        if (cancelled) return;
-        let origin = DEFAULT_USER_LOCATION;
-        try {
-          const { status } = await Location.getForegroundPermissionsAsync();
-          if (status === 'granted') {
-            const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-            origin = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
-          }
-        } catch {}
-        const local = localCampusSearchItem(q);
-        if (local) {
-          setUserLocation(origin);
-          try {
-            await handleSelectPlace(local, origin);
-          } catch {
-            setQuery(q);
-            transitionToSearch();
-          }
-        } else {
-          setQuery(q);
-          transitionToSearch();
-          if (e instanceof GeocodingNetworkError) {
-            Alert.alert('Search Unavailable', e.message);
-          }
-        }
-      } finally {
-        if (!cancelled) {
-          setCalendarNavBusy(false);
-          setCalendarNavLabel(null);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      setCalendarNavBusy(false);
-      setCalendarNavLabel(null);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchQuery, roomQuery, calNav]);
-
   useSpeechRecognitionEvent('start', () => setIsListening(true));
   useSpeechRecognitionEvent('end', () => {
     setIsListening(false);
@@ -468,6 +371,105 @@ export default function MapScreen() {
     },
     [userLocation, searchFade, startPreviewWatcher],
   );
+
+  const handleSelectPlaceRef = useRef(handleSelectPlace);
+  handleSelectPlaceRef.current = handleSelectPlace;
+
+  useEffect(() => {
+    if (!searchQuery) return;
+    const q = Array.isArray(searchQuery) ? searchQuery[0] : searchQuery;
+    const r = Array.isArray(roomQuery) ? roomQuery[0] : roomQuery;
+    if (!q.trim()) return;
+
+    setCalendarNavLabel(q);
+    setCalendarNavBusy(true);
+    const roomTrim = r && r.trim() ? r.trim() : undefined;
+    setInitialRoom(roomTrim);
+
+    let cancelled = false;
+
+    const resolveOrigin = async () => {
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const loc = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+          return { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+        }
+      } catch {}
+      return DEFAULT_USER_LOCATION;
+    };
+
+    (async () => {
+      try {
+        const [firstResults, origin] = await Promise.all([
+          geocodeSearch(q, DEFAULT_USER_LOCATION),
+          resolveOrigin(),
+        ]);
+        if (cancelled) return;
+        setUserLocation(origin);
+
+        let place = firstResults[0];
+        if (!place) {
+          const second = await geocodeSearch(q, origin);
+          if (cancelled) return;
+          place = second[0];
+        }
+
+        if (cancelled) return;
+        if (place) {
+          await handleSelectPlaceRef.current(place, origin);
+        } else {
+          const local = localCampusSearchItem(q);
+          if (local) {
+            await handleSelectPlaceRef.current(local, origin);
+          } else {
+            setQuery(q);
+            transitionToSearch();
+            Alert.alert('Location not found', `Could not find "${q}". Try typing the building in search.`);
+          }
+        }
+      } catch (e) {
+        if (cancelled) return;
+        let origin = DEFAULT_USER_LOCATION;
+        try {
+          const { status } = await Location.getForegroundPermissionsAsync();
+          if (status === 'granted') {
+            const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+            origin = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+          }
+        } catch {}
+        const local = localCampusSearchItem(q);
+        if (local) {
+          setUserLocation(origin);
+          try {
+            await handleSelectPlaceRef.current(local, origin);
+          } catch {
+            setQuery(q);
+            transitionToSearch();
+          }
+        } else {
+          setQuery(q);
+          transitionToSearch();
+          if (e instanceof GeocodingNetworkError) {
+            Alert.alert('Search Unavailable', e.message);
+          }
+        }
+      } finally {
+        if (!cancelled) {
+          setCalendarNavBusy(false);
+          setCalendarNavLabel(null);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      setCalendarNavBusy(false);
+      setCalendarNavLabel(null);
+    };
+  }, [searchQuery, roomQuery, calNav, transitionToSearch]);
 
   const resetToDefault = useCallback(() => {
     stopLocationWatcher();

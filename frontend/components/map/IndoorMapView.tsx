@@ -25,13 +25,21 @@ import {
   resolveRoomFromQuery,
   findNearest,
 } from '@/lib/services/indoor-navigation';
-import { decodeGrid, computeGridRoute, type OccupancyGrid } from '@/lib/services/grid-astar';
+import {
+  decodeGrid,
+  computeGridRoute,
+  type OccupancyGrid,
+  type RawGridData,
+} from '@/lib/services/grid-astar';
+import type { ImageProps } from 'expo-image';
 
 // ---------------------------------------------------------------------------
 // Pre-bundled occupancy grids (produced by backend/export_grids.py).
 // Loaded as static JSON assets; decoded once and cached in _decodedGrids.
 // ---------------------------------------------------------------------------
-const RAW_FLOOR_GRIDS: Record<string, any> = {
+type FloorImageSource = NonNullable<ImageProps['source']>;
+
+const RAW_FLOOR_GRIDS: Record<string, RawGridData> = {
   f0: require('@/assets/grids/gdc_f0.json'),
   f1: require('@/assets/grids/gdc_f1.json'),
   f2: require('@/assets/grids/gdc_f2.json'),
@@ -46,7 +54,7 @@ const _decodedGrids: Record<string, OccupancyGrid> = {};
 // ---------------------------------------------------------------------------
 // Floor plan image map — maps floorId to require()'d asset
 // ---------------------------------------------------------------------------
-const FLOOR_IMAGES: Record<string, any> = {
+const FLOOR_IMAGES: Record<string, FloorImageSource> = {
   f0: require('@/assets/floorplans/gdc_floor_1.png'),
   f1: require('@/assets/floorplans/gdc_floor_2.png'),
   f2: require('@/assets/floorplans/gdc_floor_3.png'),
@@ -286,7 +294,7 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
     setActiveFloorId(entrance.floorId);
     setPlacementMode('idle');
     computeRoute(entrance, dest);
-  }, [graph, destNode, computeRoute]);
+  }, [destNode, computeRoute, getEntrance]);
 
   const handleEnterTapMode = useCallback(() => {
     setPlacementMode('tap');

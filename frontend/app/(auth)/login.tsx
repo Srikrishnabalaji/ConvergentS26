@@ -38,7 +38,16 @@ export default function LoginScreen() {
       Alert.alert(isSignUp ? 'Sign Up Error' : 'Sign In Error', error.message);
       return;
     }
-    if (data.session) router.replace('/(tabs)/myGroups');
+    if (data.session) {
+      router.replace('/(tabs)/myGroups');
+      return;
+    }
+    if (isSignUp) {
+      Alert.alert(
+        'Almost there',
+        'Check your email to confirm your account if prompted, then sign in.',
+      );
+    }
   }
 
   return (

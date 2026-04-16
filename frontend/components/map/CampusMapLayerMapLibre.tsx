@@ -108,9 +108,9 @@ const _initialStylePromise = fetchMapStyle().then((s) => {
   return s;
 });
 
-const EMPTY_GEOJSON = {
-  type: 'FeatureCollection' as const,
-  features: [] as any[],
+const EMPTY_GEOJSON: GeoJSON.FeatureCollection = {
+  type: 'FeatureCollection',
+  features: [],
 };
 
 export default function CampusMapLayerMapLibre({
