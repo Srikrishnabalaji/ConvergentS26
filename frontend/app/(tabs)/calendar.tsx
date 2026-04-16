@@ -84,6 +84,12 @@ const validateBuilding = async (location: string): Promise<boolean> => {
 
 const TODAY = getTodayString();
 const PRIMARY = '#0B617E';
+const PRIMARY_LIGHT = '#7FB3C5';
+const TEXT_PRIMARY = '#0D2838';
+const TEXT_SECONDARY = '#5D7280';
+const BG_COOL = '#F5F7F9';
+const BORDER_COOL = '#E8EDF0';
+const MUTED_COOL = '#8FA2AD';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -564,18 +570,26 @@ export default function CalendarScreen() {
         onPress={() => handleEventPress(item.location)}
         activeOpacity={0.72}
       >
-        <View style={styles.eventTimeCol}>
-          <Text style={styles.eventTime}>{item.time}</Text>
-        </View>
         <View style={styles.eventTextCol}>
+          <View style={styles.eventMetaRow}>
+            <View style={styles.eventTimePill}>
+              <MaterialIcons name="schedule" size={12} color={PRIMARY} style={{ marginRight: 4 }} />
+              <Text style={styles.eventTime}>{item.time}</Text>
+            </View>
+          </View>
           <Text style={styles.eventTitle} numberOfLines={2}>
             {item.title}
           </Text>
           {item.location ? (
-            <Text style={styles.eventSubtitle} numberOfLines={1}>
-              {item.location}
-            </Text>
-          ) : null}
+            <View style={styles.eventLocationRow}>
+              <MaterialIcons name="location-on" size={13} color={MUTED_COOL} style={{ marginRight: 3 }} />
+              <Text style={styles.eventSubtitle} numberOfLines={1}>
+                {item.location}
+              </Text>
+            </View>
+          ) : (
+            <Text style={styles.eventSubtitleMuted}>No location</Text>
+          )}
         </View>
       </TouchableOpacity>
       <TouchableOpacity
@@ -651,7 +665,7 @@ export default function CalendarScreen() {
                   placeholder="e.g., CS313E Class"
                   value={newEvent.title}
                   onChangeText={(text) => setNewEvent(prev => ({...prev, title: text }))}
-                  placeholderTextColor="#999"
+                  placeholderTextColor={MUTED_COOL}
                 />
 
                 <Text style={styles.label}>Location</Text>
@@ -662,10 +676,10 @@ export default function CalendarScreen() {
                       placeholder="Building (GDC, PCL...)"
                       value={newEvent.building}
                       onChangeText={handleBuildingChange}
-                      placeholderTextColor="#999"
+                      placeholderTextColor={MUTED_COOL}
                     />
                     {locationSearching && (
-                      <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: 4 }}>Searching...</Text>
+                      <Text style={{ color: MUTED_COOL, fontSize: 12, marginTop: 4 }}>Searching...</Text>
                     )}
                     {locationSuggestions.length > 0 && (
                       <View style={styles.suggestionsContainer}>
@@ -693,11 +707,11 @@ export default function CalendarScreen() {
                       placeholder="Room"
                       value={newEvent.room}
                       onChangeText={handleRoomChange}
-                      placeholderTextColor="#999"
+                      placeholderTextColor={MUTED_COOL}
                       editable={!!newEvent.building.trim()}
                     />
                     {roomSearching && (
-                      <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: 4 }}>...</Text>
+                      <Text style={{ color: MUTED_COOL, fontSize: 12, marginTop: 4 }}>...</Text>
                     )}
                     {roomSuggestions.length > 0 && (
                       <View style={styles.suggestionsContainer}>
@@ -724,7 +738,7 @@ export default function CalendarScreen() {
                   onPress={() => setShowTimePicker(true)}
                 >
                   <MaterialIcons name="access-time" size={20} color={PRIMARY} style={{ marginRight: 8 }} />
-                  <Text style={[styles.timeSelectorText, !newEvent.time && { color: '#999' }]}>
+                  <Text style={[styles.timeSelectorText, !newEvent.time && { color: MUTED_COOL }]}>
                     {newEvent.time || 'Tap to select time'}
                   </Text>
                 </TouchableOpacity>
@@ -736,7 +750,7 @@ export default function CalendarScreen() {
                       mode="time"
                       display={Platform.OS === 'ios' ? 'spinner' : 'default'}
                       onChange={onTimeChange}
-                      textColor="#000000"
+                      textColor={TEXT_PRIMARY}
                       themeVariant="light"
                     />
                     {Platform.OS === 'ios' && (
@@ -857,33 +871,35 @@ export default function CalendarScreen() {
             </View>
           </View>
           {groupEventsOnly ? (
-            <ScrollView
-              horizontal
-              nestedScrollEnabled
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.groupChipScroll}
-            >
-              {groups.length === 0 ? (
-                <Text style={styles.filterNoGroups}>No groups available</Text>
-              ) : (
-                groups.map((g) => {
-                  const id = String(g.id);
-                  const selected = selectedGroupFilterId === id;
-                  return (
-                    <TouchableOpacity
-                      key={id}
-                      style={[styles.filterChip, selected && styles.filterChipSelected]}
-                      onPress={() => setSelectedGroupFilterId(id)}
-                      activeOpacity={0.85}
-                    >
-                      <Text style={[styles.filterChipText, selected && styles.filterChipTextSelected]}>
-                        {g.name}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })
-              )}
-            </ScrollView>
+            <View style={styles.filterChipsWrap}>
+              <ScrollView
+                horizontal
+                nestedScrollEnabled
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.groupChipScroll}
+              >
+                {groups.length === 0 ? (
+                  <Text style={styles.filterNoGroups}>No groups available</Text>
+                ) : (
+                  groups.map((g) => {
+                    const id = String(g.id);
+                    const selected = selectedGroupFilterId === id;
+                    return (
+                      <TouchableOpacity
+                        key={id}
+                        style={[styles.filterChip, selected && styles.filterChipSelected]}
+                        onPress={() => setSelectedGroupFilterId(id)}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={[styles.filterChipText, selected && styles.filterChipTextSelected]}>
+                          {g.name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })
+                )}
+              </ScrollView>
+            </View>
           ) : null}
         </View>
 
@@ -919,7 +935,7 @@ export default function CalendarScreen() {
         {groupEventsOnly && !selectedGroupFilterId ? (
           <View style={styles.emptyCard}>
             <View style={styles.emptyIconCircle}>
-              <MaterialIcons name="groups" size={30} color="#cbd5e1" />
+              <MaterialIcons name="groups" size={30} color={PRIMARY_LIGHT} />
             </View>
             <Text style={styles.emptyTitle}>Select a group</Text>
             <Text style={styles.emptySubtitle}>
@@ -929,7 +945,7 @@ export default function CalendarScreen() {
         ) : sortedEvents.length === 0 ? (
           <View style={styles.emptyCard}>
             <View style={styles.emptyIconCircle}>
-              <MaterialIcons name="event-available" size={30} color="#cbd5e1" />
+              <MaterialIcons name="event-available" size={30} color={PRIMARY_LIGHT} />
             </View>
             <Text style={styles.emptyTitle}>No events this day</Text>
             <Text style={styles.emptySubtitle}>
@@ -950,10 +966,10 @@ export default function CalendarScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#0B617E',
+    backgroundColor: PRIMARY,
   },
   banner: {
-    backgroundColor: '#0B617E',
+    backgroundColor: PRIMARY,
     paddingHorizontal: 20,
     paddingTop: 20,
     paddingBottom: 10,
@@ -966,7 +982,7 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     flex: 1,
-    backgroundColor: '#f5f7f9',
+    backgroundColor: BG_COOL,
   },
   scrollPage: {
     flex: 1,
@@ -977,57 +993,62 @@ const styles = StyleSheet.create({
     paddingBottom: 48,
   },
   filterCard: {
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(127, 179, 197, 0.22)',
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#e8eef2',
+    borderColor: 'rgba(127, 179, 197, 0.4)',
     padding: 14,
     marginBottom: 16,
-    shadowColor: '#0f172a',
+    shadowColor: PRIMARY,
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
     elevation: 1,
   },
   filterRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 4,
+    marginBottom: 0,
   },
   filterLabelCol: {
     flex: 1,
     marginRight: 12,
   },
   switchSlot: {
-    width: 52,
+    width: 58,
     alignItems: 'center',
     justifyContent: 'center',
+    marginLeft: 4,
   },
   filterTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#334155',
+    fontSize: 15,
+    fontWeight: '700',
+    color: TEXT_PRIMARY,
   },
   filterHint: {
     fontSize: 12,
-    color: '#94a3b8',
+    color: TEXT_SECONDARY,
     marginTop: 2,
+  },
+  filterChipsWrap: {
+    marginTop: 12,
+    borderRadius: 12,
   },
   groupChipScroll: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 10,
-    paddingBottom: 2,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
   },
   filterChip: {
     paddingVertical: 8,
     paddingHorizontal: 14,
-    backgroundColor: '#f1f5f9',
+    backgroundColor: BG_COOL,
     borderRadius: 10,
     marginRight: 8,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: BORDER_COOL,
   },
   filterChipSelected: {
     backgroundColor: PRIMARY,
@@ -1036,14 +1057,14 @@ const styles = StyleSheet.create({
   filterChipText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#64748b',
+    color: TEXT_SECONDARY,
   },
   filterChipTextSelected: {
     color: '#fff',
   },
   filterNoGroups: {
     fontSize: 13,
-    color: '#94a3b8',
+    color: MUTED_COOL,
     paddingVertical: 8,
   },
   headerBlock: {
@@ -1076,10 +1097,10 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     paddingVertical: 12,
     paddingHorizontal: 14,
-    backgroundColor: '#f0f7f9',
+    backgroundColor: 'rgba(127, 179, 197, 0.22)',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#cfe4ea',
+    borderColor: 'rgba(127, 179, 197, 0.4)',
   },
   groupContextLabel: {
     fontSize: 12,
@@ -1090,13 +1111,13 @@ const styles = StyleSheet.create({
   groupContextName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1a1a1a',
+    color: TEXT_PRIMARY,
   },
   calendarCard: {
     backgroundColor: '#fff',
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#e8eef2',
+    borderColor: BORDER_COOL,
     paddingBottom: 8,
     marginBottom: 20,
     shadowColor: '#0f172a',
@@ -1114,13 +1135,13 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#475569',
+    color: MUTED_COOL,
     letterSpacing: 1.2,
     textTransform: 'uppercase',
   },
   countPill: {
     marginLeft: 8,
-    backgroundColor: 'rgba(11, 97, 126, 0.12)',
+    backgroundColor: 'rgba(127, 179, 197, 0.3)',
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 8,
@@ -1132,40 +1153,52 @@ const styles = StyleSheet.create({
   },
   dateSubline: {
     fontSize: 14,
-    color: '#94a3b8',
+    color: MUTED_COOL,
     marginBottom: 12,
     fontWeight: '500',
   },
   eventCardWrap: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     backgroundColor: '#fff',
-    borderRadius: 14,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#e8eef2',
-    marginBottom: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    shadowColor: '#0f172a',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 1,
+    borderColor: BORDER_COOL,
+    marginBottom: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    shadowColor: PRIMARY,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    elevation: 2,
   },
   eventCardTouchable: {
     flex: 1,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     minWidth: 0,
-    marginRight: 8,
+    marginRight: 10,
   },
-  eventTimeCol: {
-    minWidth: 64,
-    marginRight: 12,
+  eventMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  eventTimePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(127, 179, 197, 0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(127, 179, 197, 0.4)',
+    borderRadius: 999,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    alignSelf: 'flex-start',
   },
   eventTime: {
     fontWeight: '700',
-    fontSize: 13,
+    fontSize: 12,
     color: PRIMARY,
   },
   eventTextCol: {
@@ -1173,24 +1206,34 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   eventTitle: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '600',
-    color: PRIMARY,
-    marginBottom: 2,
+    color: TEXT_PRIMARY,
+    marginBottom: 4,
+  },
+  eventLocationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   eventSubtitle: {
     fontSize: 13,
-    color: '#94a3b8',
+    color: MUTED_COOL,
+    flexShrink: 1,
+  },
+  eventSubtitleMuted: {
+    fontSize: 13,
+    color: MUTED_COOL,
+    fontStyle: 'italic',
   },
   eventEditBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 5,
-    paddingHorizontal: 9,
-    borderRadius: 8,
-    backgroundColor: '#fff',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(127, 179, 197, 0.2)',
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: 'rgba(127, 179, 197, 0.42)',
     flexShrink: 0,
   },
   eventEditBtnText: {
@@ -1202,7 +1245,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#e8eef2',
+    borderColor: BORDER_COOL,
     borderStyle: 'dashed',
     paddingVertical: 28,
     paddingHorizontal: 20,
@@ -1213,7 +1256,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: '#f8fafc',
+    backgroundColor: 'rgba(127, 179, 197, 0.22)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
@@ -1221,12 +1264,12 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#334155',
+    color: TEXT_PRIMARY,
     marginBottom: 6,
   },
   emptySubtitle: {
     fontSize: 14,
-    color: '#94a3b8',
+    color: MUTED_COOL,
     textAlign: 'center',
     lineHeight: 20,
     maxWidth: 260,
@@ -1243,13 +1286,13 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     maxHeight: '88%',
     borderWidth: 1,
-    borderColor: '#e8eef2',
+    borderColor: BORDER_COOL,
   },
   modalHeader: {
     paddingHorizontal: 20,
     paddingBottom: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e8eef2',
+    borderBottomColor: BORDER_COOL,
   },
   modalTitle: {
     fontSize: 22,
@@ -1259,7 +1302,7 @@ const styles = StyleSheet.create({
   },
   modalDate: {
     fontSize: 14,
-    color: '#64748b',
+    color: TEXT_SECONDARY,
     fontWeight: '500',
   },
   formContainer: {
@@ -1269,7 +1312,7 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#64748b',
+    color: TEXT_SECONDARY,
     marginBottom: 8,
     marginTop: 14,
     letterSpacing: 0.8,
@@ -1277,36 +1320,36 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: BORDER_COOL,
     borderRadius: 12,
     padding: 14,
     fontSize: 16,
-    backgroundColor: '#f8fafc',
-    color: '#0f172a',
+    backgroundColor: BG_COOL,
+    color: TEXT_PRIMARY,
   },
   timeSelector: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: BORDER_COOL,
     borderRadius: 12,
     padding: 14,
-    backgroundColor: '#f8fafc',
+    backgroundColor: BG_COOL,
   },
   timeSelectorText: {
     fontSize: 16,
-    color: '#0f172a',
+    color: TEXT_PRIMARY,
   },
   iosPickerContainer: {
-    backgroundColor: '#f8fafc',
+    backgroundColor: BG_COOL,
     borderRadius: 12,
     marginTop: 8,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: BORDER_COOL,
   },
   iosPickerDoneButton: {
-    backgroundColor: '#e2e8f0',
+    backgroundColor: BORDER_COOL,
     padding: 12,
     alignItems: 'center',
   },
@@ -1337,20 +1380,20 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: '#f1f5f9',
+    borderTopColor: BORDER_COOL,
   },
   cancelButton: {
     flex: 1,
     paddingVertical: 14,
     borderRadius: 12,
-    backgroundColor: '#f1f5f9',
+    backgroundColor: BG_COOL,
     alignItems: 'center',
     marginRight: 8,
   },
   cancelButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#64748b',
+    color: TEXT_SECONDARY,
   },
   addButton: {
     flex: 1,
@@ -1373,11 +1416,11 @@ const styles = StyleSheet.create({
   chip: {
     paddingVertical: 8,
     paddingHorizontal: 14,
-    backgroundColor: '#f1f5f9',
+    backgroundColor: BG_COOL,
     borderRadius: 10,
     marginRight: 8,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: BORDER_COOL,
   },
   chipSelected: {
     backgroundColor: PRIMARY,
@@ -1386,7 +1429,7 @@ const styles = StyleSheet.create({
   chipText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#64748b',
+    color: TEXT_SECONDARY,
   },
   chipTextSelected: {
     color: '#fff',
@@ -1395,7 +1438,7 @@ const styles = StyleSheet.create({
   suggestionsContainer: {
     marginTop: 4,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: BORDER_COOL,
     borderRadius: 12,
     backgroundColor: '#fff',
     overflow: 'hidden',
@@ -1406,16 +1449,16 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e2e8f0',
+    borderBottomColor: BORDER_COOL,
   },
   suggestionName: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#0f172a',
+    color: TEXT_PRIMARY,
   },
   suggestionAddress: {
     fontSize: 12,
-    color: '#94a3b8',
+    color: MUTED_COOL,
     marginTop: 1,
   },
 });

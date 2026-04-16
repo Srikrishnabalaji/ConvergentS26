@@ -2,6 +2,8 @@ import React from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
+const PRIMARY = '#0B617E';
+
 type Props = {
   duration: string;
   distance: string;
@@ -32,7 +34,7 @@ export function RouteInfoCard({
       {loading ? (
         <>
           <View style={styles.loadingRow}>
-            <ActivityIndicator size="small" color="#0B617E" />
+            <ActivityIndicator size="small" color={PRIMARY} />
             <Text style={styles.loadingText}>Finding walking route…</Text>
           </View>
           <Text style={styles.address}>{address}</Text>
@@ -88,7 +90,7 @@ export function RouteInfoCard({
               onPress={onExit}
               activeOpacity={0.8}
             >
-              <MaterialIcons name="close" size={20} color="#fff" />
+              <MaterialIcons name="close" size={20} color="#dc2626" />
               <Text style={styles.exitText}>Exit</Text>
             </TouchableOpacity>
           </>
@@ -150,7 +152,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#4CAF50',
+    backgroundColor: PRIMARY,
     borderRadius: 12,
     paddingVertical: 14,
     gap: 6,
@@ -180,7 +182,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FF3B30',
+    backgroundColor: 'rgba(220, 38, 38, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(220, 38, 38, 0.35)',
     borderRadius: 12,
     paddingVertical: 14,
     gap: 6,
@@ -188,7 +192,7 @@ const styles = StyleSheet.create({
   exitText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#fff',
+    color: '#dc2626',
   },
   loadingRow: {
     flexDirection: 'row',

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -41,6 +41,14 @@ type DetailMember = {
 };
 
 const PRIMARY = '#0B617E';
+const PRIMARY_LIGHT = '#7FB3C5';
+const ACCENT = '#D9C2A3';
+const ACCENT_SOFT = '#EFE3D3';
+const TEXT_PRIMARY = '#0D2838';
+const TEXT_SECONDARY = '#5D7280';
+const BG_COOL = '#F5F7F9';
+const BORDER_COOL = '#E8EDF0';
+const MUTED_COOL = '#8FA2AD';
 
 function initialsFromName(name: string | null | undefined): string {
   if (!name?.trim()) return '?';
@@ -88,6 +96,7 @@ function GroupCard({
   const privateLabel = group.is_private ? ' · Private' : '';
   const metaLine = `${typeLabel}${privateLabel} · ${subtitle}`;
   const effectiveJoinLabel = joinLabel ?? 'Join';
+  const isRequestAction = effectiveJoinLabel === 'Request';
 
   const showJoinBtn = !!onJoin && !isPending;
   const showPendingState = isPending;
@@ -99,7 +108,7 @@ function GroupCard({
         <Image source={{ uri: group.image_url }} style={cardStyles.avatarImg} />
       ) : (
         <View style={cardStyles.avatarPlaceholder}>
-          <MaterialIcons name="groups" size={22} color="#94a3b8" />
+          <MaterialIcons name="groups" size={22} color={MUTED_COOL} />
         </View>
       )}
       <View style={cardStyles.cardTextCol}>
@@ -108,10 +117,10 @@ function GroupCard({
             {group.name}
           </Text>
           {group.is_private && (
-            <MaterialIcons name="lock" size={13} color="#94a3b8" style={{ marginLeft: 5, marginTop: 1 }} />
+            <MaterialIcons name="lock" size={13} color={MUTED_COOL} style={{ marginLeft: 5, marginTop: 1 }} />
           )}
           {!group.is_private && group.has_join_password && (
-            <MaterialIcons name="key" size={13} color="#94a3b8" style={{ marginLeft: 5, marginTop: 1 }} />
+            <MaterialIcons name="key" size={13} color={MUTED_COOL} style={{ marginLeft: 5, marginTop: 1 }} />
           )}
         </View>
         <Text style={cardStyles.cardMeta} numberOfLines={1}>{metaLine}</Text>
@@ -149,7 +158,7 @@ function GroupCard({
               )}
               {onLeave && (
                 <TouchableOpacity
-                  style={[cardStyles.btnCompact, cardStyles.btnCompactLeave]}
+                  style={cardStyles.btnCompactLeave}
                   onPress={onLeave}
                   disabled={leaving}
                   activeOpacity={0.7}
@@ -176,16 +185,23 @@ function GroupCard({
                   activeOpacity={0.85}
                 >
                   {joinLoading ? (
-                    <ActivityIndicator size="small" color="#fff" />
+                    <ActivityIndicator size="small" color={isRequestAction ? TEXT_PRIMARY : '#fff'} />
                   ) : (
                     <>
                       <MaterialIcons
                         name={effectiveJoinLabel === 'Request' ? 'send' : 'group-add'}
                         size={14}
-                        color="#fff"
+                        color={isRequestAction ? TEXT_PRIMARY : '#fff'}
                         style={{ marginRight: 4 }}
                       />
-                      <Text style={cardStyles.btnCompactJoinText}>{effectiveJoinLabel}</Text>
+                      <Text
+                        style={[
+                          cardStyles.btnCompactJoinText,
+                          isRequestAction && cardStyles.btnCompactRequestText,
+                        ]}
+                      >
+                        {effectiveJoinLabel}
+                      </Text>
                     </>
                   )}
                 </TouchableOpacity>
@@ -251,24 +267,24 @@ const cardStyles = StyleSheet.create({
   cardTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#0f172a',
+    color: TEXT_PRIMARY,
     lineHeight: 22,
     flexShrink: 1,
   },
-  cardMeta: { fontSize: 13, color: '#64748b', fontWeight: '500' },
+  cardMeta: { fontSize: 13, color: TEXT_SECONDARY, fontWeight: '500' },
   avatarImg: {
     width: 50,
     height: 50,
     borderRadius: 15,
     marginRight: 14,
-    backgroundColor: '#f1f5f9',
+    backgroundColor: BG_COOL,
   },
   avatarPlaceholder: {
     width: 50,
     height: 50,
     borderRadius: 15,
     marginRight: 14,
-    backgroundColor: 'rgba(11, 97, 126, 0.07)',
+    backgroundColor: 'rgba(127, 179, 197, 0.18)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -278,10 +294,21 @@ const cardStyles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: 10,
-    backgroundColor: 'rgba(11, 97, 126, 0.07)',
+    backgroundColor: 'rgba(127, 179, 197, 0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(127, 179, 197, 0.4)',
   },
   btnCompactText: { color: PRIMARY, fontSize: 13, fontWeight: '600' },
-  btnCompactLeave: { backgroundColor: '#fef2f2' },
+  btnCompactLeave: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+  },
   btnCompactLeaveText: { color: '#dc2626', fontSize: 13, fontWeight: '600' },
   btnCompactJoin: {
     flexDirection: 'row',
@@ -291,8 +318,13 @@ const cardStyles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: PRIMARY,
   },
-  btnCompactRequest: { backgroundColor: PRIMARY },
+  btnCompactRequest: {
+    backgroundColor: PRIMARY_LIGHT,
+    borderWidth: 1,
+    borderColor: 'rgba(11, 97, 126, 0.26)',
+  },
   btnCompactJoinText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  btnCompactRequestText: { color: TEXT_PRIMARY },
   pendingWrap: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   btnPending: {
     flexDirection: 'row',
@@ -300,16 +332,20 @@ const cardStyles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 10,
     borderRadius: 10,
-    backgroundColor: '#fef3c7',
+    backgroundColor: ACCENT_SOFT,
+    borderWidth: 1,
+    borderColor: ACCENT,
   },
-  btnPendingText: { color: '#92400e', fontSize: 12, fontWeight: '700' },
+  btnPendingText: { color: TEXT_PRIMARY, fontSize: 12, fontWeight: '700' },
   btnCancelRequest: {
     paddingVertical: 5,
     paddingHorizontal: 8,
     borderRadius: 8,
-    backgroundColor: '#f1f5f9',
+    backgroundColor: BG_COOL,
+    borderWidth: 1,
+    borderColor: BORDER_COOL,
   },
-  btnCancelRequestText: { color: '#64748b', fontSize: 11, fontWeight: '600' },
+  btnCancelRequestText: { color: TEXT_SECONDARY, fontSize: 11, fontWeight: '600' },
 });
 
 // ---------------------------------------------------------------------------
@@ -361,7 +397,7 @@ function InputModal({
             <TextInput
               style={modalInputStyles.input}
               placeholder={placeholder}
-              placeholderTextColor="#94a3b8"
+              placeholderTextColor={MUTED_COOL}
               value={value}
               onChangeText={onChangeText}
               secureTextEntry={secureText}
@@ -419,7 +455,7 @@ const modalInputStyles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 18,
-    backgroundColor: 'rgba(11, 97, 126, 0.08)',
+    backgroundColor: 'rgba(127, 179, 197, 0.22)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
@@ -428,14 +464,14 @@ const modalInputStyles = StyleSheet.create({
   title: {
     fontSize: 21,
     fontWeight: '700',
-    color: '#0f172a',
+    color: TEXT_PRIMARY,
     textAlign: 'center',
     marginBottom: 8,
     letterSpacing: -0.3,
   },
   subtitle: {
     fontSize: 14,
-    color: '#64748b',
+    color: TEXT_SECONDARY,
     textAlign: 'center',
     lineHeight: 21,
     marginBottom: 20,
@@ -443,13 +479,13 @@ const modalInputStyles = StyleSheet.create({
   },
   input: {
     borderWidth: 1.5,
-    borderColor: '#e2e8f0',
+    borderColor: BORDER_COOL,
     borderRadius: 14,
     paddingHorizontal: 16,
     paddingVertical: 15,
     fontSize: 18,
-    color: '#0f172a',
-    backgroundColor: '#f8fafc',
+    color: TEXT_PRIMARY,
+    backgroundColor: BG_COOL,
     textAlign: 'center',
     letterSpacing: 3,
     marginBottom: 20,
@@ -464,12 +500,12 @@ const modalInputStyles = StyleSheet.create({
   },
   confirmBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
   cancelBtn: {
-    backgroundColor: '#f1f5f9',
+    backgroundColor: BG_COOL,
     borderRadius: 14,
     paddingVertical: 15,
     alignItems: 'center',
   },
-  cancelBtnText: { color: '#64748b', fontSize: 15, fontWeight: '600' },
+  cancelBtnText: { color: TEXT_SECONDARY, fontSize: 15, fontWeight: '600' },
 });
 
 // ---------------------------------------------------------------------------
@@ -478,6 +514,7 @@ const modalInputStyles = StyleSheet.create({
 
 export default function MyGroupsScreen() {
   const router = useRouter();
+  const listRef = useRef<ScrollView | null>(null);
   const [activePanel, setActivePanel] = useState<PanelType>('my_groups');
 
   // Groups data
@@ -586,7 +623,7 @@ export default function MyGroupsScreen() {
     const myGroupIds = new Set(memberRows.map((r) => r.group_id));
     const adminIds = new Set(memberRows.filter((r) => r.role === 'admin').map((r) => r.group_id));
     const editorIds = new Set(memberRows.filter((r) => r.role === 'editor').map((r) => r.group_id));
-    const pendingIds = new Set(
+    const pendingIds = new Set<string>(
       (requestsRes.data ?? [])
         .filter((r: { group_id: string; status: string }) => r.status === 'pending')
         .map((r: { group_id: string; status: string }) => r.group_id)
@@ -613,7 +650,18 @@ export default function MyGroupsScreen() {
     setLoading(false);
   }, []);
 
-  useFocusEffect(useCallback(() => { fetchGroups(); }, [fetchGroups]));
+  useFocusEffect(useCallback(() => {
+    fetchGroups();
+    requestAnimationFrame(() => {
+      listRef.current?.scrollTo({ y: 0, animated: false });
+    });
+  }, [fetchGroups]));
+
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      listRef.current?.scrollTo({ y: 0, animated: false });
+    });
+  }, [activePanel]);
 
   // -------------------------------------------------------------------------
   // Join routing: decide the right path based on group type + settings
@@ -824,24 +872,24 @@ export default function MyGroupsScreen() {
                       style={[
                         styles.modalBadge,
                         selectedGroup.type === 'campus_org'
-                          ? { backgroundColor: 'rgba(11, 97, 126, 0.12)' }
-                          : { backgroundColor: '#f1f5f9' },
+                          ? { backgroundColor: 'rgba(127, 179, 197, 0.26)' }
+                          : { backgroundColor: BG_COOL },
                         { marginRight: 8, marginBottom: 4 },
                       ]}
                     >
                       <Text
                         style={[
                           styles.modalBadgeText,
-                          { color: selectedGroup.type === 'campus_org' ? PRIMARY : '#64748b' },
+                          { color: selectedGroup.type === 'campus_org' ? PRIMARY : TEXT_SECONDARY },
                         ]}
                       >
                         {selectedGroup.type === 'campus_org' ? 'Campus org' : 'Friend group'}
                       </Text>
                     </View>
                     {selectedGroup.is_private && (
-                      <View style={[styles.modalBadge, { backgroundColor: '#f1f5f9', marginRight: 8, marginBottom: 4 }]}>
-                        <MaterialIcons name="lock" size={12} color="#64748b" style={{ marginRight: 4 }} />
-                        <Text style={[styles.modalBadgeText, { color: '#64748b' }]}>Private</Text>
+                      <View style={[styles.modalBadge, { backgroundColor: BG_COOL, marginRight: 8, marginBottom: 4 }]}>
+                        <MaterialIcons name="lock" size={12} color={TEXT_SECONDARY} style={{ marginRight: 4 }} />
+                        <Text style={[styles.modalBadgeText, { color: TEXT_SECONDARY }]}>Private</Text>
                       </View>
                     )}
                     <Text style={[styles.modalMetaMuted, { marginBottom: 4 }]}>
@@ -863,7 +911,7 @@ export default function MyGroupsScreen() {
                   <Text style={styles.modalSectionTitle}>Members</Text>
                   {!isMemberOfSelected ? (
                     <View style={styles.modalHintBox}>
-                      <MaterialIcons name="lock-outline" size={18} color="#94a3b8" style={{ marginRight: 8 }} />
+                        <MaterialIcons name="lock-outline" size={18} color={MUTED_COOL} style={{ marginRight: 8 }} />
                       <Text style={styles.modalHintText}>Join this group to see who is in it.</Text>
                     </View>
                   ) : detailMembersLoading ? (
@@ -949,30 +997,44 @@ export default function MyGroupsScreen() {
 
       {/* ── Main content ── */}
       <View style={styles.contentContainer}>
-        {/* 2-tab segment */}
+        {/* Single toggle for panels */}
         <View style={styles.segmentWrap}>
-          {(['my_groups', 'discover'] as const).map((panel) => {
-            const labels: Record<PanelType, string> = {
-              my_groups: 'Your Groups',
-              discover: 'Discover',
-            };
-            const active = activePanel === panel;
-            return (
-              <TouchableOpacity
-                key={panel}
-                style={[styles.segmentItem, active && styles.segmentItemActive]}
-                onPress={() => setActivePanel(panel)}
-                activeOpacity={0.85}
+          <TouchableOpacity
+            style={styles.panelToggle}
+            onPress={() => setActivePanel((prev) => (prev === 'my_groups' ? 'discover' : 'my_groups'))}
+            activeOpacity={0.9}
+            accessibilityRole="button"
+            accessibilityLabel={`Switch to ${activePanel === 'my_groups' ? 'Discover' : 'Your Groups'}`}
+          >
+            <View
+              style={[
+                styles.panelToggleThumb,
+                activePanel === 'discover' && styles.panelToggleThumbRight,
+              ]}
+            />
+            <View style={styles.panelToggleTrackLabels}>
+              <Text
+                style={[
+                  styles.panelToggleLabel,
+                  activePanel === 'my_groups' && styles.panelToggleLabelActive,
+                ]}
               >
-                <Text style={[styles.segmentLabel, active && styles.segmentLabelActive]}>
-                  {labels[panel]}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
+                Your Groups
+              </Text>
+              <Text
+                style={[
+                  styles.panelToggleLabel,
+                  activePanel === 'discover' && styles.panelToggleLabelActive,
+                ]}
+              >
+                Discover
+              </Text>
+            </View>
+          </TouchableOpacity>
         </View>
 
         <ScrollView
+          ref={listRef}
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
@@ -1050,11 +1112,11 @@ export default function MyGroupsScreen() {
               {/* Search bar + join-by-code */}
               <View style={styles.searchRow}>
                 <View style={styles.searchInputWrap}>
-                  <MaterialIcons name="search" size={20} color="#94a3b8" style={{ marginRight: 8 }} />
+                  <MaterialIcons name="search" size={20} color={MUTED_COOL} style={{ marginRight: 8 }} />
                   <TextInput
                     style={styles.searchInput}
                     placeholder="Search groups…"
-                    placeholderTextColor="#94a3b8"
+                    placeholderTextColor={MUTED_COOL}
                     value={discoverSearch}
                     onChangeText={setDiscoverSearch}
                     returnKeyType="search"
@@ -1175,7 +1237,7 @@ function EmptyCard({ icon, title, subtitle }: {
   return (
     <View style={styles.emptyCard}>
       <View style={styles.emptyIconCircle}>
-        <MaterialIcons name={icon} size={30} color="#85b0bf" />
+        <MaterialIcons name={icon} size={30} color={PRIMARY_LIGHT} />
       </View>
       <Text style={styles.emptyTitle}>{title}</Text>
       <Text style={styles.emptySubtitle}>{subtitle}</Text>
@@ -1188,9 +1250,9 @@ function EmptyCard({ icon, title, subtitle }: {
 // ---------------------------------------------------------------------------
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#0B617E' },
+  safeArea: { flex: 1, backgroundColor: PRIMARY },
   banner: {
-    backgroundColor: '#0B617E',
+    backgroundColor: PRIMARY,
     paddingHorizontal: 20,
     paddingTop: 20,
     paddingBottom: 10,
@@ -1201,7 +1263,7 @@ const styles = StyleSheet.create({
     elevation: 8,
     zIndex: 1,
   },
-  contentContainer: { flex: 1, backgroundColor: '#f5f7f9' },
+  contentContainer: { flex: 1, backgroundColor: BG_COOL },
   scrollView: { flex: 1 },
   scrollContent: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 48 },
   headerBlock: {
@@ -1224,30 +1286,52 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   segmentWrap: {
-    flexDirection: 'row',
-    backgroundColor: '#f5f7f9',
+    backgroundColor: BG_COOL,
     paddingHorizontal: 20,
     paddingTop: 16,
     paddingBottom: 4,
-    gap: 8,
   },
-  segmentItem: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderRadius: 12,
-    backgroundColor: 'rgba(11, 97, 126, 0.07)',
+  panelToggle: {
+    position: 'relative',
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: 'rgba(127, 179, 197, 0.24)',
+    padding: 3,
+    justifyContent: 'center',
   },
-  segmentItemActive: {
+  panelToggleThumb: {
+    position: 'absolute',
+    top: 3,
+    left: 3,
+    width: '50%',
+    height: 38,
+    borderRadius: 11,
     backgroundColor: PRIMARY,
     shadowColor: PRIMARY,
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.22,
+    shadowOpacity: 0.2,
     shadowRadius: 6,
     elevation: 3,
   },
-  segmentLabel: { fontSize: 14, fontWeight: '600', color: '#64748b' },
-  segmentLabelActive: { color: '#fff' },
+  panelToggleThumbRight: {
+    left: '50%',
+  },
+  panelToggleTrackLabels: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  panelToggleLabel: {
+    width: '50%',
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '600',
+    color: TEXT_SECONDARY,
+    zIndex: 1,
+  },
+  panelToggleLabelActive: {
+    color: '#fff',
+  },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1257,13 +1341,13 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#94a3b8',
+    color: MUTED_COOL,
     letterSpacing: 0.8,
     textTransform: 'uppercase',
   },
   countPill: {
     marginLeft: 8,
-    backgroundColor: 'rgba(11, 97, 126, 0.1)',
+    backgroundColor: 'rgba(127, 179, 197, 0.3)',
     paddingHorizontal: 9,
     paddingVertical: 3,
     borderRadius: 10,
@@ -1287,15 +1371,15 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 20,
-    backgroundColor: 'rgba(11, 97, 126, 0.06)',
+    backgroundColor: 'rgba(127, 179, 197, 0.22)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
   },
-  emptyTitle: { fontSize: 16, fontWeight: '600', color: '#334155', marginBottom: 5 },
+  emptyTitle: { fontSize: 16, fontWeight: '600', color: TEXT_PRIMARY, marginBottom: 5 },
   emptySubtitle: {
     fontSize: 13,
-    color: '#94a3b8',
+    color: MUTED_COOL,
     textAlign: 'center',
     lineHeight: 19,
     maxWidth: 240,
@@ -1322,7 +1406,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 1,
   },
-  searchInput: { flex: 1, fontSize: 15, color: '#0f172a', fontWeight: '500', letterSpacing: 0 },
+  searchInput: { flex: 1, fontSize: 15, color: TEXT_PRIMARY, fontWeight: '500', letterSpacing: 0 },
   codeBtn: {
     width: 46,
     height: 46,
@@ -1370,14 +1454,14 @@ const styles = StyleSheet.create({
     width: 100,
     height: 100,
     borderRadius: 24,
-    backgroundColor: '#f1f5f9',
+    backgroundColor: BG_COOL,
     marginBottom: 16,
   },
   modalHeroPlaceholder: {
     width: 100,
     height: 100,
     borderRadius: 24,
-    backgroundColor: 'rgba(11, 97, 126, 0.08)',
+    backgroundColor: 'rgba(127, 179, 197, 0.24)',
     marginBottom: 16,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1385,7 +1469,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#0f172a',
+    color: TEXT_PRIMARY,
     textAlign: 'center',
     marginBottom: 12,
     letterSpacing: -0.3,
@@ -1404,57 +1488,57 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   modalBadgeText: { fontSize: 13, fontWeight: '600' },
-  modalMetaMuted: { fontSize: 14, color: '#64748b', fontWeight: '500' },
+  modalMetaMuted: { fontSize: 14, color: TEXT_SECONDARY, fontWeight: '500' },
   modalSection: {
     marginHorizontal: 20,
     marginBottom: 16,
-    backgroundColor: '#f8fafb',
+    backgroundColor: BG_COOL,
     borderRadius: 16,
     padding: 16,
   },
   modalSectionTitle: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#94a3b8',
+    color: MUTED_COOL,
     letterSpacing: 0.8,
     textTransform: 'uppercase',
     marginBottom: 10,
   },
-  modalBodyText: { fontSize: 15, color: '#334155', lineHeight: 23 },
-  modalPlaceholder: { fontSize: 14, color: '#94a3b8', fontStyle: 'italic' },
+  modalBodyText: { fontSize: 15, color: TEXT_PRIMARY, lineHeight: 23 },
+  modalPlaceholder: { fontSize: 14, color: MUTED_COOL, fontStyle: 'italic' },
   modalHintBox: { flexDirection: 'row', alignItems: 'center' },
-  modalHintText: { flex: 1, fontSize: 14, color: '#64748b', lineHeight: 20 },
+  modalHintText: { flex: 1, fontSize: 14, color: TEXT_SECONDARY, lineHeight: 20 },
   modalLoading: { paddingVertical: 16, alignItems: 'center' },
   memberRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#edf1f5',
+    borderBottomColor: BORDER_COOL,
   },
   memberAvatarImg: {
     width: 40,
     height: 40,
     borderRadius: 14,
     marginRight: 12,
-    backgroundColor: '#e2e8f0',
+    backgroundColor: BORDER_COOL,
   },
   memberAvatarFallback: {
     width: 40,
     height: 40,
     borderRadius: 14,
     marginRight: 12,
-    backgroundColor: 'rgba(11, 97, 126, 0.1)',
+    backgroundColor: 'rgba(127, 179, 197, 0.24)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   memberAvatarInitials: { fontSize: 14, fontWeight: '700', color: PRIMARY },
-  memberName: { flex: 1, fontSize: 15, fontWeight: '500', color: '#0f172a' },
+  memberName: { flex: 1, fontSize: 15, fontWeight: '500', color: TEXT_PRIMARY },
   roleBadge: {
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 8,
-    backgroundColor: 'rgba(11, 97, 126, 0.06)',
+    backgroundColor: 'rgba(127, 179, 197, 0.2)',
   },
   roleBadgeText: {
     fontSize: 11,
@@ -1482,8 +1566,8 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     paddingVertical: 14,
     alignItems: 'center',
-    backgroundColor: '#f1f5f9',
+    backgroundColor: BG_COOL,
     borderRadius: 14,
   },
-  modalCloseBtnText: { fontSize: 16, fontWeight: '600', color: '#64748b' },
+  modalCloseBtnText: { fontSize: 16, fontWeight: '600', color: TEXT_SECONDARY },
 });
