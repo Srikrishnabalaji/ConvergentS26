@@ -1,24 +1,35 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  Image,
   ActivityIndicator,
-  RefreshControl,
   Alert,
-  StyleSheet,
-  Modal,
-  Pressable,
-  TextInput,
+  Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { supabase } from '@/lib/supabase';
+import {
+  Chip,
+  IconButton,
+  PageShell,
+  SearchInput,
+  SegmentedTabs,
+  initialsFromName,
+  type SegmentedOption,
+} from '@/components/ui';
+import { shadows } from '@/constants/shadows';
+import { cn } from '@/lib/cn';
+
+const PRIMARY = '#0B617E';
 
 type GroupType = 'friends' | 'campus_org';
 type PanelType = 'my_groups' | 'discover';
@@ -39,17 +50,6 @@ type DetailMember = {
   role: string;
   profiles: { full_name: string | null; avatar_url: string | null } | null;
 };
-
-const PRIMARY = '#0B617E';
-
-function initialsFromName(name: string | null | undefined): string {
-  if (!name?.trim()) return '?';
-  const parts = name.trim().split(/\s+/);
-  if (parts.length >= 2) {
-    return `${parts[0][0] ?? ''}${parts[parts.length - 1][0] ?? ''}`.toUpperCase();
-  }
-  return name.slice(0, 2).toUpperCase();
-}
 
 // ---------------------------------------------------------------------------
 // GroupCard
@@ -96,15 +96,15 @@ function GroupCard({
   const mainContent = (
     <>
       {group.image_url ? (
-        <Image source={{ uri: group.image_url }} style={cardStyles.avatarImg} />
+        <Image source={{ uri: group.image_url }} className="w-[50px] h-[50px] rounded-[15px] mr-3.5 bg-surface-raised" />
       ) : (
-        <View style={cardStyles.avatarPlaceholder}>
+        <View className="w-[50px] h-[50px] rounded-[15px] mr-3.5 bg-primary/[0.07] items-center justify-center">
           <MaterialIcons name="groups" size={22} color="#94a3b8" />
         </View>
       )}
-      <View style={cardStyles.cardTextCol}>
-        <View style={cardStyles.nameLockRow}>
-          <Text style={cardStyles.cardTitle} numberOfLines={1}>
+      <View className="flex-1 min-w-0">
+        <View className="flex-row items-center mb-[3px]">
+          <Text className="text-base font-semibold text-ink leading-[22px] shrink" numberOfLines={1}>
             {group.name}
           </Text>
           {group.is_private && (
@@ -114,66 +114,67 @@ function GroupCard({
             <MaterialIcons name="key" size={13} color="#94a3b8" style={{ marginLeft: 5, marginTop: 1 }} />
           )}
         </View>
-        <Text style={cardStyles.cardMeta} numberOfLines={1}>{metaLine}</Text>
+        <Text className="text-[13px] text-ink-subtle font-medium" numberOfLines={1}>
+          {metaLine}
+        </Text>
       </View>
     </>
   );
 
   return (
-    <View style={cardStyles.cardWrap}>
-      <View style={cardStyles.cardMain}>
-        <View style={cardStyles.cardMainRow}>
+    <View style={shadows.brand} className="bg-white rounded-[18px] mb-3">
+      <View className="px-4 py-3.5">
+        <View className="flex-row items-center">
           {onPress ? (
             <TouchableOpacity
-              style={cardStyles.cardTouchableLeft}
+              className="flex-1 flex-row items-center min-w-0 mr-2"
               onPress={onPress}
               activeOpacity={0.72}
             >
               {mainContent}
             </TouchableOpacity>
           ) : (
-            <View style={cardStyles.cardTouchableLeft}>{mainContent}</View>
+            <View className="flex-1 flex-row items-center min-w-0 mr-2">{mainContent}</View>
           )}
 
           {hasActions && (
-            <View style={cardStyles.actionsInline}>
+            <View className="flex-row items-center shrink-0 self-center gap-1.5">
               {canEdit && onEdit && (
                 <TouchableOpacity
-                  style={cardStyles.btnCompact}
                   onPress={onEdit}
                   activeOpacity={0.7}
+                  className="flex-row items-center py-1.5 px-3 rounded-[10px] bg-primary/[0.07]"
                 >
                   <MaterialIcons name="edit" size={15} color={PRIMARY} style={{ marginRight: 3 }} />
-                  <Text style={cardStyles.btnCompactText}>Edit</Text>
+                  <Text className="text-primary text-[13px] font-semibold">Edit</Text>
                 </TouchableOpacity>
               )}
               {onLeave && (
                 <TouchableOpacity
-                  style={[cardStyles.btnCompact, cardStyles.btnCompactLeave]}
                   onPress={onLeave}
                   disabled={leaving}
                   activeOpacity={0.7}
+                  className="flex-row items-center py-1.5 px-3 rounded-[10px] bg-danger-bgSoft"
                 >
                   {leaving ? (
                     <ActivityIndicator size="small" color="#dc2626" />
                   ) : (
                     <>
                       <MaterialIcons name="logout" size={14} color="#b91c1c" style={{ marginRight: 3 }} />
-                      <Text style={cardStyles.btnCompactLeaveText}>Leave</Text>
+                      <Text className="text-danger text-[13px] font-semibold">Leave</Text>
                     </>
                   )}
                 </TouchableOpacity>
               )}
               {showJoinBtn && (
                 <TouchableOpacity
-                  style={[
-                    cardStyles.btnCompactJoin,
-                    effectiveJoinLabel === 'Request' && cardStyles.btnCompactRequest,
-                    joinLoading && { opacity: 0.65 },
-                  ]}
                   onPress={onJoin}
                   disabled={joinLoading}
                   activeOpacity={0.85}
+                  className={cn(
+                    'flex-row items-center py-1.5 px-3.5 rounded-[10px] bg-primary',
+                    joinLoading && 'opacity-[0.65]'
+                  )}
                 >
                   {joinLoading ? (
                     <ActivityIndicator size="small" color="#fff" />
@@ -185,27 +186,27 @@ function GroupCard({
                         color="#fff"
                         style={{ marginRight: 4 }}
                       />
-                      <Text style={cardStyles.btnCompactJoinText}>{effectiveJoinLabel}</Text>
+                      <Text className="text-white text-[13px] font-bold">{effectiveJoinLabel}</Text>
                     </>
                   )}
                 </TouchableOpacity>
               )}
               {showPendingState && (
-                <View style={cardStyles.pendingWrap}>
-                  <View style={cardStyles.btnPending}>
+                <View className="flex-row items-center gap-[5px]">
+                  <View className="flex-row items-center py-1.5 px-2.5 rounded-[10px] bg-warn-bg">
                     <MaterialIcons name="schedule" size={13} color="#92400e" style={{ marginRight: 3 }} />
-                    <Text style={cardStyles.btnPendingText}>Pending</Text>
+                    <Text className="text-warn-text text-xs font-bold">Pending</Text>
                   </View>
                   {onCancelRequest && (
                     <TouchableOpacity
-                      style={cardStyles.btnCancelRequest}
                       onPress={onCancelRequest}
                       disabled={cancellingRequest}
+                      className="py-[5px] px-2 rounded-lg bg-surface-raised"
                     >
                       {cancellingRequest ? (
                         <ActivityIndicator size="small" color="#64748b" />
                       ) : (
-                        <Text style={cardStyles.btnCancelRequestText}>Cancel</Text>
+                        <Text className="text-ink-subtle text-[11px] font-semibold">Cancel</Text>
                       )}
                     </TouchableOpacity>
                   )}
@@ -219,101 +220,8 @@ function GroupCard({
   );
 }
 
-const cardStyles = StyleSheet.create({
-  cardWrap: {
-    backgroundColor: '#fff',
-    borderRadius: 18,
-    marginBottom: 12,
-    shadowColor: '#0B617E',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.07,
-    shadowRadius: 14,
-    elevation: 2,
-  },
-  cardMain: { paddingHorizontal: 16, paddingVertical: 14 },
-  cardMainRow: { flexDirection: 'row', alignItems: 'center' },
-  cardTouchableLeft: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    minWidth: 0,
-    marginRight: 8,
-  },
-  cardTextCol: { flex: 1, minWidth: 0 },
-  nameLockRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 3 },
-  actionsInline: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexShrink: 0,
-    alignSelf: 'center',
-    gap: 6,
-  },
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#0f172a',
-    lineHeight: 22,
-    flexShrink: 1,
-  },
-  cardMeta: { fontSize: 13, color: '#64748b', fontWeight: '500' },
-  avatarImg: {
-    width: 50,
-    height: 50,
-    borderRadius: 15,
-    marginRight: 14,
-    backgroundColor: '#f1f5f9',
-  },
-  avatarPlaceholder: {
-    width: 50,
-    height: 50,
-    borderRadius: 15,
-    marginRight: 14,
-    backgroundColor: 'rgba(11, 97, 126, 0.07)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  btnCompact: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    backgroundColor: 'rgba(11, 97, 126, 0.07)',
-  },
-  btnCompactText: { color: PRIMARY, fontSize: 13, fontWeight: '600' },
-  btnCompactLeave: { backgroundColor: '#fef2f2' },
-  btnCompactLeaveText: { color: '#dc2626', fontSize: 13, fontWeight: '600' },
-  btnCompactJoin: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    backgroundColor: PRIMARY,
-  },
-  btnCompactRequest: { backgroundColor: PRIMARY },
-  btnCompactJoinText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  pendingWrap: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  btnPending: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 10,
-    backgroundColor: '#fef3c7',
-  },
-  btnPendingText: { color: '#92400e', fontSize: 12, fontWeight: '700' },
-  btnCancelRequest: {
-    paddingVertical: 5,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-    backgroundColor: '#f1f5f9',
-  },
-  btnCancelRequestText: { color: '#64748b', fontSize: 11, fontWeight: '600' },
-});
-
 // ---------------------------------------------------------------------------
-// Small reusable Input Modal (code join + password prompt)
+// InputModal — centered dialog with icon + OTP-style or text input
 // ---------------------------------------------------------------------------
 
 function InputModal({
@@ -349,48 +257,57 @@ function InputModal({
 
   return (
     <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={onCancel}>
-      <Pressable style={modalInputStyles.overlay} onPress={onCancel}>
+      <Pressable className="flex-1 bg-[rgba(15,23,42,0.55)]" onPress={onCancel}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={modalInputStyles.kvContainer}
+          className="flex-1 justify-center items-center p-6"
         >
-          <Pressable style={modalInputStyles.sheet} onPress={(e) => e.stopPropagation()}>
+          <Pressable
+            onPress={(e) => e.stopPropagation()}
+            style={shadows.dialog}
+            className="w-full bg-white rounded-3xl px-6 pt-7 pb-6"
+          >
             {icon && (
-              <View style={modalInputStyles.iconCircle}>
+              <View className="w-16 h-16 rounded-[18px] bg-primary/[0.08] items-center justify-center mb-4 self-center">
                 <MaterialIcons name={icon} size={28} color={PRIMARY} />
               </View>
             )}
-            <Text style={modalInputStyles.title}>{title}</Text>
-            {subtitle && <Text style={modalInputStyles.subtitle}>{subtitle}</Text>}
+            <Text className="text-[21px] font-bold text-ink text-center mb-2 tracking-[-0.3px]">
+              {title}
+            </Text>
+            {subtitle && (
+              <Text className="text-sm text-ink-subtle text-center leading-[21px] mb-5 px-1">
+                {subtitle}
+              </Text>
+            )}
 
             {otpLength ? (
-              /* OTP box input */
               <TouchableOpacity
                 activeOpacity={1}
-                style={modalInputStyles.otpWrapper}
+                className="w-full mb-5"
                 onPress={() => hiddenRef.current?.focus()}
               >
-                <View style={modalInputStyles.otpRow}>
+                <View className="flex-row gap-2">
                   {Array.from({ length: otpLength }).map((_, i) => {
                     const char = value[i];
                     const isCursor = i === value.length;
                     return (
                       <View
                         key={i}
-                        style={[
-                          modalInputStyles.otpBox,
-                          char ? modalInputStyles.otpBoxFilled : undefined,
-                          isCursor ? modalInputStyles.otpBoxCursor : undefined,
-                        ]}
+                        className={cn(
+                          'flex-1 h-12 border-[1.5px] rounded-xl items-center justify-center bg-surface-subtle',
+                          char ? 'bg-primary/[0.06] border-primary' : 'border-line-neutral',
+                          isCursor && 'border-primary border-2'
+                        )}
                       >
-                        <Text style={modalInputStyles.otpChar}>{char ?? ''}</Text>
+                        <Text className="text-lg font-extrabold text-ink">{char ?? ''}</Text>
                       </View>
                     );
                   })}
                 </View>
                 <TextInput
                   ref={hiddenRef}
-                  style={modalInputStyles.otpHidden}
+                  style={{ position: 'absolute', width: 1, height: 1, opacity: 0 }}
                   value={value}
                   onChangeText={(t) =>
                     onChangeText(t.toUpperCase().replace(/[^A-F0-9]/g, '').slice(0, otpLength))
@@ -404,9 +321,8 @@ function InputModal({
                 />
               </TouchableOpacity>
             ) : (
-              /* Regular text input */
               <TextInput
-                style={modalInputStyles.input}
+                className="border-[1.5px] border-line-neutral rounded-[14px] px-4 py-[15px] text-lg text-ink bg-surface-subtle text-center tracking-[3px] mb-5 font-bold"
                 placeholder={placeholder}
                 placeholderTextColor="#94a3b8"
                 value={value}
@@ -420,18 +336,24 @@ function InputModal({
             )}
 
             <TouchableOpacity
-              style={[modalInputStyles.confirmBtn, confirming && { opacity: 0.7 }]}
               onPress={onConfirm}
               disabled={confirming}
+              className={cn(
+                'bg-primary rounded-[14px] py-4 items-center mb-2.5',
+                confirming && 'opacity-70'
+              )}
             >
               {confirming ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={modalInputStyles.confirmBtnText}>{confirmLabel}</Text>
+                <Text className="text-white text-base font-bold">{confirmLabel}</Text>
               )}
             </TouchableOpacity>
-            <TouchableOpacity style={modalInputStyles.cancelBtn} onPress={onCancel}>
-              <Text style={modalInputStyles.cancelBtnText}>Cancel</Text>
+            <TouchableOpacity
+              onPress={onCancel}
+              className="bg-surface-raised rounded-[14px] py-[15px] items-center"
+            >
+              <Text className="text-ink-subtle text-[15px] font-semibold">Cancel</Text>
             </TouchableOpacity>
           </Pressable>
         </KeyboardAvoidingView>
@@ -439,110 +361,6 @@ function InputModal({
     </Modal>
   );
 }
-
-const modalInputStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.55)',
-  },
-  kvContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  sheet: {
-    width: '100%',
-    backgroundColor: '#fff',
-    borderRadius: 24,
-    paddingHorizontal: 24,
-    paddingTop: 28,
-    paddingBottom: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.18,
-    shadowRadius: 24,
-    elevation: 12,
-  },
-  iconCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 18,
-    backgroundColor: 'rgba(11, 97, 126, 0.08)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-    alignSelf: 'center',
-  },
-  title: {
-    fontSize: 21,
-    fontWeight: '700',
-    color: '#0f172a',
-    textAlign: 'center',
-    marginBottom: 8,
-    letterSpacing: -0.3,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#64748b',
-    textAlign: 'center',
-    lineHeight: 21,
-    marginBottom: 20,
-    paddingHorizontal: 4,
-  },
-  input: {
-    borderWidth: 1.5,
-    borderColor: '#e2e8f0',
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 15,
-    fontSize: 18,
-    color: '#0f172a',
-    backgroundColor: '#f8fafc',
-    textAlign: 'center',
-    letterSpacing: 3,
-    marginBottom: 20,
-    fontWeight: '700',
-  },
-  confirmBtn: {
-    backgroundColor: PRIMARY,
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  confirmBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  cancelBtn: {
-    backgroundColor: '#f1f5f9',
-    borderRadius: 14,
-    paddingVertical: 15,
-    alignItems: 'center',
-  },
-  cancelBtnText: { color: '#64748b', fontSize: 15, fontWeight: '600' },
-  // OTP boxes
-  otpWrapper: { width: '100%', marginBottom: 20 },
-  otpRow: { flexDirection: 'row', gap: 8 },
-  otpBox: {
-    flex: 1,
-    height: 48,
-    borderWidth: 1.5,
-    borderColor: '#e2e8f0',
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#f8fafc',
-  },
-  otpBoxFilled: {
-    backgroundColor: 'rgba(11, 97, 126, 0.06)',
-    borderColor: PRIMARY,
-  },
-  otpBoxCursor: {
-    borderColor: PRIMARY,
-    borderWidth: 2,
-  },
-  otpChar: { fontSize: 18, fontWeight: '800', color: '#0f172a' },
-  otpHidden: { position: 'absolute', width: 1, height: 1, opacity: 0 },
-});
 
 // ---------------------------------------------------------------------------
 // Main screen
@@ -552,7 +370,6 @@ export default function MyGroupsScreen() {
   const router = useRouter();
   const [activePanel, setActivePanel] = useState<PanelType>('my_groups');
 
-  // Groups data
   const [myGroups, setMyGroups] = useState<Group[]>([]);
   const [discoverGroups, setDiscoverGroups] = useState<Group[]>([]);
   const [adminGroupIds, setAdminGroupIds] = useState<Set<string>>(new Set());
@@ -561,47 +378,34 @@ export default function MyGroupsScreen() {
   const [loading, setLoading] = useState(true);
   const scrollRef = useRef<ScrollView>(null);
 
-  // Action loading states
   const [joiningId, setJoiningId] = useState<string | null>(null);
   const [requestingId, setRequestingId] = useState<string | null>(null);
   const [cancellingRequestId, setCancellingRequestId] = useState<string | null>(null);
   const [leavingId, setLeavingId] = useState<string | null>(null);
 
-  // Group detail modal
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [detailMembers, setDetailMembers] = useState<DetailMember[]>([]);
   const [detailMembersLoading, setDetailMembersLoading] = useState(false);
 
-  // Discover search
   const [discoverSearch, setDiscoverSearch] = useState('');
 
-  // Join-by-code modal
   const [showCodeModal, setShowCodeModal] = useState(false);
   const [codeInput, setCodeInput] = useState('');
   const [joiningByCode, setJoiningByCode] = useState(false);
 
-  // Password prompt modal
   const [passwordGroup, setPasswordGroup] = useState<Group | null>(null);
   const [passwordInput, setPasswordInput] = useState('');
   const [joiningWithPassword, setJoiningWithPassword] = useState(false);
 
-  // My-groups section collapse state
   const [collapsedMyGroups, setCollapsedMyGroups] = useState<Set<'friends' | 'campus'>>(new Set());
 
-  // Discover type filter
   const [discoverFilter, setDiscoverFilter] = useState<'all' | 'friends' | 'campus'>('all');
 
-  // -------------------------------------------------------------------------
-  // isMemberOfSelected: used to gate the member list in the detail modal
-  // -------------------------------------------------------------------------
   const isMemberOfSelected = useMemo(() => {
     if (!selectedGroup) return false;
     return myGroups.some((g) => g.id === selectedGroup.id);
   }, [selectedGroup, myGroups]);
 
-  // -------------------------------------------------------------------------
-  // Load members when the detail modal opens (only for own groups)
-  // -------------------------------------------------------------------------
   useEffect(() => {
     if (!selectedGroup || !isMemberOfSelected) {
       setDetailMembers([]);
@@ -641,16 +445,18 @@ export default function MyGroupsScreen() {
       setDetailMembersLoading(false);
       setDetailMembers(merged);
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [selectedGroup, isMemberOfSelected]);
 
-  // -------------------------------------------------------------------------
-  // fetchGroups
-  // -------------------------------------------------------------------------
   const fetchGroups = useCallback(async () => {
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setLoading(false); return; }
+    if (!user) {
+      setLoading(false);
+      return;
+    }
 
     const [memberRes, groupsRes, countRes, requestsRes] = await Promise.all([
       supabase.from('group_members').select('group_id, role').eq('user_id', user.id),
@@ -692,14 +498,13 @@ export default function MyGroupsScreen() {
     setLoading(false);
   }, []);
 
-  useFocusEffect(useCallback(() => {
-    scrollRef.current?.scrollTo({ y: 0, animated: false });
-    fetchGroups();
-  }, [fetchGroups]));
+  useFocusEffect(
+    useCallback(() => {
+      scrollRef.current?.scrollTo({ y: 0, animated: false });
+      fetchGroups();
+    }, [fetchGroups])
+  );
 
-  // -------------------------------------------------------------------------
-  // Join routing: decide the right path based on group type + settings
-  // -------------------------------------------------------------------------
   function handleJoinPress(group: Group) {
     if (joiningId || requestingId) return;
     if (group.type === 'campus_org') {
@@ -822,9 +627,6 @@ export default function MyGroupsScreen() {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Derived / filtered data
-  // -------------------------------------------------------------------------
   const myFriendGroups = useMemo(() => myGroups.filter((g) => g.type === 'friends'), [myGroups]);
   const myCampusGroups = useMemo(() => myGroups.filter((g) => g.type === 'campus_org'), [myGroups]);
 
@@ -834,23 +636,42 @@ export default function MyGroupsScreen() {
     return discoverGroups.filter((g) => g.name.toLowerCase().startsWith(q));
   }, [discoverGroups, discoverSearch]);
 
-  const discoverFriendGroups = useMemo(() => searchedDiscover.filter((g) => g.type === 'friends'), [searchedDiscover]);
-  const discoverCampusGroups = useMemo(() => searchedDiscover.filter((g) => g.type === 'campus_org'), [searchedDiscover]);
-
-  const hasDiscoverSearch = discoverSearch.trim().length > 0;
-  const noSearchResults = hasDiscoverSearch && (
-    discoverFilter === 'friends' ? discoverFriendGroups.length === 0 :
-    discoverFilter === 'campus'  ? discoverCampusGroups.length === 0 :
-    discoverFriendGroups.length === 0 && discoverCampusGroups.length === 0
+  const discoverFriendGroups = useMemo(
+    () => searchedDiscover.filter((g) => g.type === 'friends'),
+    [searchedDiscover]
+  );
+  const discoverCampusGroups = useMemo(
+    () => searchedDiscover.filter((g) => g.type === 'campus_org'),
+    [searchedDiscover]
   );
 
-  // -------------------------------------------------------------------------
-  // Render
-  // -------------------------------------------------------------------------
-  return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
+  const hasDiscoverSearch = discoverSearch.trim().length > 0;
+  const noSearchResults =
+    hasDiscoverSearch &&
+    (discoverFilter === 'friends'
+      ? discoverFriendGroups.length === 0
+      : discoverFilter === 'campus'
+      ? discoverCampusGroups.length === 0
+      : discoverFriendGroups.length === 0 && discoverCampusGroups.length === 0);
 
-      {/* Join-by-code modal */}
+  const panelOptions: SegmentedOption<PanelType>[] = [
+    { value: 'my_groups', label: 'Your Groups' },
+    { value: 'discover', label: 'Discover' },
+  ];
+
+  return (
+    <PageShell
+      title="Groups"
+      right={
+        <IconButton
+          tone="surface"
+          onPress={() => router.push('/create-group' as never)}
+          accessibilityLabel="Create group"
+        >
+          <MaterialIcons name="add" size={22} color={PRIMARY} />
+        </IconButton>
+      }
+    >
       <InputModal
         visible={showCodeModal}
         title="Join with Code"
@@ -861,12 +682,14 @@ export default function MyGroupsScreen() {
         onConfirm={handleJoinByCode}
         confirmLabel="Join Group"
         confirming={joiningByCode}
-        onCancel={() => { setShowCodeModal(false); setCodeInput(''); }}
+        onCancel={() => {
+          setShowCodeModal(false);
+          setCodeInput('');
+        }}
         icon="key"
         otpLength={6}
       />
 
-      {/* Password prompt modal */}
       <InputModal
         visible={!!passwordGroup}
         title="Password Required"
@@ -877,473 +700,475 @@ export default function MyGroupsScreen() {
         onConfirm={handleJoinWithPassword}
         confirmLabel="Join"
         confirming={joiningWithPassword}
-        onCancel={() => { setPasswordGroup(null); setPasswordInput(''); }}
+        onCancel={() => {
+          setPasswordGroup(null);
+          setPasswordInput('');
+        }}
         secureText
         icon="lock"
       />
 
-      {/* Group detail modal */}
-      <Modal
-        visible={!!selectedGroup}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setSelectedGroup(null)}
-      >
-        <Pressable style={styles.modalOverlay} onPress={() => setSelectedGroup(null)}>
-          <Pressable style={styles.modalSheet} onPress={(e) => e.stopPropagation()}>
-            {selectedGroup && (
-              <ScrollView
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={styles.modalScrollContent}
-              >
-                <View style={styles.modalHandle} />
-                <View style={styles.modalHero}>
-                  {selectedGroup.image_url ? (
-                    <Image source={{ uri: selectedGroup.image_url }} style={styles.modalHeroImage} />
-                  ) : (
-                    <View style={styles.modalHeroPlaceholder}>
-                      <MaterialIcons name="groups" size={40} color="#94a3b8" />
-                    </View>
-                  )}
-                  <Text style={styles.modalTitle}>{selectedGroup.name}</Text>
-                  <View style={styles.modalMetaRow}>
-                    <View
-                      style={[
-                        styles.modalBadge,
-                        selectedGroup.type === 'campus_org'
-                          ? { backgroundColor: 'rgba(11, 97, 126, 0.12)' }
-                          : { backgroundColor: '#f1f5f9' },
-                        { marginRight: 8, marginBottom: 4 },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.modalBadgeText,
-                          { color: selectedGroup.type === 'campus_org' ? PRIMARY : '#64748b' },
-                        ]}
-                      >
-                        {selectedGroup.type === 'campus_org' ? 'Campus org' : 'Friend group'}
-                      </Text>
-                    </View>
-                    {selectedGroup.is_private && (
-                      <View style={[styles.modalBadge, { backgroundColor: '#f1f5f9', marginRight: 8, marginBottom: 4 }]}>
-                        <MaterialIcons name="lock" size={12} color="#64748b" style={{ marginRight: 4 }} />
-                        <Text style={[styles.modalBadgeText, { color: '#64748b' }]}>Private</Text>
-                      </View>
-                    )}
-                    <Text style={[styles.modalMetaMuted, { marginBottom: 4 }]}>
-                      {selectedGroup.member_count ?? 0} members
-                    </Text>
-                  </View>
-                </View>
+      <GroupDetailModal
+        group={selectedGroup}
+        isMemberOfSelected={isMemberOfSelected}
+        detailMembers={detailMembers}
+        detailMembersLoading={detailMembersLoading}
+        onClose={() => setSelectedGroup(null)}
+        onNavigateToEvents={(g) => {
+          setSelectedGroup(null);
+          router.push({
+            pathname: '/(tabs)/calendar',
+            params: { groupId: g.id, groupName: g.name },
+          });
+        }}
+      />
 
-                <View style={styles.modalSection}>
-                  <Text style={styles.modalSectionTitle}>About</Text>
-                  {selectedGroup.description ? (
-                    <Text style={styles.modalBodyText}>{selectedGroup.description}</Text>
-                  ) : (
-                    <Text style={styles.modalPlaceholder}>No description yet.</Text>
-                  )}
-                </View>
-
-                <View style={styles.modalSection}>
-                  <Text style={styles.modalSectionTitle}>Members</Text>
-                  {!isMemberOfSelected ? (
-                    <View style={styles.modalHintBox}>
-                      <MaterialIcons name="lock-outline" size={18} color="#94a3b8" style={{ marginRight: 8 }} />
-                      <Text style={styles.modalHintText}>Join this group to see who is in it.</Text>
-                    </View>
-                  ) : detailMembersLoading ? (
-                    <View style={styles.modalLoading}>
-                      <ActivityIndicator color={PRIMARY} />
-                    </View>
-                  ) : detailMembers.length === 0 ? (
-                    <Text style={styles.modalPlaceholder}>No members loaded.</Text>
-                  ) : (
-                    <View>
-                      {detailMembers.map((m, index) => (
-                        <View
-                          key={m.user_id}
-                          style={[
-                            styles.memberRow,
-                            index === detailMembers.length - 1 && { borderBottomWidth: 0 },
-                          ]}
-                        >
-                          {m.profiles?.avatar_url ? (
-                            <Image source={{ uri: m.profiles.avatar_url }} style={styles.memberAvatarImg} />
-                          ) : (
-                            <View style={styles.memberAvatarFallback}>
-                              <Text style={styles.memberAvatarInitials}>
-                                {initialsFromName(m.profiles?.full_name)}
-                              </Text>
-                            </View>
-                          )}
-                          <Text style={styles.memberName} numberOfLines={1}>
-                            {m.profiles?.full_name ?? 'Member'}
-                          </Text>
-                          <View style={styles.roleBadge}>
-                            <Text style={styles.roleBadgeText}>{m.role}</Text>
-                          </View>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-                </View>
-
-                <TouchableOpacity
-                  style={styles.modalPrimaryBtn}
-                  onPress={() => {
-                    const g = selectedGroup;
-                    setSelectedGroup(null);
-                    router.push({
-                      pathname: '/(tabs)/calendar',
-                      params: { groupId: g.id, groupName: g.name },
-                    });
-                  }}
-                  activeOpacity={0.88}
-                >
-                  <MaterialIcons name="event" size={22} color="#fff" style={{ marginRight: 8 }} />
-                  <Text style={styles.modalPrimaryBtnText}>View group events</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.modalCloseBtn}
-                  onPress={() => setSelectedGroup(null)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.modalCloseBtnText}>Close</Text>
-                </TouchableOpacity>
-              </ScrollView>
-            )}
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      {/* ── Header ── */}
-      <View style={styles.banner}>
-        <View style={styles.headerBlock}>
-          <Text style={styles.pageTitle}>Groups</Text>
-          <TouchableOpacity
-            style={styles.headerIconBtnPrimary}
-            onPress={() => router.push('/create-group' as never)}
-            accessibilityRole="button"
-            accessibilityLabel="Create group"
-          >
-            <MaterialIcons name="add" size={22} color={PRIMARY} />
-          </TouchableOpacity>
-        </View>
+      <View className="px-5 pt-4 pb-1">
+        <SegmentedTabs<PanelType>
+          value={activePanel}
+          onChange={setActivePanel}
+          options={panelOptions}
+        />
       </View>
 
-      {/* ── Main content ── */}
-      <View style={styles.contentContainer}>
-        {/* 2-tab segment */}
-        <View style={styles.segmentWrap}>
-          {(['my_groups', 'discover'] as const).map((panel) => {
-            const labels: Record<PanelType, string> = {
-              my_groups: 'Your Groups',
-              discover: 'Discover',
-            };
-            const active = activePanel === panel;
-            return (
-              <TouchableOpacity
-                key={panel}
-                style={[styles.segmentItem, active && styles.segmentItemActive]}
-                onPress={() => setActivePanel(panel)}
-                activeOpacity={0.85}
-              >
-                <Text style={[styles.segmentLabel, active && styles.segmentLabelActive]}>
-                  {labels[panel]}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        <ScrollView
-          ref={scrollRef}
-          style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          refreshControl={
-            <RefreshControl refreshing={loading} onRefresh={fetchGroups} tintColor={PRIMARY} />
-          }
-        >
-          {/* ═══════════════════════════════════════════════════════════════
-              PANEL A — YOUR GROUPS
-          ═══════════════════════════════════════════════════════════════ */}
-          {activePanel === 'my_groups' && (
-            <>
-              {loading && myGroups.length === 0 ? (
-                <View style={styles.loadingBlock}>
-                  <ActivityIndicator color={PRIMARY} size="large" />
-                </View>
-              ) : (
-                <>
-                  {/* Friend Groups sub-section */}
-                  <SectionHeader
-                    title="Friend Groups"
-                    count={myFriendGroups.length}
-                    collapsed={collapsedMyGroups.has('friends')}
-                    onToggle={() => setCollapsedMyGroups(prev => {
-                      const n = new Set(prev);
-                      n.has('friends') ? n.delete('friends') : n.add('friends');
-                      return n;
-                    })}
-                  />
-                  {!collapsedMyGroups.has('friends') && (
-                    myFriendGroups.length === 0 ? (
-                      <EmptyCard
-                        icon="people"
-                        title="No friend groups yet"
-                        subtitle="Create one with the + button or join one in Discover."
-                      />
-                    ) : (
-                      myFriendGroups.map((group) => (
-                        <GroupCard
-                          key={group.id}
-                          group={group}
-                          subtitle={`${group.member_count ?? 0} members`}
-                          canEdit={adminGroupIds.has(group.id) || editorGroupIds.has(group.id)}
-                          onEdit={() => router.push(`/edit-group/${group.id}` as never)}
-                          onPress={() => setSelectedGroup(group)}
-                          onLeave={!adminGroupIds.has(group.id) ? () => !leavingId && handleLeave(group.id) : undefined}
-                          leaving={leavingId === group.id}
-                        />
-                      ))
-                    )
-                  )}
-
-                  {/* Campus Groups sub-section */}
-                  <SectionHeader
-                    title="Campus Groups"
-                    count={myCampusGroups.length}
-                    topSpacing
-                    collapsed={collapsedMyGroups.has('campus')}
-                    onToggle={() => setCollapsedMyGroups(prev => {
-                      const n = new Set(prev);
-                      n.has('campus') ? n.delete('campus') : n.add('campus');
-                      return n;
-                    })}
-                  />
-                  {!collapsedMyGroups.has('campus') && (
-                    myCampusGroups.length === 0 ? (
-                      <EmptyCard
-                        icon="school"
-                        title="No campus groups yet"
-                        subtitle="Request to join a campus org in Discover."
-                      />
-                    ) : (
-                      myCampusGroups.map((group) => (
-                        <GroupCard
-                          key={group.id}
-                          group={group}
-                          subtitle={`${group.member_count ?? 0} members`}
-                          canEdit={adminGroupIds.has(group.id) || editorGroupIds.has(group.id)}
-                          onEdit={() => router.push(`/edit-group/${group.id}` as never)}
-                          onPress={() => setSelectedGroup(group)}
-                          onLeave={!adminGroupIds.has(group.id) ? () => !leavingId && handleLeave(group.id) : undefined}
-                          leaving={leavingId === group.id}
-                        />
-                      ))
-                    )
-                  )}
-                </>
-              )}
-            </>
-          )}
-
-          {/* ═══════════════════════════════════════════════════════════════
-              PANEL B — DISCOVER
-          ═══════════════════════════════════════════════════════════════ */}
-          {activePanel === 'discover' && (
-            <>
-              {/* Search bar + join-by-code */}
-              <View style={styles.searchRow}>
-                <View style={styles.searchInputWrap}>
-                  <MaterialIcons name="search" size={20} color="#94a3b8" style={{ marginRight: 8 }} />
-                  <TextInput
-                    style={styles.searchInput}
-                    placeholder="Search groups…"
-                    placeholderTextColor="#94a3b8"
-                    value={discoverSearch}
-                    onChangeText={setDiscoverSearch}
-                    returnKeyType="search"
-                    clearButtonMode="while-editing"
-                  />
-                </View>
-                <TouchableOpacity
-                  style={styles.codeBtn}
-                  onPress={() => { setCodeInput(''); setShowCodeModal(true); }}
-                  activeOpacity={0.8}
-                  accessibilityLabel="Join with code"
-                >
-                  <MaterialIcons name="key" size={20} color={PRIMARY} />
-                </TouchableOpacity>
+      <ScrollView
+        ref={scrollRef}
+        className="flex-1"
+        contentContainerClassName="px-5 pt-2 pb-12"
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchGroups} tintColor={PRIMARY} />}
+      >
+        {activePanel === 'my_groups' && (
+          <>
+            {loading && myGroups.length === 0 ? (
+              <View className="py-12 items-center">
+                <ActivityIndicator color={PRIMARY} size="large" />
               </View>
-
-              {/* Type filter chips */}
-              <View style={styles.discoverFilterRow}>
-                {(['all', 'friends', 'campus'] as const).map(f => {
-                  const label = f === 'all' ? 'All' : f === 'friends' ? 'Friend Groups' : 'Campus Groups';
-                  const active = discoverFilter === f;
-                  return (
-                    <TouchableOpacity
-                      key={f}
-                      style={[styles.discoverFilterChip, active && styles.discoverFilterChipActive]}
-                      onPress={() => setDiscoverFilter(f)}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={[styles.discoverFilterChipText, active && styles.discoverFilterChipTextActive]}>
-                        {label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              {loading && discoverGroups.length === 0 ? (
-                <View style={styles.loadingBlock}>
-                  <ActivityIndicator color={PRIMARY} size="large" />
-                </View>
-              ) : noSearchResults ? (
-                <EmptyCard
-                  icon="search-off"
-                  title={`No results for "${discoverSearch.trim()}"`}
-                  subtitle="Try a different search term."
+            ) : (
+              <>
+                <SectionHeader
+                  title="Friend Groups"
+                  count={myFriendGroups.length}
+                  collapsed={collapsedMyGroups.has('friends')}
+                  onToggle={() =>
+                    setCollapsedMyGroups((prev) => {
+                      const n = new Set(prev);
+                      if (n.has('friends')) n.delete('friends'); else n.add('friends');
+                      return n;
+                    })
+                  }
                 />
-              ) : discoverFilter === 'friends' ? (
-                /* ── Friend groups only ── */
-                discoverFriendGroups.length === 0 ? (
-                  <EmptyCard
-                    icon="people-outline"
-                    title="No friend groups to join"
-                    subtitle="All available friend groups will appear here."
-                  />
-                ) : (
-                  <>{discoverFriendGroups.map((group) => (
-                    <GroupCard
-                      key={group.id}
-                      group={group}
-                      subtitle={`${group.member_count ?? 0} members`}
-                      onJoin={() => handleJoinPress(group)}
-                      joinLabel="Join"
-                      joinLoading={joiningId === group.id}
-                      onPress={() => setSelectedGroup(group)}
+                {!collapsedMyGroups.has('friends') &&
+                  (myFriendGroups.length === 0 ? (
+                    <EmptyCard
+                      icon="people"
+                      title="No friend groups yet"
+                      subtitle="Create one with the + button or join one in Discover."
                     />
-                  ))}</>
-                )
-              ) : discoverFilter === 'campus' ? (
-                /* ── Campus groups only ── */
-                discoverCampusGroups.length === 0 ? (
-                  <EmptyCard
-                    icon="school"
-                    title="No campus orgs to join"
-                    subtitle="Available campus organizations will appear here."
-                  />
-                ) : (
-                  <>{discoverCampusGroups.map((group) => {
-                    const isPending = pendingRequestIds.has(group.id);
-                    return (
+                  ) : (
+                    myFriendGroups.map((group) => (
                       <GroupCard
                         key={group.id}
                         group={group}
                         subtitle={`${group.member_count ?? 0} members`}
-                        onJoin={!isPending ? () => handleJoinPress(group) : undefined}
-                        joinLabel="Request"
-                        joinLoading={requestingId === group.id}
-                        isPending={isPending}
-                        onCancelRequest={isPending ? () => handleCancelRequest(group.id) : undefined}
-                        cancellingRequest={cancellingRequestId === group.id}
+                        canEdit={adminGroupIds.has(group.id) || editorGroupIds.has(group.id)}
+                        onEdit={() => router.push(`/edit-group/${group.id}` as never)}
                         onPress={() => setSelectedGroup(group)}
+                        onLeave={
+                          !adminGroupIds.has(group.id) ? () => !leavingId && handleLeave(group.id) : undefined
+                        }
+                        leaving={leavingId === group.id}
                       />
-                    );
-                  })}</>
-                )
+                    ))
+                  ))}
+
+                <SectionHeader
+                  title="Campus Groups"
+                  count={myCampusGroups.length}
+                  topSpacing
+                  collapsed={collapsedMyGroups.has('campus')}
+                  onToggle={() =>
+                    setCollapsedMyGroups((prev) => {
+                      const n = new Set(prev);
+                      if (n.has('campus')) n.delete('campus'); else n.add('campus');
+                      return n;
+                    })
+                  }
+                />
+                {!collapsedMyGroups.has('campus') &&
+                  (myCampusGroups.length === 0 ? (
+                    <EmptyCard
+                      icon="school"
+                      title="No campus groups yet"
+                      subtitle="Request to join a campus org in Discover."
+                    />
+                  ) : (
+                    myCampusGroups.map((group) => (
+                      <GroupCard
+                        key={group.id}
+                        group={group}
+                        subtitle={`${group.member_count ?? 0} members`}
+                        canEdit={adminGroupIds.has(group.id) || editorGroupIds.has(group.id)}
+                        onEdit={() => router.push(`/edit-group/${group.id}` as never)}
+                        onPress={() => setSelectedGroup(group)}
+                        onLeave={
+                          !adminGroupIds.has(group.id) ? () => !leavingId && handleLeave(group.id) : undefined
+                        }
+                        leaving={leavingId === group.id}
+                      />
+                    ))
+                  ))}
+              </>
+            )}
+          </>
+        )}
+
+        {activePanel === 'discover' && (
+          <>
+            <View className="flex-row items-center mt-4 mb-1 gap-2.5">
+              <View className="flex-1">
+                <SearchInput
+                  placeholder="Search groups…"
+                  value={discoverSearch}
+                  onChangeText={setDiscoverSearch}
+                  onClear={() => setDiscoverSearch('')}
+                  returnKeyType="search"
+                />
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  setCodeInput('');
+                  setShowCodeModal(true);
+                }}
+                activeOpacity={0.8}
+                accessibilityLabel="Join with code"
+                className="w-[46px] h-[46px] rounded-xl bg-primary/10 items-center justify-center"
+              >
+                <MaterialIcons name="key" size={20} color={PRIMARY} />
+              </TouchableOpacity>
+            </View>
+
+            <View className="flex-row mt-3 mb-4 gap-2">
+              {(['all', 'friends', 'campus'] as const).map((f) => {
+                const label = f === 'all' ? 'All' : f === 'friends' ? 'Friend Groups' : 'Campus Groups';
+                return (
+                  <Chip
+                    key={f}
+                    label={label}
+                    active={discoverFilter === f}
+                    onPress={() => setDiscoverFilter(f)}
+                  />
+                );
+              })}
+            </View>
+
+            {loading && discoverGroups.length === 0 ? (
+              <View className="py-12 items-center">
+                <ActivityIndicator color={PRIMARY} size="large" />
+              </View>
+            ) : noSearchResults ? (
+              <EmptyCard
+                icon="search-off"
+                title={`No results for "${discoverSearch.trim()}"`}
+                subtitle="Try a different search term."
+              />
+            ) : discoverFilter === 'friends' ? (
+              discoverFriendGroups.length === 0 ? (
+                <EmptyCard
+                  icon="people-outline"
+                  title="No friend groups to join"
+                  subtitle="All available friend groups will appear here."
+                />
               ) : (
-                /* ── All (both sections) ── */
-                <>
-                  {(!hasDiscoverSearch || discoverFriendGroups.length > 0) && (
-                    <>
-                      <SectionHeader title="Friend Groups" count={discoverFriendGroups.length} />
-                      {discoverFriendGroups.length === 0 ? (
-                        <EmptyCard
-                          icon="people-outline"
-                          title="No friend groups to join"
-                          subtitle="All available friend groups will appear here."
+                discoverFriendGroups.map((group) => (
+                  <GroupCard
+                    key={group.id}
+                    group={group}
+                    subtitle={`${group.member_count ?? 0} members`}
+                    onJoin={() => handleJoinPress(group)}
+                    joinLabel="Join"
+                    joinLoading={joiningId === group.id}
+                    onPress={() => setSelectedGroup(group)}
+                  />
+                ))
+              )
+            ) : discoverFilter === 'campus' ? (
+              discoverCampusGroups.length === 0 ? (
+                <EmptyCard
+                  icon="school"
+                  title="No campus orgs to join"
+                  subtitle="Available campus organizations will appear here."
+                />
+              ) : (
+                discoverCampusGroups.map((group) => {
+                  const isPending = pendingRequestIds.has(group.id);
+                  return (
+                    <GroupCard
+                      key={group.id}
+                      group={group}
+                      subtitle={`${group.member_count ?? 0} members`}
+                      onJoin={!isPending ? () => handleJoinPress(group) : undefined}
+                      joinLabel="Request"
+                      joinLoading={requestingId === group.id}
+                      isPending={isPending}
+                      onCancelRequest={isPending ? () => handleCancelRequest(group.id) : undefined}
+                      cancellingRequest={cancellingRequestId === group.id}
+                      onPress={() => setSelectedGroup(group)}
+                    />
+                  );
+                })
+              )
+            ) : (
+              <>
+                {(!hasDiscoverSearch || discoverFriendGroups.length > 0) && (
+                  <>
+                    <SectionHeader title="Friend Groups" count={discoverFriendGroups.length} />
+                    {discoverFriendGroups.length === 0 ? (
+                      <EmptyCard
+                        icon="people-outline"
+                        title="No friend groups to join"
+                        subtitle="All available friend groups will appear here."
+                      />
+                    ) : (
+                      discoverFriendGroups.map((group) => (
+                        <GroupCard
+                          key={group.id}
+                          group={group}
+                          subtitle={`${group.member_count ?? 0} members`}
+                          onJoin={() => handleJoinPress(group)}
+                          joinLabel="Join"
+                          joinLoading={joiningId === group.id}
+                          onPress={() => setSelectedGroup(group)}
                         />
-                      ) : (
-                        discoverFriendGroups.map((group) => (
+                      ))
+                    )}
+                  </>
+                )}
+
+                {(!hasDiscoverSearch || discoverCampusGroups.length > 0) && (
+                  <>
+                    <SectionHeader
+                      title="Campus Groups"
+                      count={discoverCampusGroups.length}
+                      topSpacing={!hasDiscoverSearch || discoverFriendGroups.length > 0}
+                    />
+                    {discoverCampusGroups.length === 0 ? (
+                      <EmptyCard
+                        icon="school"
+                        title="No campus orgs to join"
+                        subtitle="Available campus organizations will appear here."
+                      />
+                    ) : (
+                      discoverCampusGroups.map((group) => {
+                        const isPending = pendingRequestIds.has(group.id);
+                        return (
                           <GroupCard
                             key={group.id}
                             group={group}
                             subtitle={`${group.member_count ?? 0} members`}
-                            onJoin={() => handleJoinPress(group)}
-                            joinLabel="Join"
-                            joinLoading={joiningId === group.id}
+                            onJoin={!isPending ? () => handleJoinPress(group) : undefined}
+                            joinLabel="Request"
+                            joinLoading={requestingId === group.id}
+                            isPending={isPending}
+                            onCancelRequest={isPending ? () => handleCancelRequest(group.id) : undefined}
+                            cancellingRequest={cancellingRequestId === group.id}
                             onPress={() => setSelectedGroup(group)}
                           />
-                        ))
-                      )}
-                    </>
-                  )}
-
-                  {(!hasDiscoverSearch || discoverCampusGroups.length > 0) && (
-                    <>
-                      <SectionHeader title="Campus Groups" count={discoverCampusGroups.length} topSpacing={!hasDiscoverSearch || discoverFriendGroups.length > 0} />
-                      {discoverCampusGroups.length === 0 ? (
-                        <EmptyCard
-                          icon="school"
-                          title="No campus orgs to join"
-                          subtitle="Available campus organizations will appear here."
-                        />
-                      ) : (
-                        discoverCampusGroups.map((group) => {
-                          const isPending = pendingRequestIds.has(group.id);
-                          return (
-                            <GroupCard
-                              key={group.id}
-                              group={group}
-                              subtitle={`${group.member_count ?? 0} members`}
-                              onJoin={!isPending ? () => handleJoinPress(group) : undefined}
-                              joinLabel="Request"
-                              joinLoading={requestingId === group.id}
-                              isPending={isPending}
-                              onCancelRequest={isPending ? () => handleCancelRequest(group.id) : undefined}
-                              cancellingRequest={cancellingRequestId === group.id}
-                              onPress={() => setSelectedGroup(group)}
-                            />
-                          );
-                        })
-                      )}
-                    </>
-                  )}
-                </>
-              )}
-            </>
-          )}
-        </ScrollView>
-      </View>
-    </SafeAreaView>
+                        );
+                      })
+                    )}
+                  </>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </ScrollView>
+    </PageShell>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Small helper components
-// ---------------------------------------------------------------------------
+function GroupDetailModal({
+  group,
+  isMemberOfSelected,
+  detailMembers,
+  detailMembersLoading,
+  onClose,
+  onNavigateToEvents,
+}: {
+  group: Group | null;
+  isMemberOfSelected: boolean;
+  detailMembers: DetailMember[];
+  detailMembersLoading: boolean;
+  onClose: () => void;
+  onNavigateToEvents: (g: Group) => void;
+}) {
+  return (
+    <Modal visible={!!group} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable className="flex-1 bg-[rgba(15,23,42,0.5)] justify-end" onPress={onClose}>
+        <Pressable
+          onPress={(e) => e.stopPropagation()}
+          style={shadows.sheet}
+          className="bg-white rounded-t-[28px] w-full max-h-[85%] overflow-hidden"
+        >
+          {group && (
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerClassName="pb-9"
+            >
+              <View className="self-center w-10 h-[5px] rounded-[3px] bg-[#d4d8de] mt-3 mb-2" />
+              <View className="items-center px-6 pb-5 pt-2">
+                {group.image_url ? (
+                  <Image
+                    source={{ uri: group.image_url }}
+                    className="w-[100px] h-[100px] rounded-3xl mb-4 bg-surface-raised"
+                  />
+                ) : (
+                  <View className="w-[100px] h-[100px] rounded-3xl bg-primary/[0.08] mb-4 items-center justify-center">
+                    <MaterialIcons name="groups" size={40} color="#94a3b8" />
+                  </View>
+                )}
+                <Text className="text-[24px] font-bold text-ink text-center mb-3 tracking-[-0.3px]">
+                  {group.name}
+                </Text>
+                <View className="flex-row items-center flex-wrap justify-center">
+                  <View
+                    className={cn(
+                      'flex-row items-center px-3.5 py-1.5 rounded-[20px] mr-2 mb-1',
+                      group.type === 'campus_org' ? 'bg-primary/[0.12]' : 'bg-surface-raised'
+                    )}
+                  >
+                    <Text
+                      className={cn(
+                        'text-[13px] font-semibold',
+                        group.type === 'campus_org' ? 'text-primary' : 'text-ink-subtle'
+                      )}
+                    >
+                      {group.type === 'campus_org' ? 'Campus org' : 'Friend group'}
+                    </Text>
+                  </View>
+                  {group.is_private && (
+                    <View className="flex-row items-center px-3.5 py-1.5 rounded-[20px] mr-2 mb-1 bg-surface-raised">
+                      <MaterialIcons name="lock" size={12} color="#64748b" style={{ marginRight: 4 }} />
+                      <Text className="text-[13px] font-semibold text-ink-subtle">Private</Text>
+                    </View>
+                  )}
+                  <Text className="text-sm text-ink-subtle font-medium mb-1">
+                    {group.member_count ?? 0} members
+                  </Text>
+                </View>
+              </View>
+
+              <View className="mx-5 mb-4 bg-surface-soft rounded-2xl p-4">
+                <Text className="text-xs font-bold text-ink-dim uppercase tracking-[0.8px] mb-2.5">
+                  About
+                </Text>
+                {group.description ? (
+                  <Text className="text-[15px] text-ink-body leading-[23px]">{group.description}</Text>
+                ) : (
+                  <Text className="text-sm text-ink-dim italic">No description yet.</Text>
+                )}
+              </View>
+
+              <View className="mx-5 mb-4 bg-surface-soft rounded-2xl p-4">
+                <Text className="text-xs font-bold text-ink-dim uppercase tracking-[0.8px] mb-2.5">
+                  Members
+                </Text>
+                {!isMemberOfSelected ? (
+                  <View className="flex-row items-center">
+                    <MaterialIcons name="lock-outline" size={18} color="#94a3b8" style={{ marginRight: 8 }} />
+                    <Text className="flex-1 text-sm text-ink-subtle leading-5">
+                      Join this group to see who is in it.
+                    </Text>
+                  </View>
+                ) : detailMembersLoading ? (
+                  <View className="py-4 items-center">
+                    <ActivityIndicator color={PRIMARY} />
+                  </View>
+                ) : detailMembers.length === 0 ? (
+                  <Text className="text-sm text-ink-dim italic">No members loaded.</Text>
+                ) : (
+                  <View>
+                    {detailMembers.map((m, index) => (
+                      <View
+                        key={m.user_id}
+                        className={cn(
+                          'flex-row items-center py-2.5 border-b border-line-soft',
+                          index === detailMembers.length - 1 && 'border-b-0'
+                        )}
+                      >
+                        {m.profiles?.avatar_url ? (
+                          <Image
+                            source={{ uri: m.profiles.avatar_url }}
+                            className="w-10 h-10 rounded-[14px] mr-3 bg-line-neutral"
+                          />
+                        ) : (
+                          <View className="w-10 h-10 rounded-[14px] mr-3 bg-primary/10 items-center justify-center">
+                            <Text className="text-sm font-bold text-primary">
+                              {initialsFromName(m.profiles?.full_name)}
+                            </Text>
+                          </View>
+                        )}
+                        <Text className="flex-1 text-[15px] font-medium text-ink" numberOfLines={1}>
+                          {m.profiles?.full_name ?? 'Member'}
+                        </Text>
+                        <View className="px-2.5 py-1 rounded-lg bg-primary/[0.06]">
+                          <Text className="text-[11px] font-semibold text-primary capitalize">
+                            {m.role}
+                          </Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+
+              <TouchableOpacity
+                onPress={() => onNavigateToEvents(group)}
+                activeOpacity={0.88}
+                style={shadows.primaryBtn}
+                className="flex-row items-center justify-center bg-primary mx-5 py-4 rounded-2xl mb-2.5"
+              >
+                <MaterialIcons name="event" size={22} color="#fff" style={{ marginRight: 8 }} />
+                <Text className="text-white text-base font-bold">View group events</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={onClose}
+                activeOpacity={0.7}
+                className="mx-5 py-3.5 items-center bg-surface-raised rounded-[14px]"
+              >
+                <Text className="text-base font-semibold text-ink-subtle">Close</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          )}
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
 
 function SectionHeader({
-  title, count, topSpacing, collapsed, onToggle,
+  title,
+  count,
+  topSpacing,
+  collapsed,
+  onToggle,
 }: {
-  title: string; count: number; topSpacing?: boolean; collapsed?: boolean; onToggle?: () => void;
+  title: string;
+  count: number;
+  topSpacing?: boolean;
+  collapsed?: boolean;
+  onToggle?: () => void;
 }) {
   const inner = (
     <>
-      <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-        <Text style={styles.sectionTitle}>{title}</Text>
+      <View className="flex-row items-center flex-1">
+        <Text className="text-[13px] font-bold text-ink-dim tracking-[0.8px] uppercase">{title}</Text>
         {count > 0 && (
-          <View style={styles.countPill}>
-            <Text style={styles.countPillText}>{count}</Text>
+          <View className="ml-2 bg-primary/10 px-[9px] py-[3px] rounded-[10px]">
+            <Text className="text-xs font-bold text-primary">{count}</Text>
           </View>
         )}
       </View>
@@ -1360,371 +1185,37 @@ function SectionHeader({
   if (onToggle) {
     return (
       <TouchableOpacity
-        style={[styles.sectionHeader, topSpacing && { marginTop: 8 }]}
         onPress={onToggle}
         activeOpacity={0.7}
+        className={cn('flex-row items-center mb-3 mt-5', topSpacing && 'mt-2')}
       >
         {inner}
       </TouchableOpacity>
     );
   }
   return (
-    <View style={[styles.sectionHeader, topSpacing && { marginTop: 8 }]}>
-      {inner}
-    </View>
+    <View className={cn('flex-row items-center mb-3 mt-5', topSpacing && 'mt-2')}>{inner}</View>
   );
 }
 
-function EmptyCard({ icon, title, subtitle }: {
+function EmptyCard({
+  icon,
+  title,
+  subtitle,
+}: {
   icon: React.ComponentProps<typeof MaterialIcons>['name'];
   title: string;
   subtitle: string;
 }) {
   return (
-    <View style={styles.emptyCard}>
-      <View style={styles.emptyIconCircle}>
+    <View style={shadows.card} className="bg-white rounded-[20px] py-7 px-5 items-center mb-2">
+      <View className="w-16 h-16 rounded-[20px] bg-primary/[0.06] items-center justify-center mb-3">
         <MaterialIcons name={icon} size={30} color="#85b0bf" />
       </View>
-      <Text style={styles.emptyTitle}>{title}</Text>
-      <Text style={styles.emptySubtitle}>{subtitle}</Text>
+      <Text className="text-base font-semibold text-ink-body mb-1.5">{title}</Text>
+      <Text className="text-[13px] text-ink-dim text-center leading-[19px] max-w-[240px]">
+        {subtitle}
+      </Text>
     </View>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Styles
-// ---------------------------------------------------------------------------
-
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#0B617E' },
-  banner: {
-    backgroundColor: '#0B617E',
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 10,
-    shadowColor: '#04303f',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-    elevation: 8,
-    zIndex: 1,
-  },
-  contentContainer: { flex: 1, backgroundColor: '#f5f7f9' },
-  scrollView: { flex: 1 },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 48 },
-  headerBlock: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  pageTitle: { fontSize: 40, fontWeight: '800', color: '#fff', letterSpacing: -1 },
-  headerIconBtnPrimary: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  segmentWrap: {
-    flexDirection: 'row',
-    backgroundColor: '#e8edf0',
-    marginHorizontal: 20,
-    marginTop: 16,
-    marginBottom: 4,
-    borderRadius: 14,
-    padding: 3,
-  },
-  segmentItem: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderRadius: 11,
-  },
-  segmentItemActive: {
-    backgroundColor: '#fff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  segmentLabel: { fontSize: 14, fontWeight: '600', color: '#64748b' },
-  segmentLabelActive: { color: PRIMARY, fontWeight: '700' },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-    marginTop: 20,
-  },
-  sectionTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#94a3b8',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-  },
-  countPill: {
-    marginLeft: 8,
-    backgroundColor: 'rgba(11, 97, 126, 0.1)',
-    paddingHorizontal: 9,
-    paddingVertical: 3,
-    borderRadius: 10,
-  },
-  countPillText: { fontSize: 12, fontWeight: '700', color: PRIMARY },
-  loadingBlock: { paddingVertical: 48, alignItems: 'center' },
-  emptyCard: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    paddingVertical: 28,
-    paddingHorizontal: 20,
-    alignItems: 'center',
-    marginBottom: 8,
-    shadowColor: '#0f172a',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 14,
-    elevation: 1,
-  },
-  emptyIconCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 20,
-    backgroundColor: 'rgba(11, 97, 126, 0.06)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-  },
-  emptyTitle: { fontSize: 16, fontWeight: '600', color: '#334155', marginBottom: 5 },
-  emptySubtitle: {
-    fontSize: 13,
-    color: '#94a3b8',
-    textAlign: 'center',
-    lineHeight: 19,
-    maxWidth: 240,
-  },
-  // Search
-  searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 16,
-    marginBottom: 4,
-    gap: 10,
-  },
-  searchInputWrap: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    shadowColor: '#0B617E',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 1,
-  },
-  searchInput: { flex: 1, fontSize: 15, color: '#0f172a', fontWeight: '500', letterSpacing: 0 },
-  codeBtn: {
-    width: 46,
-    height: 46,
-    borderRadius: 14,
-    backgroundColor: 'rgba(11, 97, 126, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  // Detail modal
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalSheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    width: '100%',
-    maxHeight: '85%',
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 24,
-    elevation: 16,
-  },
-  modalScrollContent: { paddingBottom: 36 },
-  modalHandle: {
-    alignSelf: 'center',
-    width: 40,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: '#d4d8de',
-    marginTop: 12,
-    marginBottom: 8,
-  },
-  modalHero: {
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingBottom: 20,
-    paddingTop: 8,
-  },
-  modalHeroImage: {
-    width: 100,
-    height: 100,
-    borderRadius: 24,
-    backgroundColor: '#f1f5f9',
-    marginBottom: 16,
-  },
-  modalHeroPlaceholder: {
-    width: 100,
-    height: 100,
-    borderRadius: 24,
-    backgroundColor: 'rgba(11, 97, 126, 0.08)',
-    marginBottom: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#0f172a',
-    textAlign: 'center',
-    marginBottom: 12,
-    letterSpacing: -0.3,
-  },
-  modalMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-  },
-  modalBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  modalBadgeText: { fontSize: 13, fontWeight: '600' },
-  modalMetaMuted: { fontSize: 14, color: '#64748b', fontWeight: '500' },
-  modalSection: {
-    marginHorizontal: 20,
-    marginBottom: 16,
-    backgroundColor: '#f8fafb',
-    borderRadius: 16,
-    padding: 16,
-  },
-  modalSectionTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#94a3b8',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-    marginBottom: 10,
-  },
-  modalBodyText: { fontSize: 15, color: '#334155', lineHeight: 23 },
-  modalPlaceholder: { fontSize: 14, color: '#94a3b8', fontStyle: 'italic' },
-  modalHintBox: { flexDirection: 'row', alignItems: 'center' },
-  modalHintText: { flex: 1, fontSize: 14, color: '#64748b', lineHeight: 20 },
-  modalLoading: { paddingVertical: 16, alignItems: 'center' },
-  memberRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#edf1f5',
-  },
-  memberAvatarImg: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    marginRight: 12,
-    backgroundColor: '#e2e8f0',
-  },
-  memberAvatarFallback: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    marginRight: 12,
-    backgroundColor: 'rgba(11, 97, 126, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  memberAvatarInitials: { fontSize: 14, fontWeight: '700', color: PRIMARY },
-  memberName: { flex: 1, fontSize: 15, fontWeight: '500', color: '#0f172a' },
-  roleBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    backgroundColor: 'rgba(11, 97, 126, 0.06)',
-  },
-  roleBadgeText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: PRIMARY,
-    textTransform: 'capitalize',
-  },
-  modalPrimaryBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: PRIMARY,
-    marginHorizontal: 20,
-    paddingVertical: 16,
-    borderRadius: 16,
-    marginBottom: 10,
-    shadowColor: PRIMARY,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  modalPrimaryBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  modalCloseBtn: {
-    marginHorizontal: 20,
-    paddingVertical: 14,
-    alignItems: 'center',
-    backgroundColor: '#f1f5f9',
-    borderRadius: 14,
-  },
-  modalCloseBtnText: { fontSize: 16, fontWeight: '600', color: '#64748b' },
-
-  // Discover filter chips
-  discoverFilterRow: {
-    flexDirection: 'row',
-    marginTop: 12,
-    marginBottom: 16,
-    gap: 8,
-  },
-  discoverFilterChip: {
-    paddingVertical: 7,
-    paddingHorizontal: 14,
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    shadowColor: '#0f172a',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
-  },
-  discoverFilterChipActive: {
-    backgroundColor: PRIMARY,
-    borderColor: PRIMARY,
-  },
-  discoverFilterChipText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#64748b',
-  },
-  discoverFilterChipTextActive: {
-    color: '#fff',
-  },
-});

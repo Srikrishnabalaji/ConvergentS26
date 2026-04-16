@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TextInput,
-  StyleSheet,
   TouchableOpacity,
   Keyboard,
   Alert,
@@ -29,6 +28,7 @@ import { LocationConfirmCard } from '@/components/map/LocationConfirmCard';
 import { IndoorMapView } from '@/components/map/IndoorMapView';
 import type { BuildingGraph } from '@/lib/services/indoor-navigation';
 import gdcGraphData from '@/assets/gdc_graph.json';
+import { shadows } from '@/constants/shadows';
 import {
   UT_CAMPUS_REGION,
   DEFAULT_USER_LOCATION,
@@ -57,11 +57,7 @@ import {
 } from '@/lib/services/routing';
 import { useLocalSearchParams } from 'expo-router';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
 type MapViewState = 'default' | 'searching' | 'navigation' | 'walking' | 'building' | 'indoor';
-
 type IndoorExitTarget = 'navigation' | 'walking' | 'building';
 
 function destinationHasIndoorMap(place: SearchItem): boolean {
@@ -75,11 +71,7 @@ function destinationHasIndoorMap(place: SearchItem): boolean {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 export default function MapScreen() {
-  // State
   const [viewState, setViewState] = useState<MapViewState>('default');
   const [query, setQuery] = useState('');
   const [selectedPlace, setSelectedPlace] = useState<SearchItem | null>(null);
@@ -97,19 +89,13 @@ export default function MapScreen() {
   const [routeLoading, setRouteLoading] = useState(false);
   const [showOverview, setShowOverview] = useState(false);
   const [initialRoom, setInitialRoom] = useState<string | undefined>(undefined);
-  // Tracks whether the current roomQuery URL param is still "live". Set to false
-  // when the user exits indoor navigation so the same param isn't re-applied.
   const [roomParamActive, setRoomParamActive] = useState(true);
-  /** Calendar deep link: show overlay and avoid setting search query until resolved (prevents Nominatim races). */
   const [calendarNavBusy, setCalendarNavBusy] = useState(false);
   const [calendarNavLabel, setCalendarNavLabel] = useState<string | null>(null);
 
-  // Voice search
   const [isListening, setIsListening] = useState(false);
   const [voicePartial, setVoicePartial] = useState('');
   const pulseAnim = useRef(new RNAnimated.Value(1)).current;
-
-  // Search overlay fade animation
   const searchFade = useRef(new RNAnimated.Value(0)).current;
 
   const cameraRef = useRef<CameraRef>(null);
@@ -121,28 +107,24 @@ export default function MapScreen() {
   const previewRouteCalcPosRef = useRef<{ latitude: number; longitude: number } | null>(null);
   const indoorExitTargetRef = useRef<IndoorExitTarget>('navigation');
 
-  // Clock ticks every minute so the ETA stays accurate as real time passes
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setCurrentTime(Date.now()), 60_000);
     return () => clearInterval(id);
   }, []);
 
-  // "Arrives at H:MM AM/PM"
   const etaString = useMemo(() => {
     if (routeWalkMin <= 0) return '';
     const arrival = new Date(currentTime + routeWalkMin * 60_000);
     return arrival.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   }, [currentTime, routeWalkMin]);
 
-  // Read searchQuery / roomQuery from calendar; calNav forces effect on repeated taps.
   const { searchQuery, roomQuery, calNav } = useLocalSearchParams<{
     searchQuery?: string;
     roomQuery?: string;
     calNav?: string;
   }>();
 
-  // When a new calendar navigation arrives, re-activate the room param.
   useEffect(() => {
     if (calNav) setRoomParamActive(true);
   }, [calNav]);
@@ -154,7 +136,6 @@ export default function MapScreen() {
     return t || undefined;
   }, [roomQuery, roomParamActive]);
 
-  /** Prefer in-memory initialRoom; else calendar URL (survives resetToDefault). */
   const indoorDestinationRoom = useMemo(
     () => (initialRoom && initialRoom.trim() ? initialRoom.trim() : undefined) ?? roomQuerySingle,
     [initialRoom, roomQuerySingle],
@@ -170,8 +151,6 @@ export default function MapScreen() {
     setCalendarNavBusy(true);
     const roomTrim = r && r.trim() ? r.trim() : undefined;
     setInitialRoom(roomTrim);
-    // Do not setQuery(q) yet — that triggers the debounced search and competes
-    // with this flow for Nominatim rate limits.
 
     let cancelled = false;
 
@@ -182,14 +161,9 @@ export default function MapScreen() {
           const loc = await Location.getCurrentPositionAsync({
             accuracy: Location.Accuracy.Balanced,
           });
-          return {
-            latitude: loc.coords.latitude,
-            longitude: loc.coords.longitude,
-          };
+          return { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
         }
-      } catch {
-        /* default below */
-      }
+      } catch {}
       return DEFAULT_USER_LOCATION;
     };
 
@@ -219,10 +193,7 @@ export default function MapScreen() {
           } else {
             setQuery(q);
             transitionToSearch();
-            Alert.alert(
-              'Location not found',
-              `Could not find "${q}". Try typing the building in search.`,
-            );
+            Alert.alert('Location not found', `Could not find "${q}". Try typing the building in search.`);
           }
         }
       } catch (e) {
@@ -231,14 +202,10 @@ export default function MapScreen() {
         try {
           const { status } = await Location.getForegroundPermissionsAsync();
           if (status === 'granted') {
-            const loc = await Location.getCurrentPositionAsync({
-              accuracy: Location.Accuracy.Balanced,
-            });
+            const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
             origin = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
           }
-        } catch {
-          /* */
-        }
+        } catch {}
         const local = localCampusSearchItem(q);
         if (local) {
           setUserLocation(origin);
@@ -268,13 +235,9 @@ export default function MapScreen() {
       setCalendarNavBusy(false);
       setCalendarNavLabel(null);
     };
-    // Intentionally only react to router params — avoid re-running when userLocation updates.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery, roomQuery, calNav]);
 
-  // -----------------------------------------------------------------------
-  // Voice search event handlers
-  // -----------------------------------------------------------------------
   useSpeechRecognitionEvent('start', () => setIsListening(true));
   useSpeechRecognitionEvent('end', () => {
     setIsListening(false);
@@ -297,7 +260,6 @@ export default function MapScreen() {
     setVoicePartial('');
   });
 
-  // Pulsing animation while listening
   useEffect(() => {
     if (!isListening) return;
     const loop = RNAnimated.loop(
@@ -330,7 +292,6 @@ export default function MapScreen() {
     setVoicePartial('');
   }, []);
 
-  // Load recents from AsyncStorage on mount
   useEffect(() => {
     (async () => {
       try {
@@ -340,7 +301,6 @@ export default function MapScreen() {
     })();
   }, []);
 
-  // Persist recents whenever they change
   const saveRecents = useCallback(async (recents: SearchItem[]) => {
     setRecentSearches(recents);
     try {
@@ -348,36 +308,28 @@ export default function MapScreen() {
     } catch {}
   }, []);
 
-  // Request location on mount
   useEffect(() => {
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
         const loc = await Location.getCurrentPositionAsync({});
-        setUserLocation({
-          latitude: loc.coords.latitude,
-          longitude: loc.coords.longitude,
-        });
+        setUserLocation({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
       }
     })();
   }, []);
 
-  // Debounced geocoding search (now proximity-aware)
   useEffect(() => {
     if (query.length === 0) {
       setSearchResults([]);
       setSearchLoading(false);
       return;
     }
-
     setSearchLoading(true);
-
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
-
       try {
         const results = await geocodeSearch(query, userLocation, controller.signal);
         if (!controller.signal.aborted) setSearchResults(results);
@@ -397,13 +349,11 @@ export default function MapScreen() {
         if (!controller.signal.aborted) setSearchLoading(false);
       }
     }, 700);
-
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [query, userLocation]);
 
-  // Stop location watcher helper
   const stopLocationWatcher = useCallback(() => {
     if (locationWatcherRef.current) {
       locationWatcherRef.current.remove();
@@ -412,7 +362,6 @@ export default function MapScreen() {
     isReroutingRef.current = false;
   }, []);
 
-  // Cleanup watcher on unmount
   useEffect(() => {
     return () => {
       stopLocationWatcher();
@@ -422,22 +371,18 @@ export default function MapScreen() {
   const startPreviewWatcher = useCallback(
     async (
       dest: { latitude: number; longitude: number },
-      /** When starting preview from a known fix (e.g. calendar deep link), avoids stale React state. */
       routePreviewFrom?: { latitude: number; longitude: number },
     ) => {
       stopLocationWatcher();
       previewRouteCalcPosRef.current = routePreviewFrom ?? userLocation;
-
       const watcher = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.Balanced, distanceInterval: 30, timeInterval: 10_000 },
         async (loc) => {
           const pos = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
           setUserLocation(pos);
-
           const prev = previewRouteCalcPosRef.current;
           if (prev && !isReroutingRef.current) {
-            const moved =
-              haversineKm(pos.latitude, pos.longitude, prev.latitude, prev.longitude) * 1000;
+            const moved = haversineKm(pos.latitude, pos.longitude, prev.latitude, prev.longitude) * 1000;
             if (moved > PREVIEW_REROUTE_THRESHOLD_M) {
               isReroutingRef.current = true;
               previewRouteCalcPosRef.current = pos;
@@ -458,25 +403,14 @@ export default function MapScreen() {
     [userLocation, stopLocationWatcher],
   );
 
-  // -----------------------------------------------------------------------
-  // View state transitions with animation
-  // -----------------------------------------------------------------------
   const transitionToSearch = useCallback(() => {
     searchFade.setValue(0);
     setViewState('searching');
-    RNAnimated.timing(searchFade, {
-      toValue: 1,
-      duration: 200,
-      useNativeDriver: true,
-    }).start();
+    RNAnimated.timing(searchFade, { toValue: 1, duration: 200, useNativeDriver: true }).start();
   }, [searchFade]);
 
   const transitionFromSearch = useCallback(() => {
-    RNAnimated.timing(searchFade, {
-      toValue: 0,
-      duration: 150,
-      useNativeDriver: true,
-    }).start(() => {
+    RNAnimated.timing(searchFade, { toValue: 0, duration: 150, useNativeDriver: true }).start(() => {
       setViewState('default');
       setQuery('');
       setSearchResults([]);
@@ -484,13 +418,9 @@ export default function MapScreen() {
     Keyboard.dismiss();
   }, [searchFade]);
 
-  // -----------------------------------------------------------------------
-  // Handlers
-  // -----------------------------------------------------------------------
   const handleSelectPlace = useCallback(
     async (
       item: SearchItem,
-      /** Origin for the walking route when React state has not caught up (calendar deep link). */
       routeFromOverride?: { latitude: number; longitude: number },
     ) => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -503,16 +433,10 @@ export default function MapScreen() {
       setRouteWalkMin(0);
       Keyboard.dismiss();
 
-      // Animate out of search overlay then into navigation
-      RNAnimated.timing(searchFade, {
-        toValue: 0,
-        duration: 150,
-        useNativeDriver: true,
-      }).start(() => {
+      RNAnimated.timing(searchFade, { toValue: 0, duration: 150, useNativeDriver: true }).start(() => {
         setViewState('navigation');
       });
 
-      // Add to recents (dedup, cap at MAX_RECENTS)
       setRecentSearches((prev) => {
         const filtered = prev.filter((s) => s.id !== item.id);
         const updated = [item, ...filtered].slice(0, MAX_RECENTS);
@@ -520,15 +444,9 @@ export default function MapScreen() {
         return updated;
       });
 
-      // Fit map to show both user and destination
       const dest = { latitude: item.latitude, longitude: item.longitude };
-      fitMapToCoordinates(
-        cameraRef,
-        [origin, dest],
-        { top: 140, right: 60, bottom: 280, left: 60 },
-      );
+      fitMapToCoordinates(cameraRef, [origin, dest], { top: 140, right: 60, bottom: 280, left: 60 });
 
-      // Fetch real walking route
       try {
         const result = await fetchWalkingRoute(origin, dest);
         setRouteCoords(result.coords);
@@ -536,19 +454,11 @@ export default function MapScreen() {
         setRouteWalkMin(result.durationMin);
 
         if (result.coords.length > 1) {
-          fitMapToCoordinates(cameraRef, result.coords, {
-            top: 140,
-            right: 60,
-            bottom: 280,
-            left: 60,
-          });
+          fitMapToCoordinates(cameraRef, result.coords, { top: 140, right: 60, bottom: 280, left: 60 });
         }
 
         if (result.isFallback) {
-          Alert.alert(
-            'Route Unavailable',
-            'Showing an estimated route. Check your connection for accurate directions.',
-          );
+          Alert.alert('Route Unavailable', 'Showing an estimated route. Check your connection for accurate directions.');
         }
 
         startPreviewWatcher(dest, routeFromOverride ?? origin);
@@ -570,7 +480,6 @@ export default function MapScreen() {
     setRouteLoading(false);
     setInitialRoom(undefined);
     setRoomParamActive(false);
-    // Delay clearing selectedPlace so PointAnnotation doesn't unmount mid-frame
     setTimeout(() => setSelectedPlace(null), 50);
   }, [stopLocationWatcher]);
 
@@ -590,30 +499,24 @@ export default function MapScreen() {
       setRepositionCoord(null);
       setShowFloorDropdown(false);
       if (selectedPlace) {
-        fitMapToCoordinates(cameraRef, [
-          userLocation,
-          { latitude: selectedPlace.latitude, longitude: selectedPlace.longitude },
-        ], { top: 140, right: 60, bottom: 280, left: 60 });
+        fitMapToCoordinates(
+          cameraRef,
+          [userLocation, { latitude: selectedPlace.latitude, longitude: selectedPlace.longitude }],
+          { top: 140, right: 60, bottom: 280, left: 60 },
+        );
       }
     } else if (viewState === 'indoor') {
       const target = indoorExitTargetRef.current;
-      if (target === 'building') {
-        setViewState('building');
-      } else if (target === 'walking') {
-        setViewState('walking');
-      } else {
-        setViewState('navigation');
-      }
+      if (target === 'building') setViewState('building');
+      else if (target === 'walking') setViewState('walking');
+      else setViewState('navigation');
     }
   }, [viewState, userLocation, selectedPlace, stopLocationWatcher, transitionFromSearch, resetToDefault]);
 
   const handleDestinationPinPress = useCallback(() => {
     if (!selectedPlace) return;
     if (!destinationHasIndoorMap(selectedPlace)) {
-      Alert.alert(
-        'Indoor map',
-        'Floor plans and indoor directions are only available for Gates Dell Complex (GDC) right now.',
-      );
+      Alert.alert('Indoor map', 'Floor plans and indoor directions are only available for Gates Dell Complex (GDC) right now.');
       return;
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -631,11 +534,9 @@ export default function MapScreen() {
     stopLocationWatcher();
     setShowOverview(false);
     setViewState('navigation');
-
     if (!selectedPlace) return;
 
     const dest = { latitude: selectedPlace.latitude, longitude: selectedPlace.longitude };
-
     setRouteLoading(true);
     let currentLoc = userLocation;
     try {
@@ -649,45 +550,26 @@ export default function MapScreen() {
       setRouteCoords(result.coords);
       setRouteDistMi(result.distanceMi);
       setRouteWalkMin(result.durationMin);
-
       if (result.coords.length > 1) {
-        fitMapToCoordinates(cameraRef, result.coords, {
-          top: 140,
-          right: 60,
-          bottom: 280,
-          left: 60,
-        });
+        fitMapToCoordinates(cameraRef, result.coords, { top: 140, right: 60, bottom: 280, left: 60 });
       }
-
       if (result.isFallback) {
-        Alert.alert(
-          'Route Unavailable',
-          'Showing an estimated route. Check your connection for accurate directions.',
-        );
+        Alert.alert('Route Unavailable', 'Showing an estimated route. Check your connection for accurate directions.');
       }
-
       startPreviewWatcher(dest, currentLoc);
     } finally {
       setRouteLoading(false);
     }
   }, [stopLocationWatcher, selectedPlace, userLocation, startPreviewWatcher]);
 
-  // Route overview: toggle between overview and follow-me
   const handleRouteOverview = useCallback(() => {
     if (showOverview) {
-      // Resume following
       setShowOverview(false);
     } else {
-      // Show overview: disable follow, fit route
       setShowOverview(true);
       setTimeout(() => {
         if (routeCoords.length > 1) {
-          fitMapToCoordinates(cameraRef, routeCoords, {
-            top: 140,
-            right: 60,
-            bottom: 280,
-            left: 60,
-          });
+          fitMapToCoordinates(cameraRef, routeCoords, { top: 140, right: 60, bottom: 280, left: 60 });
         }
       }, 50);
     }
@@ -701,9 +583,7 @@ export default function MapScreen() {
     setShowOverview(false);
     let currentLoc = userLocation;
     try {
-      const loc = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-      });
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       currentLoc = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
       setUserLocation(currentLoc);
     } catch {}
@@ -715,12 +595,8 @@ export default function MapScreen() {
       setRouteCoords(result.coords);
       setRouteDistMi(result.distanceMi);
       setRouteWalkMin(result.durationMin);
-
       if (result.isFallback) {
-        Alert.alert(
-          'Route Unavailable',
-          'Showing an estimated route. Directions will update when connection improves.',
-        );
+        Alert.alert('Route Unavailable', 'Showing an estimated route. Directions will update when connection improves.');
       }
     } finally {
       setRouteLoading(false);
@@ -730,25 +606,17 @@ export default function MapScreen() {
 
     stopLocationWatcher();
     const watcher = await Location.watchPositionAsync(
-      {
-        accuracy: Location.Accuracy.High,
-        distanceInterval: 5,
-        timeInterval: 3000,
-      },
+      { accuracy: Location.Accuracy.High, distanceInterval: 5, timeInterval: 3000 },
       (loc) => {
         const pos = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
         setUserLocation(pos);
 
-        // Check arrival
         const distToDest = haversineKm(pos.latitude, pos.longitude, dest.latitude, dest.longitude) * 1000;
         if (distToDest < ARRIVAL_THRESHOLD_M) {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           stopLocationWatcher();
           setSelectedFloor(1);
           setShowOverview(false);
-          // If a calendar event queued an indoor room, skip the outdoor
-          // "is this your exact location?" card and jump straight into the
-          // building so the user can drop a pin or use the main entrance.
           if (initialRoom) {
             indoorExitTargetRef.current = 'navigation';
             setViewState('indoor');
@@ -768,7 +636,6 @@ export default function MapScreen() {
           return;
         }
 
-        // Trim completed portion behind user and check rerouting
         setRouteCoords((currentRouteCoords) => {
           if (currentRouteCoords.length < 2 || isReroutingRef.current) return currentRouteCoords;
 
@@ -816,16 +683,12 @@ export default function MapScreen() {
   const handleRecenter = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setShowOverview(false);
-
     let coord = userLocation;
     try {
-      const fresh = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
+      const fresh = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       coord = { latitude: fresh.coords.latitude, longitude: fresh.coords.longitude };
       setUserLocation(coord);
     } catch {}
-
     cameraRef.current?.setCamera({
       centerCoordinate: [coord.longitude, coord.latitude],
       zoomLevel: viewState === 'walking' ? 17 : 16,
@@ -834,24 +697,18 @@ export default function MapScreen() {
     });
   }, [viewState, userLocation]);
 
-  // -----------------------------------------------------------------------
-  // Render
-  // -----------------------------------------------------------------------
-
-  // Search overlay (animated fade-in)
   if (viewState === 'searching') {
     return (
-      <RNAnimated.View style={[styles.searchOverlayWrap, { opacity: searchFade }]}>
-        <SafeAreaView style={styles.searchOverlay}>
-          {/* Search bar */}
-          <View style={styles.searchOverlayBar}>
-            <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
+      <RNAnimated.View className="absolute inset-0 z-[100]" style={{ opacity: searchFade }}>
+        <SafeAreaView className="flex-1 bg-white">
+          <View className="flex-row items-center bg-white px-2.5 py-3 border-b border-line-muted">
+            <TouchableOpacity onPress={handleBack} className="px-1">
               <MaterialIcons name="chevron-left" size={28} color="#000" />
             </TouchableOpacity>
-            <View style={styles.searchInputWrap}>
+            <View className="flex-1 px-2">
               <TextInput
                 ref={inputRef}
-                style={styles.searchInput}
+                className="text-base text-black py-0"
                 value={isListening ? voicePartial || 'Listening…' : query}
                 onChangeText={setQuery}
                 placeholder="Search here"
@@ -862,17 +719,15 @@ export default function MapScreen() {
               />
             </View>
             {isListening ? (
-              <TouchableOpacity style={styles.micBtn} onPress={stopVoiceSearch}>
+              <TouchableOpacity className="px-2 items-center justify-center" onPress={stopVoiceSearch}>
                 <RNAnimated.View
-                  style={[
-                    styles.listeningDot,
-                    { transform: [{ scale: pulseAnim }] },
-                  ]}
+                  className="w-[22px] h-[22px] rounded-full bg-[#EA4335]"
+                  style={{ transform: [{ scale: pulseAnim }] }}
                 />
               </TouchableOpacity>
             ) : query.length > 0 ? (
               <TouchableOpacity
-                style={styles.micBtn}
+                className="px-2 items-center justify-center"
                 onPress={() => {
                   setQuery('');
                   setSearchResults([]);
@@ -881,12 +736,11 @@ export default function MapScreen() {
                 <MaterialIcons name="close" size={20} color="#666" />
               </TouchableOpacity>
             ) : (
-              <TouchableOpacity style={styles.micBtn} onPress={startVoiceSearch}>
+              <TouchableOpacity className="px-2 items-center justify-center" onPress={startVoiceSearch}>
                 <MaterialIcons name="mic" size={22} color="#666" />
               </TouchableOpacity>
             )}
           </View>
-          {/* Results */}
           <SearchPanel
             recentSearches={recentSearches}
             searchResults={searchResults}
@@ -900,10 +754,9 @@ export default function MapScreen() {
     );
   }
 
-  // Indoor navigation full-screen view
   if (viewState === 'indoor') {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView className="flex-1">
         <IndoorMapView
           graph={gdcGraphData as BuildingGraph}
           onExit={handleBack}
@@ -913,16 +766,11 @@ export default function MapScreen() {
     );
   }
 
-  // Map-based views (default, navigation, walking, building)
   return (
-    <View style={styles.container}>
-      {/* Map */}
+    <View className="flex-1">
       <CampusMapLayer
         cameraRef={cameraRef}
-        initialCenter={{
-          latitude: UT_CAMPUS_REGION.latitude,
-          longitude: UT_CAMPUS_REGION.longitude,
-        }}
+        initialCenter={{ latitude: UT_CAMPUS_REGION.latitude, longitude: UT_CAMPUS_REGION.longitude }}
         initialLongitudeDelta={UT_CAMPUS_REGION.longitudeDelta}
         mapWidth={MAP_WINDOW_WIDTH}
         showsUserLocation={!isRepositioning}
@@ -946,33 +794,28 @@ export default function MapScreen() {
         }
         repositionMarker={
           isRepositioning && repositionCoord
-            ? {
-                coordinate: repositionCoord,
-                onDragEnd: setRepositionCoord,
-              }
+            ? { coordinate: repositionCoord, onDragEnd: setRepositionCoord }
             : null
         }
         onDestinationPress={handleDestinationPinPress}
       />
 
-      {/* Floating search bar */}
-      <SafeAreaView style={styles.floatingBar} pointerEvents="box-none">
-        <View style={styles.searchBarRow}>
+      <SafeAreaView className="absolute inset-x-0 top-0 z-10" pointerEvents="box-none">
+        <View
+          className={`flex-row items-center bg-white rounded-[14px] mx-4 px-1.5 py-3 ${
+            Platform.OS === 'ios' ? 'mt-2' : 'mt-4'
+          }`}
+          style={shadows.floating}
+        >
           {viewState !== 'default' ? (
-            <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
+            <TouchableOpacity onPress={handleBack} className="px-1">
               <MaterialIcons name="chevron-left" size={28} color="#000" />
             </TouchableOpacity>
           ) : null}
-          <TouchableOpacity
-            style={styles.searchInputWrap}
-            activeOpacity={0.9}
-            onPress={transitionToSearch}
-          >
+          <TouchableOpacity className="flex-1 px-2" activeOpacity={0.9} onPress={transitionToSearch}>
             <Text
-              style={[
-                styles.searchInput,
-                { color: query || calendarNavBusy ? '#000' : '#999' },
-              ]}
+              className="text-base py-0"
+              style={{ color: query || calendarNavBusy ? '#000' : '#999' }}
               numberOfLines={1}
             >
               {calendarNavBusy && calendarNavLabel
@@ -981,18 +824,18 @@ export default function MapScreen() {
             </Text>
           </TouchableOpacity>
           {viewState === 'building' ? (
-            <View style={styles.buildingBarIcons}>
+            <View className="flex-row items-center gap-1">
               <TouchableOpacity
-                style={styles.floorSelector}
+                className="flex-row items-center bg-surface-alt rounded-lg px-2.5 py-1.5"
                 onPress={() => setShowFloorDropdown((v) => !v)}
               >
-                <Text style={styles.floorText}>{selectedFloor}</Text>
+                <Text className="text-[15px] font-semibold text-ink">{selectedFloor}</Text>
                 <MaterialIcons name="arrow-drop-down" size={20} color="#333" />
               </TouchableOpacity>
             </View>
           ) : (
             <TouchableOpacity
-              style={styles.micBtn}
+              className="px-2 items-center justify-center"
               onPress={() => {
                 transitionToSearch();
                 setTimeout(startVoiceSearch, 400);
@@ -1003,47 +846,44 @@ export default function MapScreen() {
           )}
         </View>
 
-        {/* Floor dropdown */}
         {showFloorDropdown && (
-          <View style={styles.floorDropdown}>
-            {Array.from({ length: DEFAULT_BUILDING_FLOORS }, (_, i) => i + 1).map(
-              (floor) => (
-                <TouchableOpacity
-                  key={floor}
-                  style={[
-                    styles.floorOption,
-                    floor === selectedFloor && styles.floorOptionActive,
-                  ]}
-                  onPress={() => {
-                    setSelectedFloor(floor);
-                    setShowFloorDropdown(false);
-                  }}
+          <View
+            className={`absolute right-4 bg-white rounded-xl py-1 min-w-[120px] ${
+              Platform.OS === 'ios' ? 'top-16' : 'top-[72px]'
+            }`}
+            style={shadows.floating}
+          >
+            {Array.from({ length: DEFAULT_BUILDING_FLOORS }, (_, i) => i + 1).map((floor) => (
+              <TouchableOpacity
+                key={floor}
+                className={`px-4 py-3 ${floor === selectedFloor ? 'bg-surface-alt' : ''}`}
+                onPress={() => {
+                  setSelectedFloor(floor);
+                  setShowFloorDropdown(false);
+                }}
+              >
+                <Text
+                  className={`text-[15px] ${
+                    floor === selectedFloor ? 'font-semibold text-black' : 'text-ink'
+                  }`}
                 >
-                  <Text
-                    style={[
-                      styles.floorOptionText,
-                      floor === selectedFloor && styles.floorOptionTextActive,
-                    ]}
-                  >
-                    Floor {floor}
-                  </Text>
-                </TouchableOpacity>
-              ),
-            )}
+                  Floor {floor}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
         )}
       </SafeAreaView>
 
-      {/* Recenter button */}
       <TouchableOpacity
-        style={[styles.recenterBtn, { bottom: viewState === 'default' ? 16 : 210 }]}
+        className="absolute right-4 w-12 h-12 rounded-full bg-white items-center justify-center z-10"
+        style={[shadows.floating, { bottom: viewState === 'default' ? 16 : 210 }]}
         onPress={handleRecenter}
         activeOpacity={0.8}
       >
         <MaterialIcons name="my-location" size={22} color="#333" />
       </TouchableOpacity>
 
-      {/* Bottom cards */}
       {viewState === 'navigation' && selectedPlace && (
         <RouteInfoCard
           duration={`${routeWalkMin} min`}
@@ -1069,18 +909,18 @@ export default function MapScreen() {
         />
       )}
       {viewState === 'building' && (
-        <LocationConfirmCard
-          onConfirm={handleConfirmLocation}
-          onReposition={handleReposition}
-        />
+        <LocationConfirmCard onConfirm={handleConfirmLocation} onReposition={handleReposition} />
       )}
 
       {calendarNavBusy ? (
-        <View style={styles.calendarLoadingOverlay} pointerEvents="auto">
-          <View style={styles.calendarLoadingCard}>
+        <View className="absolute inset-0 bg-white/80 items-center justify-center z-50 px-6" pointerEvents="auto">
+          <View
+            className="items-center bg-white rounded-2xl py-7 px-7 max-w-[320px] w-full border border-line-muted"
+            style={shadows.floating}
+          >
             <ActivityIndicator size="large" color="#0B617E" />
-            <Text style={styles.calendarLoadingTitle}>Getting directions</Text>
-            <Text style={styles.calendarLoadingSub} numberOfLines={2}>
+            <Text className="mt-4 text-lg font-bold text-ink-strong text-center">Getting directions</Text>
+            <Text className="mt-2 text-[15px] font-medium text-ink-muted text-center" numberOfLines={2}>
               {calendarNavLabel ? `To ${calendarNavLabel}` : 'Finding location…'}
             </Text>
           </View>
@@ -1089,173 +929,3 @@ export default function MapScreen() {
     </View>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Styles
-// ---------------------------------------------------------------------------
-const SEARCH_BAR_SHADOW = {
-  shadowColor: '#000',
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.1,
-  shadowRadius: 8,
-  elevation: 4,
-} as const;
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-
-  searchOverlayWrap: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 100,
-  },
-  searchOverlay: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-
-  searchOverlayBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    paddingHorizontal: 10,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#d0d0d0',
-  },
-
-  floatingBar: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-  },
-
-  searchBarRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    marginHorizontal: 16,
-    marginTop: Platform.OS === 'ios' ? 8 : 16,
-    paddingHorizontal: 6,
-    paddingVertical: 12,
-    ...SEARCH_BAR_SHADOW,
-  },
-  backBtn: {
-    paddingHorizontal: 4,
-  },
-  searchInputWrap: {
-    flex: 1,
-    paddingHorizontal: 8,
-  },
-  searchInput: {
-    fontSize: 16,
-    color: '#000',
-    paddingVertical: 0,
-  },
-  micBtn: {
-    paddingHorizontal: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  listeningDot: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: '#EA4335',
-  },
-
-  buildingBarIcons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  floorSelector: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f0f0f0',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  floorText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#333',
-  },
-
-  floorDropdown: {
-    position: 'absolute',
-    top: Platform.OS === 'ios' ? 64 : 72,
-    right: 16,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    paddingVertical: 4,
-    minWidth: 120,
-    ...SEARCH_BAR_SHADOW,
-  },
-  floorOption: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  floorOptionActive: {
-    backgroundColor: '#f5f5f5',
-  },
-  floorOptionText: {
-    fontSize: 15,
-    color: '#333',
-  },
-  floorOptionTextActive: {
-    fontWeight: '600',
-    color: '#000',
-  },
-  recenterBtn: {
-    position: 'absolute',
-    right: 16,
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 10,
-    ...SEARCH_BAR_SHADOW,
-  },
-  calendarLoadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255, 255, 255, 0.82)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 50,
-    paddingHorizontal: 24,
-  },
-  calendarLoadingCard: {
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    paddingVertical: 28,
-    paddingHorizontal: 28,
-    maxWidth: 320,
-    width: '100%',
-    borderWidth: 1,
-    borderColor: '#e8eef2',
-    ...SEARCH_BAR_SHADOW,
-  },
-  calendarLoadingTitle: {
-    marginTop: 16,
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#0f172a',
-    textAlign: 'center',
-  },
-  calendarLoadingSub: {
-    marginTop: 8,
-    fontSize: 15,
-    fontWeight: '500',
-    color: '#64748b',
-    textAlign: 'center',
-  },
-});

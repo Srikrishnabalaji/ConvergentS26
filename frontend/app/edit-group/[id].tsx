@@ -2,15 +2,14 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   Image,
   ActivityIndicator,
   Switch,
   Alert,
-  StyleSheet,
   ScrollView,
   Clipboard,
+  StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -18,6 +17,7 @@ import * as ImagePicker from 'expo-image-picker';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { supabase } from '@/lib/supabase';
 import { switchTrackColors, switchThumbColor } from '@/lib/switchTheme';
+import { Button, TextField, SectionLabel, Avatar, initialsFromName } from '@/components/ui';
 
 const PRIMARY_HEX = '#0B617E';
 
@@ -40,7 +40,6 @@ export default function EditGroupScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
 
-  // Base group fields
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [isCampusOrg, setIsCampusOrg] = useState(false);
@@ -48,38 +47,31 @@ export default function EditGroupScreen() {
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
 
-  // Password settings (public friend groups only)
   const [enablePassword, setEnablePassword] = useState(false);
   const [passwordValue, setPasswordValue] = useState('');
 
-  // Join code (private groups, admins only)
   const [joinCode, setJoinCode] = useState<string | null>(null);
   const [regeneratingCode, setRegeneratingCode] = useState(false);
 
-  // UI state
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [loadingGroup, setLoadingGroup] = useState(true);
   const [myRole, setMyRole] = useState<MemberRole | null>(null);
   const [myUserId, setMyUserId] = useState<string | null>(null);
 
-  // Members
   const [members, setMembers] = useState<MemberRow[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
 
-  // Join requests (campus org admins)
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
   const [loadingRequests, setLoadingRequests] = useState(false);
   const [handlingRequestId, setHandlingRequestId] = useState<string | null>(null);
 
   const isEditorOnly = myRole === 'editor';
   const isAdmin = myRole === 'admin';
-  // Password option only relevant for public friend groups
   const showPasswordOption = isAdmin && !isPrivate && !isCampusOrg;
   const showJoinCode = isAdmin && isPrivate;
   const showJoinRequests = isAdmin && isCampusOrg;
 
-  // ── Load members ──────────────────────────────────────────────────────────
   const loadMembers = useCallback(async (groupId: string) => {
     setLoadingMembers(true);
     const { data: rows, error: e1 } = await supabase
@@ -108,7 +100,6 @@ export default function EditGroupScreen() {
     setMembers(merged);
   }, []);
 
-  // ── Load join requests ────────────────────────────────────────────────────
   const loadJoinRequests = useCallback(async (groupId: string) => {
     setLoadingRequests(true);
     const { data } = await supabase.rpc('get_group_join_requests', { p_group_id: groupId });
@@ -119,11 +110,10 @@ export default function EditGroupScreen() {
         user_id: r.user_id,
         full_name: r.full_name,
         created_at: r.created_at,
-      }))
+      })),
     );
   }, []);
 
-  // ── Initial load ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!id) { router.back(); return; }
     (async () => {
@@ -180,7 +170,6 @@ export default function EditGroupScreen() {
     })();
   }, [id, loadMembers, loadJoinRequests, router]);
 
-  // ── Image picker ──────────────────────────────────────────────────────────
   async function pickImage() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
@@ -200,7 +189,6 @@ export default function EditGroupScreen() {
     }
   }
 
-  // ── Member role change ────────────────────────────────────────────────────
   async function setMemberRole(targetUserId: string, role: MemberRole) {
     if (!id) return;
     const { error } = await supabase
@@ -215,7 +203,6 @@ export default function EditGroupScreen() {
     loadMembers(id);
   }
 
-  // ── Handle join request ───────────────────────────────────────────────────
   async function handleJoinRequest(requestId: string, action: 'approve' | 'decline') {
     setHandlingRequestId(requestId);
     const { data, error } = await supabase.rpc('handle_join_request', {
@@ -231,7 +218,6 @@ export default function EditGroupScreen() {
     }
   }
 
-  // ── Regenerate join code ──────────────────────────────────────────────────
   async function handleRegenerateCode() {
     Alert.alert(
       'Regenerate Code',
@@ -251,11 +237,10 @@ export default function EditGroupScreen() {
             }
           },
         },
-      ]
+      ],
     );
   }
 
-  // ── Save ──────────────────────────────────────────────────────────────────
   async function handleSave() {
     if (!id || !name.trim()) {
       Alert.alert('Error', 'Please enter a group name.');
@@ -267,7 +252,6 @@ export default function EditGroupScreen() {
       return;
     }
 
-    // Editors can only update description
     if (isEditorOnly) {
       setLoading(true);
       const { error } = await supabase
@@ -316,10 +300,7 @@ export default function EditGroupScreen() {
       };
       if (imageUrl !== null) updatePayload.image_url = imageUrl;
 
-      const { error: updateError } = await supabase
-        .from('groups')
-        .update(updatePayload)
-        .eq('id', id);
+      const { error: updateError } = await supabase.from('groups').update(updatePayload).eq('id', id);
 
       if (updateError) {
         Alert.alert('Failed to update group', updateError.message);
@@ -335,7 +316,6 @@ export default function EditGroupScreen() {
     }
   }
 
-  // ── Delete ────────────────────────────────────────────────────────────────
   async function handleDelete() {
     if (!id) return;
     Alert.alert(
@@ -350,147 +330,125 @@ export default function EditGroupScreen() {
             setDeleting(true);
             const { error } = await supabase.from('groups').delete().eq('id', id);
             setDeleting(false);
-            if (error) { Alert.alert('Error', error.message); }
-            else { router.back(); }
+            if (error) Alert.alert('Error', error.message);
+            else router.back();
           },
         },
-      ]
+      ],
     );
   }
 
-  // ── Loading screen ────────────────────────────────────────────────────────
   if (loadingGroup) {
     return (
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#0B617E" />
+      <SafeAreaView className="flex-1 bg-white">
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="large" color={PRIMARY_HEX} />
         </View>
       </SafeAreaView>
     );
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView className="flex-1 bg-white">
       <ScrollView
-        style={styles.scroll}
+        className="flex-1"
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.closeBtn}>
-            <MaterialIcons name="close" size={28} color="#0B617E" />
+        <View className="flex-row items-center justify-between mb-5">
+          <TouchableOpacity onPress={() => router.back()} className="p-1 -ml-1">
+            <MaterialIcons name="close" size={28} color={PRIMARY_HEX} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>
+          <Text className="text-xl font-semibold text-primary">
             {isEditorOnly ? 'Edit description' : 'Edit Group'}
           </Text>
-          <View style={styles.headerSpacer} />
+          <View className="w-9" />
         </View>
 
-        {/* ── Admin-only: image + name + type ── */}
         {!isEditorOnly && (
           <>
-            <TouchableOpacity style={styles.imagePicker} onPress={pickImage}>
+            <TouchableOpacity
+              className="w-[100px] h-[100px] rounded-[20px] bg-surface-alt items-center justify-center self-center mb-5 overflow-hidden"
+              onPress={pickImage}
+            >
               {imageUri ? (
-                <Image source={{ uri: imageUri }} style={styles.imagePreview} />
+                <Image source={{ uri: imageUri }} className="w-full h-full" />
               ) : (
                 <>
                   <MaterialIcons name="add-a-photo" size={32} color="#94a3b8" />
-                  <Text style={styles.imagePickerLabel}>Change photo</Text>
+                  <Text className="text-[11px] text-ink-muted mt-1 font-medium">Change photo</Text>
                 </>
               )}
             </TouchableOpacity>
 
-            <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Group name</Text>
-              <TextInput
-                style={styles.textInput}
-                placeholder="e.g. Calc Study Group"
-                placeholderTextColor="#999"
-                value={name}
-                onChangeText={setName}
-              />
-            </View>
+            <TextField
+              label="Group name"
+              placeholder="e.g. Calc Study Group"
+              value={name}
+              onChangeText={setName}
+              containerClassName="mb-4"
+            />
           </>
         )}
 
-        {/* Description (visible to all roles) */}
-        <View style={styles.fieldGroup}>
-          <Text style={styles.fieldLabel}>Description</Text>
+        <View className="mb-4 gap-1.5">
+          <Text className="text-sm font-semibold text-ink-body">Description</Text>
           {isEditorOnly && (
-            <Text style={styles.fieldNote}>Editors can update the group description.</Text>
+            <Text className="text-xs text-ink-muted leading-[17px]">
+              Editors can update the group description.
+            </Text>
           )}
-          <TextInput
-            style={[styles.textInput, styles.textInputMulti]}
+          <TextField
             placeholder="What is this group about?"
-            placeholderTextColor="#999"
             value={description}
             onChangeText={setDescription}
             multiline
             textAlignVertical="top"
+            inputClassName="min-h-[110px] pt-3"
           />
         </View>
 
-        {/* ── Admin-only sections ── */}
         {!isEditorOnly && (
           <>
-            <Text style={styles.sectionLabel}>GROUP SETTINGS</Text>
+            <SectionLabel className="mb-1 mt-2">GROUP SETTINGS</SectionLabel>
 
-            {/* Campus org toggle */}
-            <View style={styles.toggleRow}>
-              <View style={styles.toggleTextCol}>
-                <Text style={styles.toggleTitle}>Campus organization</Text>
-                <Text style={styles.toggleSubtitle}>New members must be approved by an admin</Text>
-              </View>
-              <Switch
-                value={isCampusOrg}
-                onValueChange={(val) => {
-                  setIsCampusOrg(val);
-                  if (val) { setEnablePassword(false); setPasswordValue(''); }
-                }}
-                trackColor={switchTrackColors}
-                thumbColor={switchThumbColor(isCampusOrg, PRIMARY_HEX)}
-                ios_backgroundColor={switchTrackColors.false}
-              />
-            </View>
+            <ToggleRow
+              title="Campus organization"
+              subtitle="New members must be approved by an admin"
+              value={isCampusOrg}
+              onValueChange={(val) => {
+                setIsCampusOrg(val);
+                if (val) { setEnablePassword(false); setPasswordValue(''); }
+              }}
+            />
 
-            {/* Private toggle */}
-            <View style={styles.toggleRow}>
-              <View style={styles.toggleTextCol}>
-                <Text style={styles.toggleTitle}>Private group</Text>
-                <Text style={styles.toggleSubtitle}>Hidden from Discover — members join with a code</Text>
-              </View>
-              <Switch
-                value={isPrivate}
-                onValueChange={(val) => {
-                  setIsPrivate(val);
-                  if (val) { setEnablePassword(false); setPasswordValue(''); }
-                }}
-                trackColor={switchTrackColors}
-                thumbColor={switchThumbColor(isPrivate, PRIMARY_HEX)}
-                ios_backgroundColor={switchTrackColors.false}
-              />
-            </View>
+            <ToggleRow
+              title="Private group"
+              subtitle="Hidden from Discover — members join with a code"
+              value={isPrivate}
+              onValueChange={(val) => {
+                setIsPrivate(val);
+                if (val) { setEnablePassword(false); setPasswordValue(''); }
+              }}
+            />
 
-            {/* Join code (private groups) */}
             {showJoinCode && (
-              <View style={styles.infoCard}>
-                <View style={styles.infoCardHeader}>
+              <View className="bg-primary/10 rounded-2xl p-4 mt-3 mb-1">
+                <View className="flex-row items-center mb-1">
                   <MaterialIcons name="key" size={17} color={PRIMARY_HEX} style={{ marginRight: 7 }} />
-                  <Text style={styles.infoCardTitle}>Join Code</Text>
+                  <Text className="text-sm font-bold text-primary">Join Code</Text>
                 </View>
-                <Text style={styles.infoCardSubtitle}>
+                <Text className="text-[13px] text-ink-muted leading-[18px] mb-3.5">
                   Share this code with people you want to invite. Only the code-holder can join.
                 </Text>
-                <View style={styles.codeDisplayRow}>
-                  <Text style={styles.codeText} selectable>
+                <View className="flex-row items-center justify-between bg-white rounded-[10px] px-3.5 py-2.5">
+                  <Text className="text-[22px] font-extrabold text-primary tracking-[4px]" selectable>
                     {joinCode ?? '—'}
                   </Text>
-                  <View style={styles.codeActions}>
+                  <View className="flex-row gap-2">
                     {joinCode && (
                       <TouchableOpacity
-                        style={styles.codeActionBtn}
+                        className="w-[34px] h-[34px] rounded-[9px] bg-primary/10 items-center justify-center"
                         onPress={() => {
                           Clipboard.setString(joinCode);
                           Alert.alert('Copied', 'Join code copied to clipboard.');
@@ -500,7 +458,8 @@ export default function EditGroupScreen() {
                       </TouchableOpacity>
                     )}
                     <TouchableOpacity
-                      style={[styles.codeActionBtn, regeneratingCode && { opacity: 0.6 }]}
+                      className="w-[34px] h-[34px] rounded-[9px] bg-primary/10 items-center justify-center"
+                      style={regeneratingCode ? { opacity: 0.6 } : undefined}
                       onPress={handleRegenerateCode}
                       disabled={regeneratingCode}
                     >
@@ -513,79 +472,62 @@ export default function EditGroupScreen() {
                   </View>
                 </View>
                 {!joinCode && (
-                  <Text style={styles.infoCardNote}>
+                  <Text className="text-xs text-ink-muted mt-2.5 italic">
                     Save the group to generate a code (toggle Private on and save).
                   </Text>
                 )}
               </View>
             )}
 
-            {/* Password option (public friend groups) */}
             {showPasswordOption && (
               <>
-                <View style={styles.toggleRow}>
-                  <View style={styles.toggleTextCol}>
-                    <Text style={styles.toggleTitle}>Require a password to join</Text>
-                    <Text style={styles.toggleSubtitle}>Members must enter a password you set</Text>
-                  </View>
-                  <Switch
-                    value={enablePassword}
-                    onValueChange={(val) => {
-                      setEnablePassword(val);
-                      if (!val) setPasswordValue('');
-                    }}
-                    trackColor={switchTrackColors}
-                    thumbColor={switchThumbColor(enablePassword, PRIMARY_HEX)}
-                    ios_backgroundColor={switchTrackColors.false}
-                  />
-                </View>
+                <ToggleRow
+                  title="Require a password to join"
+                  subtitle="Members must enter a password you set"
+                  value={enablePassword}
+                  onValueChange={(val) => {
+                    setEnablePassword(val);
+                    if (!val) setPasswordValue('');
+                  }}
+                />
                 {enablePassword && (
-                  <View style={[styles.fieldGroup, { marginTop: 4 }]}>
-                    <Text style={styles.fieldLabel}>Join password</Text>
-                    <TextInput
-                      style={styles.textInput}
-                      placeholder="Password members must enter to join"
-                      placeholderTextColor="#999"
-                      value={passwordValue}
-                      onChangeText={setPasswordValue}
-                      autoCapitalize="none"
-                    />
-                  </View>
+                  <TextField
+                    label="Join password"
+                    placeholder="Password members must enter to join"
+                    value={passwordValue}
+                    onChangeText={setPasswordValue}
+                    autoCapitalize="none"
+                    containerClassName="mt-1"
+                  />
                 )}
               </>
             )}
 
-            {/* Pending join requests (campus org) */}
             {showJoinRequests && (
               <>
-                <Text style={[styles.sectionLabel, { marginTop: 24 }]}>
-                  JOIN REQUESTS
-                  {joinRequests.length > 0 && ` (${joinRequests.length})`}
-                </Text>
+                <SectionLabel className="mt-6 mb-1">
+                  {`JOIN REQUESTS${joinRequests.length > 0 ? ` (${joinRequests.length})` : ''}`}
+                </SectionLabel>
                 {loadingRequests ? (
-                  <View style={styles.centeredRow}>
+                  <View className="py-4 items-center">
                     <ActivityIndicator color={PRIMARY_HEX} />
                   </View>
                 ) : joinRequests.length === 0 ? (
-                  <View style={styles.emptyRequestsCard}>
+                  <View className="bg-surface-subtle rounded-xl py-5 items-center mb-2">
                     <MaterialIcons name="check-circle-outline" size={24} color="#94a3b8" style={{ marginBottom: 6 }} />
-                    <Text style={styles.emptyRequestsText}>No pending requests</Text>
+                    <Text className="text-sm text-ink-muted font-medium">No pending requests</Text>
                   </View>
                 ) : (
-                  <View style={styles.requestsList}>
+                  <View className="border border-line-neutral rounded-2xl overflow-hidden mb-2">
                     {joinRequests.map((req) => (
-                      <View key={req.id} style={styles.requestRow}>
-                        <View style={styles.requestAvatarFallback}>
-                          <Text style={styles.requestAvatarInitials}>
-                            {initialsFromName(req.full_name)}
-                          </Text>
-                        </View>
-                        <Text style={styles.requestName} numberOfLines={1}>
+                      <View key={req.id} className="flex-row items-center px-3.5 py-3 border-b border-line-muted/40 bg-white">
+                        <Avatar name={req.full_name} size="md" className="mr-3" />
+                        <Text className="flex-1 text-[15px] font-medium text-ink-strong" numberOfLines={1}>
                           {req.full_name ?? 'Unknown user'}
                         </Text>
-                        <View style={styles.requestActions}>
+                        <View className="flex-row gap-2">
                           <TouchableOpacity
-                            style={[styles.requestBtn, styles.requestBtnDecline]}
+                            className="w-[34px] h-[34px] rounded-[10px] items-center justify-center bg-danger/10"
                             onPress={() => handleJoinRequest(req.id, 'decline')}
                             disabled={handlingRequestId === req.id}
                           >
@@ -596,7 +538,7 @@ export default function EditGroupScreen() {
                             )}
                           </TouchableOpacity>
                           <TouchableOpacity
-                            style={[styles.requestBtn, styles.requestBtnApprove]}
+                            className="w-[34px] h-[34px] rounded-[10px] items-center justify-center bg-primary"
                             onPress={() => handleJoinRequest(req.id, 'approve')}
                             disabled={handlingRequestId === req.id}
                           >
@@ -614,39 +556,41 @@ export default function EditGroupScreen() {
               </>
             )}
 
-            {/* Members & editors */}
-            <Text style={[styles.sectionLabel, { marginTop: 24 }]}>MEMBERS</Text>
-            <Text style={styles.fieldNote}>
+            <SectionLabel className="mt-6 mb-1">MEMBERS</SectionLabel>
+            <Text className="text-xs text-ink-muted mb-2 leading-[17px]">
               Editors can update the group description. Admins have full control.
             </Text>
             {loadingMembers ? (
-              <View style={styles.centeredRow}>
+              <View className="py-4 items-center">
                 <ActivityIndicator color={PRIMARY_HEX} />
               </View>
             ) : (
-              <View style={styles.membersList}>
+              <View className="border border-line-neutral rounded-2xl overflow-hidden mb-2">
                 {members.map((m) => (
-                  <View key={m.user_id} style={styles.memberRow}>
-                    <View style={styles.memberInfo}>
-                      <Text style={styles.memberName} numberOfLines={1}>
+                  <View
+                    key={m.user_id}
+                    className="flex-row items-center justify-between px-3.5 py-3 border-b border-line-muted/40 bg-white"
+                  >
+                    <View className="flex-1 mr-2">
+                      <Text className="text-[15px] text-ink-strong font-medium" numberOfLines={1}>
                         {m.profiles?.full_name ?? 'Member'}
                       </Text>
-                      <Text style={styles.memberRole}>{m.role}</Text>
+                      <Text className="text-xs text-ink-muted mt-0.5 capitalize">{m.role}</Text>
                     </View>
                     {myRole === 'admin' && m.user_id !== myUserId && m.role === 'member' && (
                       <TouchableOpacity
-                        style={styles.roleBtn}
+                        className="px-3 py-1.5 rounded-lg bg-primary/10"
                         onPress={() => setMemberRole(m.user_id, 'editor')}
                       >
-                        <Text style={styles.roleBtnText}>Make editor</Text>
+                        <Text className="text-xs font-semibold text-primary">Make editor</Text>
                       </TouchableOpacity>
                     )}
                     {myRole === 'admin' && m.user_id !== myUserId && m.role === 'editor' && (
                       <TouchableOpacity
-                        style={[styles.roleBtn, styles.roleBtnSecondary]}
+                        className="px-3 py-1.5 rounded-lg bg-surface-alt"
                         onPress={() => setMemberRole(m.user_id, 'member')}
                       >
-                        <Text style={styles.roleBtnSecondaryText}>Remove editor</Text>
+                        <Text className="text-xs font-semibold text-ink-muted">Remove editor</Text>
                       </TouchableOpacity>
                     )}
                   </View>
@@ -656,47 +600,63 @@ export default function EditGroupScreen() {
           </>
         )}
 
-        {/* Save button */}
-        <TouchableOpacity
-          style={[styles.saveBtn, loading && { opacity: 0.7 }]}
+        <Button
+          label="Save"
           onPress={handleSave}
+          loading={loading}
           disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.saveBtnText}>Save</Text>
-          )}
-        </TouchableOpacity>
+          block
+          size="lg"
+          className="mt-7 mb-3"
+        />
 
-        {/* Delete button (admin only) */}
         {!isEditorOnly && (
           <TouchableOpacity
-            style={[styles.deleteBtn, deleting && { opacity: 0.7 }]}
+            className="border-[1.5px] border-danger rounded-2xl py-[15px] items-center"
+            style={deleting ? { opacity: 0.7 } : undefined}
             onPress={handleDelete}
             disabled={deleting}
           >
             {deleting ? (
               <ActivityIndicator size="small" color="#ef4444" />
             ) : (
-              <Text style={styles.deleteBtnText}>Delete Group</Text>
+              <Text className="text-danger text-[15px] font-semibold">Delete Group</Text>
             )}
           </TouchableOpacity>
         )}
 
-        <View style={{ height: 32 }} />
+        <View className="h-8" />
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-function initialsFromName(name: string | null | undefined): string {
-  if (!name?.trim()) return '?';
-  const parts = name.trim().split(/\s+/);
-  if (parts.length >= 2) return `${parts[0][0] ?? ''}${parts[parts.length - 1][0] ?? ''}`.toUpperCase();
-  return name.slice(0, 2).toUpperCase();
+function ToggleRow({
+  title,
+  subtitle,
+  value,
+  onValueChange,
+}: {
+  title: string;
+  subtitle: string;
+  value: boolean;
+  onValueChange: (v: boolean) => void;
+}) {
+  return (
+    <View className="flex-row items-center justify-between py-3.5 border-b border-line-muted/40">
+      <View className="flex-1 mr-3">
+        <Text className="text-[15px] font-medium text-ink-strong">{title}</Text>
+        <Text className="text-xs text-ink-muted mt-0.5 leading-[17px]">{subtitle}</Text>
+      </View>
+      <Switch
+        value={value}
+        onValueChange={onValueChange}
+        trackColor={switchTrackColors}
+        thumbColor={switchThumbColor(value, PRIMARY_HEX)}
+        ios_backgroundColor={switchTrackColors.false}
+      />
+    </View>
+  );
 }
 
 function decode(base64: string): ArrayBuffer {
@@ -708,199 +668,10 @@ function decode(base64: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-// ── Styles ─────────────────────────────────────────────────────────────────
-
-const PRIMARY = '#0B617E';
+// Avatar uses its own initialsFromName; this keeps the previous call site available
+// if external code imports from this file.
+export { initialsFromName };
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#fff' },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 48 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-  },
-  closeBtn: { padding: 4, marginLeft: -4 },
-  headerTitle: { fontSize: 20, fontWeight: '600', color: PRIMARY },
-  headerSpacer: { width: 36 },
-  imagePicker: {
-    width: 100,
-    height: 100,
-    borderRadius: 20,
-    backgroundColor: '#f1f5f9',
-    alignItems: 'center',
-    justifyContent: 'center',
-    alignSelf: 'center',
-    marginBottom: 20,
-    overflow: 'hidden',
-  },
-  imagePreview: { width: '100%', height: '100%' },
-  imagePickerLabel: { fontSize: 11, color: '#94a3b8', marginTop: 5, fontWeight: '500' },
-  fieldGroup: { marginBottom: 16 },
-  fieldLabel: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 6 },
-  fieldNote: { fontSize: 12, color: '#94a3b8', marginBottom: 8, lineHeight: 17 },
-  textInput: {
-    borderWidth: 1.5,
-    borderColor: '#e5e7eb',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: '#111827',
-    backgroundColor: '#fafafa',
-  },
-  textInputMulti: { minHeight: 110, paddingTop: 12 },
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#94a3b8',
-    letterSpacing: 1,
-    marginBottom: 4,
-    marginTop: 8,
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#f1f5f9',
-  },
-  toggleTextCol: { flex: 1, marginRight: 12 },
-  toggleTitle: { fontSize: 15, fontWeight: '500', color: '#111827' },
-  toggleSubtitle: { fontSize: 12, color: '#94a3b8', marginTop: 2, lineHeight: 17 },
-  // Join code card
-  infoCard: {
-    backgroundColor: 'rgba(11, 97, 126, 0.06)',
-    borderRadius: 14,
-    padding: 16,
-    marginTop: 12,
-    marginBottom: 4,
-  },
-  infoCardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
-  infoCardTitle: { fontSize: 14, fontWeight: '700', color: PRIMARY },
-  infoCardSubtitle: { fontSize: 13, color: '#64748b', lineHeight: 18, marginBottom: 14 },
-  codeDisplayRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  codeText: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: PRIMARY,
-    letterSpacing: 4,
-  },
-  codeActions: { flexDirection: 'row', gap: 8 },
-  codeActionBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 9,
-    backgroundColor: 'rgba(11, 97, 126, 0.08)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  infoCardNote: { fontSize: 12, color: '#94a3b8', marginTop: 10, fontStyle: 'italic' },
-  // Join requests
-  emptyRequestsCard: {
-    backgroundColor: '#f8fafb',
-    borderRadius: 12,
-    paddingVertical: 20,
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  emptyRequestsText: { fontSize: 14, color: '#94a3b8', fontWeight: '500' },
-  requestsList: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#e5e7eb',
-    borderRadius: 14,
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  requestRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#f1f5f9',
-    backgroundColor: '#fff',
-  },
-  requestAvatarFallback: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: 'rgba(11, 97, 126, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  requestAvatarInitials: { fontSize: 13, fontWeight: '700', color: PRIMARY },
-  requestName: { flex: 1, fontSize: 15, fontWeight: '500', color: '#111827' },
-  requestActions: { flexDirection: 'row', gap: 8 },
-  requestBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  requestBtnDecline: { backgroundColor: '#fef2f2' },
-  requestBtnApprove: { backgroundColor: PRIMARY },
-  // Members list
-  membersList: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#e5e7eb',
-    borderRadius: 14,
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  memberRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#f1f5f9',
-    backgroundColor: '#fff',
-  },
-  memberInfo: { flex: 1, marginRight: 8 },
-  memberName: { fontSize: 15, color: '#111827', fontWeight: '500' },
-  memberRole: { fontSize: 12, color: '#94a3b8', marginTop: 1, textTransform: 'capitalize' },
-  roleBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: 'rgba(11, 97, 126, 0.09)',
-  },
-  roleBtnText: { fontSize: 12, fontWeight: '600', color: PRIMARY },
-  roleBtnSecondary: { backgroundColor: '#f1f5f9' },
-  roleBtnSecondaryText: { fontSize: 12, fontWeight: '600', color: '#64748b' },
-  centeredRow: { paddingVertical: 16, alignItems: 'center' },
-  // Actions
-  saveBtn: {
-    backgroundColor: PRIMARY,
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 28,
-    marginBottom: 12,
-  },
-  saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  deleteBtn: {
-    borderWidth: 1.5,
-    borderColor: '#ef4444',
-    borderRadius: 14,
-    paddingVertical: 15,
-    alignItems: 'center',
-  },
-  deleteBtnText: { color: '#ef4444', fontSize: 15, fontWeight: '600' },
 });

@@ -1,18 +1,16 @@
 import React, { useState } from 'react';
 import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
+  Alert,
   KeyboardAvoidingView,
   Platform,
-  Alert,
-  ActivityIndicator,
-  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { Button, TextField } from '@/components/ui';
 
 export default function LoginScreen() {
   const [isSignUp, setIsSignUp] = useState(false);
@@ -21,46 +19,30 @@ export default function LoginScreen() {
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
 
-  async function handleSignIn() {
-    if (!email || !password) {
+  async function handleSubmit() {
+    if (!email || !password || (isSignUp && !name)) {
       Alert.alert('Error', 'Please fill in all fields.');
       return;
     }
     setLoading(true);
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = isSignUp
+      ? await supabase.auth.signUp({
+          email,
+          password,
+          options: { data: { full_name: name } },
+        })
+      : await supabase.auth.signInWithPassword({ email, password });
     setLoading(false);
-    if (error) {
-      Alert.alert('Sign In Error', error.message);
-      return;
-    }
-    if (data.session) {
-      router.replace('/(tabs)/myGroups');
-    }
-  }
 
-  async function handleSignUp() {
-    if (!email || !password || !name) {
-      Alert.alert('Error', 'Please fill in all fields.');
-      return;
-    }
-    setLoading(true);
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { full_name: name } },
-    });
-    setLoading(false);
     if (error) {
-      Alert.alert('Sign Up Error', error.message);
+      Alert.alert(isSignUp ? 'Sign Up Error' : 'Sign In Error', error.message);
       return;
     }
-    if (data.session) {
-      router.replace('/(tabs)/myGroups');
-    }
+    if (data.session) router.replace('/(tabs)/myGroups');
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView className="flex-1 bg-white">
       <KeyboardAvoidingView
         className="flex-1 px-6 justify-center"
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -69,68 +51,49 @@ export default function LoginScreen() {
           <Text className="text-[32px] font-bold text-primary mb-2">
             {isSignUp ? 'Create Account' : 'Welcome Back'}
           </Text>
-          <Text className="text-base text-gray-500">
+          <Text className="text-base text-ink-subtle">
             {isSignUp ? 'Sign up to get started' : 'Sign in to continue'}
           </Text>
         </View>
 
         <View className="gap-4">
           {isSignUp && (
-            <View className="gap-1.5">
-              <Text className="text-sm font-semibold text-gray-700">Name</Text>
-              <TextInput
-                className="border border-gray-200 rounded-[10px] px-4 py-3.5 text-base text-black bg-gray-50"
-                placeholder="Your full name"
-                placeholderTextColor="#999"
-                value={name}
-                onChangeText={setName}
-                autoCapitalize="words"
-              />
-            </View>
+            <TextField
+              label="Name"
+              placeholder="Your full name"
+              value={name}
+              onChangeText={setName}
+              autoCapitalize="words"
+            />
           )}
+          <TextField
+            label="Email"
+            placeholder="you@example.com"
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            keyboardType="email-address"
+          />
+          <TextField
+            label="Password"
+            placeholder="••••••••"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+          />
 
-          <View className="gap-1.5">
-            <Text className="text-sm font-semibold text-gray-700">Email</Text>
-            <TextInput
-              className="border border-gray-200 rounded-[10px] px-4 py-3.5 text-base text-black bg-gray-50"
-              placeholder="you@example.com"
-              placeholderTextColor="#999"
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
-            />
-          </View>
-
-          <View className="gap-1.5">
-            <Text className="text-sm font-semibold text-gray-700">Password</Text>
-            <TextInput
-              className="border border-gray-200 rounded-[10px] px-4 py-3.5 text-base text-black bg-gray-50"
-              placeholder="••••••••"
-              placeholderTextColor="#999"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-            />
-          </View>
-
-          <TouchableOpacity
-            className="bg-primary rounded-[10px] py-4 items-center mt-2"
-            onPress={isSignUp ? handleSignUp : handleSignIn}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text className="text-white text-base font-semibold">
-                {isSignUp ? 'Sign Up' : 'Sign In'}
-              </Text>
-            )}
-          </TouchableOpacity>
+          <Button
+            label={isSignUp ? 'Sign Up' : 'Sign In'}
+            onPress={handleSubmit}
+            loading={loading}
+            size="lg"
+            block
+            className="mt-2"
+          />
         </View>
 
         <View className="flex-row justify-center mt-6">
-          <Text className="text-sm text-gray-500">
+          <Text className="text-sm text-ink-subtle">
             {isSignUp ? 'Already have an account?' : "Don't have an account?"}
           </Text>
           <TouchableOpacity onPress={() => setIsSignUp(!isSignUp)}>
@@ -143,10 +106,3 @@ export default function LoginScreen() {
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-});

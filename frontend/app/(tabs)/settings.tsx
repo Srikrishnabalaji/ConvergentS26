@@ -1,18 +1,17 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  TouchableOpacity,
-  Switch,
   ActivityIndicator,
   ScrollView,
-  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { supabase } from '@/lib/supabase';
 import { switchTrackColors, switchThumbColor } from '@/lib/switchTheme';
+import { Avatar, Card, Hairline, PageShell, SectionLabel } from '@/components/ui';
 
 const PRIMARY = '#0B617E';
 
@@ -99,11 +98,7 @@ export default function SettingsScreen() {
       else if (g.type === 'campus_org') campusOrgs += 1;
     }
 
-    setGroupStats({
-      friendGroups,
-      campusOrgs,
-      totalGroups: memberRows.length,
-    });
+    setGroupStats({ friendGroups, campusOrgs, totalGroups: memberRows.length });
     setStatsLoading(false);
   }, []);
 
@@ -124,13 +119,6 @@ export default function SettingsScreen() {
     }, [loadGroupStats])
   );
 
-  const initials = useMemo(() => {
-    const parts = displayName.split(' ').filter(Boolean);
-    if (parts.length === 0) return 'U';
-    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-    return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-  }, [displayName]);
-
   async function handleSignOut() {
     await supabase.auth.signOut();
     router.replace('/(auth)/login');
@@ -138,122 +126,105 @@ export default function SettingsScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.loadingWrap}>
-          <ActivityIndicator size="large" color={PRIMARY} />
-        </View>
-      </SafeAreaView>
+      <PageShell hideBanner contentClassName="bg-surface-muted items-center justify-center">
+        <ActivityIndicator size="large" color={PRIMARY} />
+      </PageShell>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <View style={styles.banner}>
-        <Text style={styles.pageTitle}>Settings</Text>
-      </View>
-
-      <View style={styles.contentContainer}>
+    <PageShell title="Settings">
       <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
+        className="flex-1"
+        contentContainerClassName="px-5 pt-5 pb-12"
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.profileCard}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initials}</Text>
-          </View>
-          <View style={styles.profileText}>
-            <Text style={styles.profileName} numberOfLines={2}>
+        <Card className="flex-row items-center p-3.5 mb-5">
+          <Avatar name={displayName} size="xl" className="mr-3.5" />
+          <View className="flex-1 min-w-0">
+            <Text className="text-xl font-bold text-ink" numberOfLines={2}>
               {displayName}
             </Text>
-            <Text style={styles.profileMeta}>UT Austin</Text>
+            <Text className="mt-1 text-[13px] font-medium text-ink-dim">UT Austin</Text>
           </View>
-        </View>
+        </Card>
 
-        <Text style={styles.sectionLabel}>Your communities</Text>
-        <View style={styles.statsRow}>
-          <View style={[styles.statCell, styles.statCellBorder]}>
-            {statsLoading ? (
-              <ActivityIndicator color={PRIMARY} />
-            ) : (
-              <>
-                <Text style={styles.statNumber}>{groupStats.friendGroups}</Text>
-                <Text style={styles.statCaption}>Friend groups</Text>
-              </>
-            )}
-          </View>
-          <View style={[styles.statCell, styles.statCellBorder]}>
-            {statsLoading ? (
-              <ActivityIndicator color={PRIMARY} />
-            ) : (
-              <>
-                <Text style={styles.statNumber}>{groupStats.campusOrgs}</Text>
-                <Text style={styles.statCaption}>Campus orgs</Text>
-              </>
-            )}
-          </View>
-          <View style={styles.statCell}>
-            {statsLoading ? (
-              <ActivityIndicator color={PRIMARY} />
-            ) : (
-              <>
-                <Text style={styles.statNumber}>{groupStats.totalGroups}</Text>
-                <Text style={styles.statCaption}>All groups</Text>
-              </>
-            )}
-          </View>
-        </View>
+        <SectionLabel>Your communities</SectionLabel>
+        <Card className="flex-row mb-5">
+          <StatCell value={groupStats.friendGroups} label="Friend groups" loading={statsLoading} withBorder />
+          <StatCell value={groupStats.campusOrgs} label="Campus orgs" loading={statsLoading} withBorder />
+          <StatCell value={groupStats.totalGroups} label="All groups" loading={statsLoading} />
+        </Card>
 
-        <Text style={styles.sectionLabel}>Notifications</Text>
-        <View style={styles.card}>
-          <RowSwitch
-            label="Share my location"
-            value={shareLocation}
-            onValueChange={setShareLocation}
-          />
-          <View style={styles.hairline} />
-          <RowSwitch
-            label="Event notifications"
-            value={eventNotifications}
-            onValueChange={setEventNotifications}
-          />
-          <View style={styles.hairline} />
-          <RowSwitch
-            label="Leave-by alerts"
-            value={leaveByAlerts}
-            onValueChange={setLeaveByAlerts}
-          />
-        </View>
+        <SectionLabel>Notifications</SectionLabel>
+        <Card className="mb-4">
+          <RowSwitch label="Share my location" value={shareLocation} onValueChange={setShareLocation} />
+          <Hairline />
+          <RowSwitch label="Event notifications" value={eventNotifications} onValueChange={setEventNotifications} />
+          <Hairline />
+          <RowSwitch label="Leave-by alerts" value={leaveByAlerts} onValueChange={setLeaveByAlerts} />
+        </Card>
 
-        <Text style={styles.sectionLabel}>Integrations</Text>
-        <View style={styles.card}>
-          <View style={styles.rowStatic}>
-            <Text style={styles.rowLabel}>Campus</Text>
-            <Text style={styles.rowValue}>UT Austin</Text>
-          </View>
-        </View>
+        <SectionLabel>Integrations</SectionLabel>
+        <Card className="mb-4">
+          <Row label="Campus" value="UT Austin" />
+        </Card>
 
-        <Text style={styles.sectionLabel}>Display</Text>
-        <View style={styles.card}>
-          <View style={styles.rowStatic}>
-            <Text style={styles.rowLabel}>Appearance</Text>
-            <Text style={styles.rowValue}>Light</Text>
-          </View>
-          <View style={styles.hairline} />
-          <View style={styles.rowStatic}>
-            <Text style={styles.rowLabel}>Map style</Text>
-            <Text style={styles.rowValue}>Default</Text>
-          </View>
-        </View>
+        <SectionLabel>Display</SectionLabel>
+        <Card className="mb-4">
+          <Row label="Appearance" value="Light" />
+          <Hairline />
+          <Row label="Map style" value="Default" />
+        </Card>
 
-        <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut} activeOpacity={0.85}>
+        <TouchableOpacity
+          onPress={handleSignOut}
+          activeOpacity={0.85}
+          className="flex-row items-center justify-center self-stretch mt-2 py-3.5 rounded-xl bg-white border border-danger-border"
+        >
           <MaterialIcons name="logout" size={20} color="#b91c1c" style={{ marginRight: 8 }} />
-          <Text style={styles.signOutText}>Log out</Text>
+          <Text className="text-base font-bold text-danger-strong">Log out</Text>
         </TouchableOpacity>
       </ScrollView>
-      </View>
-    </SafeAreaView>
+    </PageShell>
+  );
+}
+
+function StatCell({
+  value,
+  label,
+  loading,
+  withBorder,
+}: {
+  value: number;
+  label: string;
+  loading: boolean;
+  withBorder?: boolean;
+}) {
+  return (
+    <View
+      className="flex-1 items-center justify-center py-4 min-h-[88px]"
+      style={withBorder ? { borderRightWidth: 0.5, borderRightColor: '#e8eef2' } : undefined}
+    >
+      {loading ? (
+        <ActivityIndicator color={PRIMARY} />
+      ) : (
+        <>
+          <Text className="text-[26px] font-bold text-primary mb-1">{value}</Text>
+          <Text className="text-[11px] font-semibold text-ink-subtle text-center px-1">{label}</Text>
+        </>
+      )}
+    </View>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <View className="min-h-[54px] px-3.5 flex-row items-center justify-between">
+      <Text className="text-base font-semibold text-ink-body flex-1 pr-3">{label}</Text>
+      <Text className="text-[15px] font-semibold text-ink-dim">{value}</Text>
+    </View>
   );
 }
 
@@ -267,9 +238,9 @@ function RowSwitch({
   onValueChange: (v: boolean) => void;
 }) {
   return (
-    <View style={styles.switchRow}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <View style={styles.switchSlot}>
+    <View className="min-h-[54px] px-3.5 flex-row items-center justify-between">
+      <Text className="text-base font-semibold text-ink-body flex-1 pr-3">{label}</Text>
+      <View className="w-[52px] items-center justify-center">
         <Switch
           value={value}
           onValueChange={onValueChange}
@@ -281,203 +252,3 @@ function RowSwitch({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: PRIMARY,
-  },
-  banner: {
-    backgroundColor: PRIMARY,
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 10,
-    shadowColor: '#04303f',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-    elevation: 8,
-    zIndex: 1,
-  },
-  contentContainer: {
-    flex: 1,
-    backgroundColor: '#f5f7f9',
-  },
-  scroll: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 22,
-    paddingBottom: 48,
-  },
-  loadingWrap: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#f4f7f9',
-  },
-  pageTitle: {
-    fontSize: 40,
-    fontWeight: '800',
-    color: '#fff',
-    letterSpacing: -1,
-  },
-  profileCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#e8eef2',
-    padding: 14,
-    marginBottom: 20,
-    shadowColor: '#0f172a',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 1,
-  },
-  avatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 18,
-    backgroundColor: PRIMARY,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 14,
-  },
-  avatarText: {
-    color: '#fff',
-    fontSize: 22,
-    fontWeight: '700',
-  },
-  profileText: {
-    flex: 1,
-    minWidth: 0,
-  },
-  profileName: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#0f172a',
-  },
-  profileMeta: {
-    marginTop: 4,
-    fontSize: 13,
-    fontWeight: '500',
-    color: '#94a3b8',
-  },
-  sectionLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#475569',
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-    marginBottom: 10,
-    marginTop: 4,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#e8eef2',
-    marginBottom: 20,
-    overflow: 'hidden',
-    shadowColor: '#0f172a',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 1,
-  },
-  statCell: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 18,
-    minHeight: 88,
-  },
-  statCellBorder: {
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderRightColor: '#e8eef2',
-  },
-  statNumber: {
-    fontSize: 26,
-    fontWeight: '700',
-    color: PRIMARY,
-    marginBottom: 4,
-  },
-  statCaption: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#64748b',
-    textAlign: 'center',
-    paddingHorizontal: 4,
-  },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#e8eef2',
-    marginBottom: 16,
-    overflow: 'hidden',
-    shadowColor: '#0f172a',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 1,
-  },
-  hairline: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: '#f1f5f9',
-    marginLeft: 14,
-  },
-  switchRow: {
-    minHeight: 54,
-    paddingHorizontal: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  switchSlot: {
-    width: 52,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rowStatic: {
-    minHeight: 54,
-    paddingHorizontal: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  rowLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#334155',
-    flex: 1,
-    paddingRight: 12,
-  },
-  rowValue: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#94a3b8',
-  },
-  signOutBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    alignSelf: 'stretch',
-    marginTop: 8,
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#fecaca',
-  },
-  signOutText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#b91c1c',
-  },
-});
