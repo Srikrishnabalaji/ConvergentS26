@@ -180,6 +180,7 @@ export default function CalendarScreen() {
   const [selectedDate, setSelectedDate] = useState(TODAY);
   const [events, setEvents] = useState<Record<string, CalendarEventItem[]>>({});
   const [groups, setGroups] = useState<GroupRow[]>([]);
+  const [adminGroupIds, setAdminGroupIds] = useState<Set<string>>(new Set());
   const [selectedGroupFilterId, setSelectedGroupFilterId] = useState<string | null>(null);
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -213,7 +214,7 @@ export default function CalendarScreen() {
 
     const { data: memberData } = await supabase
       .from('group_members')
-      .select('groups(id, name)')
+      .select('groups(id, name), role')
       .eq('user_id', user.id);
 
     if (memberData) {
@@ -222,6 +223,18 @@ export default function CalendarScreen() {
         .filter((g): g is GroupRow => g != null)
         .sort((a, b) => a.name.localeCompare(b.name));
       setGroups(userGroups);
+
+      // Track which groups the user is an admin of
+      const adminIds = new Set<string>();
+      memberData.forEach((r: any) => {
+        if (r.role === 'admin') {
+          const group = unwrapGroup(r.groups);
+          if (group) {
+            adminIds.add(group.id);
+          }
+        }
+      });
+      setAdminGroupIds(adminIds);
     }
 
     const { data: eventData, error } = await supabase
@@ -476,6 +489,16 @@ export default function CalendarScreen() {
       return;
     }
 
+    // Check if user is admin of the selected group (if a group is selected)
+    if (newEvent.groupId && !adminGroupIds.has(newEvent.groupId)) {
+      const groupName = groups.find((g) => String(g.id) === String(newEvent.groupId))?.name || 'this group';
+      Alert.alert(
+        'Admin Only',
+        `Only admins can create events for ${groupName}. You can create personal events by selecting "None" instead.`
+      );
+      return;
+    }
+
     if (newEvent.building.trim()) {
       const isValid = await validateBuilding(newEvent.building);
       if (!isValid) {
@@ -618,6 +641,7 @@ export default function CalendarScreen() {
         editingEventId={editingEventId}
         selectedDate={selectedDate}
         groups={groups}
+        adminGroupIds={adminGroupIds}
         newEvent={newEvent}
         setNewEvent={setNewEvent}
         timeValue={timeValue}
@@ -856,6 +880,7 @@ type EventFormModalProps = {
   editingEventId: string | null;
   selectedDate: string;
   groups: GroupRow[];
+  adminGroupIds: Set<string>;
   newEvent: NewEventForm;
   setNewEvent: React.Dispatch<React.SetStateAction<NewEventForm>>;
   timeValue: Date;
@@ -882,6 +907,7 @@ function EventFormModal(props: EventFormModalProps) {
     editingEventId,
     selectedDate,
     groups,
+    adminGroupIds,
     newEvent,
     setNewEvent,
     timeValue,
@@ -930,21 +956,44 @@ function EventFormModal(props: EventFormModalProps) {
                 keyboardShouldPersistTaps="handled"
               >
                 <FormLabel>Group</FormLabel>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-1 mt-1">
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-1 mt-1" contentContainerStyle={{ flexGrow: 0 }}>
                   <FormChip
                     label="None"
                     active={!newEvent.groupId}
                     onPress={() => setNewEvent((prev) => ({ ...prev, groupId: null }))}
                   />
-                  {groups.map((group) => (
-                    <FormChip
-                      key={group.id}
-                      label={group.name}
-                      active={String(newEvent.groupId) === String(group.id)}
-                      onPress={() => setNewEvent((prev) => ({ ...prev, groupId: String(group.id) }))}
-                    />
-                  ))}
+                  {/* Admin groups first */}
+                  {groups
+                    .filter((group) => adminGroupIds.has(group.id))
+                    .map((group) => (
+                      <FormChip
+                        key={group.id}
+                        label={group.name}
+                        active={String(newEvent.groupId) === String(group.id)}
+                        disabled={false}
+                        onPress={() => {
+                          setNewEvent((prev) => ({ ...prev, groupId: String(group.id) }));
+                        }}
+                      />
+                    ))}
+                  {/* Non-admin groups after */}
+                  {groups
+                    .filter((group) => !adminGroupIds.has(group.id))
+                    .map((group) => (
+                      <FormChip
+                        key={group.id}
+                        label={group.name}
+                        active={String(newEvent.groupId) === String(group.id)}
+                        disabled={true}
+                        onPress={() => {}}
+                      />
+                    ))}
                 </ScrollView>
+                {groups.length > 0 && groups.some(g => !adminGroupIds.has(g.id)) && (
+                  <Text className="text-[11px] text-ink-dim mt-1 mb-1">
+                    Only admins can create group events. Disabled groups are ones you&apos;re not an admin of.
+                  </Text>
+                )}
 
                 <FormLabel>Event Title *</FormLabel>
                 <FormInput
@@ -1133,18 +1182,22 @@ function FormInput({
 function FormChip({
   label,
   active,
+  disabled = false,
   onPress,
 }: {
   label: string;
   active: boolean;
+  disabled?: boolean;
   onPress: () => void;
 }) {
   return (
     <TouchableOpacity
       onPress={onPress}
+      disabled={disabled}
       className={cn(
         'py-2 px-3.5 rounded-[10px] mr-2 border',
-        active ? 'bg-primary border-primary' : 'bg-surface-raised border-line-neutral'
+        active ? 'bg-primary border-primary' : 'bg-surface-raised border-line-neutral',
+        disabled && 'opacity-40'
       )}
     >
       <Text className={cn('text-[13px] font-semibold', active ? 'text-white' : 'text-ink-subtle')}>
