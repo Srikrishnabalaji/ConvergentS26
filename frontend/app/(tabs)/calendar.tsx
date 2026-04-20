@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import {
   Alert,
   Keyboard,
@@ -15,7 +15,7 @@ import {
 import { Calendar } from 'react-native-calendars';
 import type { CalendarProps, DateData } from 'react-native-calendars';
 import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Notifications from 'expo-notifications';
@@ -262,9 +262,22 @@ export default function CalendarScreen() {
     })();
   }, []);
 
-  useEffect(() => {
-    if (paramGroupIdSingle) setSelectedGroupFilterId(paramGroupIdSingle);
-  }, [paramGroupIdSingle]);
+  // Refresh events and handle group filter when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      // Refresh events when returning to calendar
+      fetchEvents();
+
+      // Set group filter if navigating from group detail
+      if (paramGroupIdSingle) {
+        const groupIdStr = String(paramGroupIdSingle);
+        if (__DEV__) {
+          console.log('[Calendar] Received groupId param:', groupIdStr);
+        }
+        setSelectedGroupFilterId(groupIdStr);
+      }
+    }, [paramGroupIdSingle])
+  );
 
   const eventsVisibleByFilter = useMemo(() => {
     if (!selectedGroupFilterId) return events;

@@ -716,9 +716,12 @@ export default function MyGroupsScreen() {
         onClose={() => setSelectedGroup(null)}
         onNavigateToEvents={(g) => {
           setSelectedGroup(null);
+          if (__DEV__) {
+            console.log('[MyGroups] Navigating to calendar with groupId:', g.id);
+          }
           router.push({
             pathname: '/(tabs)/calendar',
-            params: { groupId: g.id, groupName: g.name },
+            params: { groupId: String(g.id), groupName: g.name },
           });
         }}
       />
