@@ -1,6 +1,8 @@
 pymupdf
 opencv-python-headless
 numpy
+Pillow
 pytesseract
 easyocr
-Pillow
+google-genai
+python-dotenv

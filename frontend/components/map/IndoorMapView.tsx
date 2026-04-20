@@ -12,8 +12,8 @@ import {
   Pressable,
 } from 'react-native';
 import { ScrollView as MapScrollView } from 'react-native-gesture-handler';
-import { Image } from 'expo-image';
 import Svg, { Polyline, Circle } from 'react-native-svg';
+import { SVGFloorPlan } from './SVGFloorPlan';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import {
   type BuildingGraph,
@@ -31,13 +31,10 @@ import {
   type OccupancyGrid,
   type RawGridData,
 } from '@/lib/services/grid-astar';
-import type { ImageProps } from 'expo-image';
-
 // ---------------------------------------------------------------------------
 // Pre-bundled occupancy grids (produced by backend/export_grids.py).
 // Loaded as static JSON assets; decoded once and cached in _decodedGrids.
 // ---------------------------------------------------------------------------
-type FloorImageSource = NonNullable<ImageProps['source']>;
 
 const RAW_FLOOR_GRIDS: Record<string, RawGridData> = {
   f0: require('@/assets/grids/gdc_f0.json'),
@@ -50,19 +47,6 @@ const RAW_FLOOR_GRIDS: Record<string, RawGridData> = {
 };
 // Decoded (bit-unpacked) grids — populated lazily on first use per floor.
 const _decodedGrids: Record<string, OccupancyGrid> = {};
-
-// ---------------------------------------------------------------------------
-// Floor plan image map — maps floorId to require()'d asset
-// ---------------------------------------------------------------------------
-const FLOOR_IMAGES: Record<string, FloorImageSource> = {
-  f0: require('@/assets/floorplans/gdc_floor_1.png'),
-  f1: require('@/assets/floorplans/gdc_floor_2.png'),
-  f2: require('@/assets/floorplans/gdc_floor_3.png'),
-  f3: require('@/assets/floorplans/gdc_floor_4.png'),
-  f4: require('@/assets/floorplans/gdc_floor_5.png'),
-  f5: require('@/assets/floorplans/gdc_floor_6.png'),
-  f6: require('@/assets/floorplans/gdc_floor_7.png'),
-};
 
 const SCREEN = Dimensions.get('window');
 const PRIMARY = '#0B617E';
@@ -433,10 +417,11 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
               style={[styles.mapImageWrap, { width: imageWidth, height: imageHeight }]}
               onPress={placementMode === 'tap' ? handleFloorPlanTap : undefined}
             >
-              <Image
-                source={FLOOR_IMAGES[activeFloorId]}
-                style={StyleSheet.absoluteFill}
-                contentFit="fill"
+              <SVGFloorPlan
+                floorId={activeFloorId}
+                width={imageWidth}
+                height={imageHeight}
+                graph={graph}
               />
               <Svg
                 style={StyleSheet.absoluteFill}
