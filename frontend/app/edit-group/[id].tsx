@@ -683,10 +683,6 @@ function decode(base64: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-// Avatar uses its own initialsFromName; this keeps the previous call site available
-// if external code imports from this file.
-export { initialsFromName };
-
 const styles = StyleSheet.create({
   scrollContent: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 48 },
 });

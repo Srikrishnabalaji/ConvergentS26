@@ -154,7 +154,7 @@ export function astar(
       `[A*] FAILED: No path found. Explored ${closed.size} nodes, ${openSet.length} remaining in queue`,
     );
   }
-  return null; // No path found
+  return null;
 }
 
 // ---------------------------------------------------------------------------

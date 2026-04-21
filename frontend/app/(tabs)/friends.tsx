@@ -411,7 +411,7 @@ export default function FriendsScreen() {
     ).slice(0, 6);
 
     if (utMatches.length > 0) {
-           setPinBuildingSuggestions(
+      setPinBuildingSuggestions(
         utMatches.map((b) => ({ id: b.code, name: b.code, address: b.displayName })),
       );
       setPinBuildingSearching(false);
