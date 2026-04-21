@@ -4,5 +4,3 @@ numpy
 Pillow
 pytesseract
 easyocr
-google-genai
-python-dotenv

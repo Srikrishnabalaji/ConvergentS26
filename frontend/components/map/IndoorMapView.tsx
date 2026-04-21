@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { ScrollView as MapScrollView } from 'react-native-gesture-handler';
 import Svg, { Polyline, Circle } from 'react-native-svg';
-import { SVGFloorPlan } from './SVGFloorPlan';
+import { FloorPlanImage } from './FloorPlanImage';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import {
   type BuildingGraph,
@@ -417,7 +417,7 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
               style={[styles.mapImageWrap, { width: imageWidth, height: imageHeight }]}
               onPress={placementMode === 'tap' ? handleFloorPlanTap : undefined}
             >
-              <SVGFloorPlan
+              <FloorPlanImage
                 floorId={activeFloorId}
                 width={imageWidth}
                 height={imageHeight}

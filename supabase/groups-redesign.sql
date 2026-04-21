@@ -1,5 +1,6 @@
 -- groups-redesign.sql
--- Run this ONCE in Supabase SQL Editor (Dashboard → SQL Editor → New query)
+-- Run this ONCE on an EXISTING database that was set up BEFORE join codes /
+-- private groups were added. For a fresh database, use schema.sql instead.
 --
 -- What this migration does:
 --   1. Adds is_private, join_code, join_password, has_join_password to groups

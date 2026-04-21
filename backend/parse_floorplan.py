@@ -1700,12 +1700,7 @@ def _cache_dir(pdf_path):
 
 
 def parse_pdf(pdf_path, building_name, ocr_engine='easyocr', render_scale=3,
-              hallway_spacing=50, debug=False, debug_dir=None):
-    doc = fitz.open(pdf_path)
-
-    # Check if PDF has a text layer
-    has_text = len(doc[0].get_text("words")) > 0
-
+              debug=False, debug_dir=None):
     # Separate caches: OCR results (slow, stable) vs grids (fast to regenerate)
     cache_dir = _cache_dir(pdf_path)
     h = hashlib.md5(os.path.abspath(pdf_path).encode()).hexdigest()[:12]
@@ -1720,101 +1715,108 @@ def parse_pdf(pdf_path, building_name, ocr_engine='easyocr', render_scale=3,
         except Exception:
             ocr_cached = None
 
-    reader = None
-    if ocr_cached is None and not has_text and ocr_engine in ('easyocr', 'both'):
-        import easyocr
-        print("  Loading EasyOCR engine...", flush=True)
-        reader = easyocr.Reader(['en'], gpu=False, verbose=False)
-
     use_tesseract = ocr_engine in ('tesseract', 'both')
-    if ocr_cached is None and use_tesseract:
-        print("  Tesseract OCR enabled")
 
-    floors, all_nodes, all_edges = [], [], []
+    floors = []
+    all_nodes = []
+    all_edges = []
     ocr_cache_data = {}
 
-    for idx in range(len(doc)):
-        page = doc[idx]
-        pw, ph = page.rect.width, page.rect.height
-        fnum = idx + 1
-        fid = f"f{idx}"
-        fname = f"Floor {fnum}"
-        floors.append({"id": fid, "name": fname, "pageIndex": idx})
+    with fitz.open(pdf_path) as doc:
+        # Check if PDF has a text layer
+        has_text = len(doc[0].get_text("words")) > 0
 
-        print(f"  {fname}  ({pw:.0f}x{ph:.0f} pts)", flush=True)
+        reader = None
+        if ocr_cached is None and not has_text and ocr_engine in ('easyocr', 'both'):
+            import easyocr
+            print("  Loading EasyOCR engine...", flush=True)
+            reader = easyocr.Reader(['en'], gpu=False, verbose=False)
 
-        # Always regenerate grid (fast, ~1 second per floor)
-        print(f"    Rendering occupancy grid (scale={render_scale})...", flush=True)
-        grid, gs = render_occupancy_grid(page, scale=render_scale)
+        if ocr_cached is None and use_tesseract:
+            print("  Tesseract OCR enabled")
 
-        # OCR: use cache if available (slow, ~15 seconds per floor)
-        if ocr_cached and idx in ocr_cached:
-            c = ocr_cached[idx]
-            rooms = [Node(n['id'], n['floor_id'], n['x'], n['y'], n['label'], n['type'],
-                         n.get('group_id')) for n in c['rooms']]
-            pivots = c['pivots']
-            ocr_texts = c.get('ocr_texts', [])
-            print(f"    (cached OCR: {len(rooms)} rooms)", flush=True)
-        else:
-            rooms = []
-            ocr_texts = []
-            if has_text:
-                rooms = extract_rooms_text(page, pw, ph, fid, fnum)
+        for idx in range(len(doc)):
+            page = doc[idx]
+            pw, ph = page.rect.width, page.rect.height
+            fnum = idx + 1
+            fid = f"f{idx}"
+            fname = f"Floor {fnum}"
+            floors.append({"id": fid, "name": fname, "pageIndex": idx})
+    
+            print(f"  {fname}  ({pw:.0f}x{ph:.0f} pts)", flush=True)
+    
+            # Always regenerate grid (fast, ~1 second per floor)
+            print(f"    Rendering occupancy grid (scale={render_scale})...", flush=True)
+            grid, gs = render_occupancy_grid(page, scale=render_scale)
+    
+            # OCR: use cache if available (slow, ~15 seconds per floor)
+            if ocr_cached and idx in ocr_cached:
+                c = ocr_cached[idx]
+                rooms = [Node(n['id'], n['floor_id'], n['x'], n['y'], n['label'], n['type'],
+                             n.get('group_id')) for n in c['rooms']]
+                pivots = c['pivots']
+                ocr_texts = c.get('ocr_texts', [])
+                print(f"    (cached OCR: {len(rooms)} rooms)", flush=True)
             else:
-                if reader:
-                    print(f"    Running EasyOCR (3 passes)...", flush=True)
-                    rooms, ocr_texts = extract_rooms_ocr(page, fid, fnum, reader)
-                if use_tesseract:
-                    print(f"    Running Tesseract OCR...", flush=True)
-                    tess_rooms = extract_rooms_tesseract(page, fid, fnum)
-                    if rooms:
-                        rooms = merge_ocr_results(rooms, tess_rooms)
-                    else:
-                        rooms = tess_rooms
-
-            pivots = extract_door_pivots(page, pw, ph)
-            ocr_cache_data[idx] = {
-                'rooms': [{'id': r.id, 'floor_id': r.floor_id, 'x': r.x, 'y': r.y,
-                           'label': r.label, 'type': r.type, 'group_id': r.group_id}
-                          for r in rooms],
-                'pivots': pivots,
-                'ocr_texts': ocr_texts,
-            }
-
-        # Phase 5: Detect vertical transport (reuses OCR text results)
-        vt_nodes = detect_vertical_transport_ocr(page, fid, fnum, ocr_texts=ocr_texts)
-        for vt in vt_nodes:
-            if not any(dist(vt.x, vt.y, r.x, r.y) < 0.015 for r in rooms):
-                rooms.append(vt)
-
-        nodes = rooms
-
-        # Erase known text regions from the grid (prevents text = walls)
-        erase_text_from_grid(grid, rooms, ocr_texts, gs, pw, ph)
-
-        # Block exterior using convex hull (fast)
-        if nodes:
-            grid = block_exterior_from_rooms(grid, nodes, gs, pw, ph)
-
-        # Phase 4: BFS-based edge building on occupancy grid
-        print(f"    Building edges via BFS pathfinding...", flush=True)
-        edges = build_floor_edges_bfs(nodes, grid, gs, pw, ph)
-
-        # Ensure floor graph is fully connected
-        edges = ensure_connected(nodes, edges, grid, gs, pw, ph)
-
-        print(f"    rooms:{len(rooms)}  doors:{len(pivots)}  "
-              f"edges:{len(edges)}", flush=True)
-
-        # Debug visualization (skeleton computed only for debug)
-        if debug and debug_dir:
-            skeleton, dist_map = extract_hallway_skeleton(grid, min_half_width=8,
-                                                           max_half_width=55)
-            save_debug_images(debug_dir, fname, page, grid, dist_map, skeleton,
-                               nodes, edges, gs, pw, ph)
-
-        all_nodes.extend(nodes)
-        all_edges.extend(edges)
+                rooms = []
+                ocr_texts = []
+                if has_text:
+                    rooms = extract_rooms_text(page, pw, ph, fid, fnum)
+                else:
+                    if reader:
+                        print(f"    Running EasyOCR (3 passes)...", flush=True)
+                        rooms, ocr_texts = extract_rooms_ocr(page, fid, fnum, reader)
+                    if use_tesseract:
+                        print(f"    Running Tesseract OCR...", flush=True)
+                        tess_rooms = extract_rooms_tesseract(page, fid, fnum)
+                        if rooms:
+                            rooms = merge_ocr_results(rooms, tess_rooms)
+                        else:
+                            rooms = tess_rooms
+    
+                pivots = extract_door_pivots(page, pw, ph)
+                ocr_cache_data[idx] = {
+                    'rooms': [{'id': r.id, 'floor_id': r.floor_id, 'x': r.x, 'y': r.y,
+                               'label': r.label, 'type': r.type, 'group_id': r.group_id}
+                              for r in rooms],
+                    'pivots': pivots,
+                    'ocr_texts': ocr_texts,
+                }
+    
+            # Phase 5: Detect vertical transport (reuses OCR text results)
+            vt_nodes = detect_vertical_transport_ocr(page, fid, fnum, ocr_texts=ocr_texts)
+            for vt in vt_nodes:
+                if not any(dist(vt.x, vt.y, r.x, r.y) < 0.015 for r in rooms):
+                    rooms.append(vt)
+    
+            nodes = rooms
+    
+            # Erase known text regions from the grid (prevents text = walls)
+            erase_text_from_grid(grid, rooms, ocr_texts, gs, pw, ph)
+    
+            # Block exterior using convex hull (fast)
+            if nodes:
+                grid = block_exterior_from_rooms(grid, nodes, gs, pw, ph)
+    
+            # Phase 4: BFS-based edge building on occupancy grid
+            print(f"    Building edges via BFS pathfinding...", flush=True)
+            edges = build_floor_edges_bfs(nodes, grid, gs, pw, ph)
+    
+            # Ensure floor graph is fully connected
+            edges = ensure_connected(nodes, edges, grid, gs, pw, ph)
+    
+            print(f"    rooms:{len(rooms)}  doors:{len(pivots)}  "
+                  f"edges:{len(edges)}", flush=True)
+    
+            # Debug visualization (skeleton computed only for debug)
+            if debug and debug_dir:
+                skeleton, dist_map = extract_hallway_skeleton(grid, min_half_width=8,
+                                                               max_half_width=55)
+                save_debug_images(debug_dir, fname, page, grid, dist_map, skeleton,
+                                   nodes, edges, gs, pw, ph)
+    
+            all_nodes.extend(nodes)
+            all_edges.extend(edges)
 
     # Save OCR cache if we computed fresh OCR data
     if ocr_cache_data:
@@ -1849,8 +1851,6 @@ def main():
                     default='easyocr', help="OCR engine to use (default: easyocr)")
     ap.add_argument("--render-scale", type=int, default=3,
                     help="Occupancy grid render scale (default: 3)")
-    ap.add_argument("--hallway-spacing", type=int, default=100,
-                    help="Pixel spacing for hallway node placement (default: 100)")
     ap.add_argument("--debug", action='store_true',
                     help="Save debug visualization PNGs")
     args = ap.parse_args()
@@ -1863,7 +1863,6 @@ def main():
     print(f"Parsing {args.pdf}...")
     data = parse_pdf(args.pdf, args.building, ocr_engine=args.ocr_engine,
                      render_scale=args.render_scale,
-                     hallway_spacing=args.hallway_spacing,
                      debug=args.debug, debug_dir=debug_dir)
 
     with open(out, "w") as f:

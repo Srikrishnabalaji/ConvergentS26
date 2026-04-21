@@ -16,28 +16,28 @@ def main():
     parser.add_argument("--prefix", default="floor", help="Filename prefix")
     args = parser.parse_args()
 
-    doc = fitz.open(args.pdf)
     os.makedirs(args.outdir, exist_ok=True)
 
-    for i, page in enumerate(doc):
-        pw, ph = page.rect.width, page.rect.height
+    with fitz.open(args.pdf) as doc:
+        for i, page in enumerate(doc):
+            pw, ph = page.rect.width, page.rect.height
 
-        # Crop: remove top 8%, bottom 16% (UT logo + title block), sides 3%
-        clip = fitz.Rect(
-            pw * 0.03,       # left
-            ph * 0.06,       # top
-            pw * 0.97,       # right
-            ph * 0.84,       # bottom
-        )
+            # Crop: remove top 6%, bottom 16% (UT logo + title block), sides 3%
+            clip = fitz.Rect(
+                pw * 0.03,       # left
+                ph * 0.06,       # top
+                pw * 0.97,       # right
+                ph * 0.84,       # bottom
+            )
 
-        mat = fitz.Matrix(args.scale, args.scale)
-        pix = page.get_pixmap(matrix=mat, clip=clip)
+            mat = fitz.Matrix(args.scale, args.scale)
+            pix = page.get_pixmap(matrix=mat, clip=clip)
 
-        out_path = os.path.join(args.outdir, f"{args.prefix}_{i+1}.png")
-        pix.save(out_path)
-        print(f"  Page {i+1} → {out_path}  ({pix.width}x{pix.height})")
+            out_path = os.path.join(args.outdir, f"{args.prefix}_{i+1}.png")
+            pix.save(out_path)
+            print(f"  Page {i+1} → {out_path}  ({pix.width}x{pix.height})")
 
-    print(f"\nDone — {len(doc)} pages extracted to {args.outdir}/")
+        print(f"\nDone — {len(doc)} pages extracted to {args.outdir}/")
 
 if __name__ == "__main__":
     main()
