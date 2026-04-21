@@ -9,11 +9,14 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "NSLocationWhenInUseUsageDescription": "This app uses your location to show nearby places.",
-      "NSLocationAlwaysUsageDescription": "This app uses your location in the background.",
-      "NSLocationAlwaysAndWhenInUseUsageDescription": "This app uses your location to provide location-based features.",
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.wavepoint"
+      "bundleIdentifier": "com.keshavpartha.wavepoint",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "This app uses your location to show nearby places.",
+        "NSLocationAlwaysUsageDescription": "This app uses your location in the background.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app uses your location to provide location-based features.",
+        "NSMotionUsageDescription": "WavePoint uses motion sensors to track your steps for indoor navigation."
+      }
     },
     "android": {
       "adaptiveIcon": {

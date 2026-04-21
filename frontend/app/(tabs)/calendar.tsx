@@ -18,8 +18,8 @@ import type { DateTimePickerEvent } from '@react-native-community/datetimepicker
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import * as Notifications from 'expo-notifications';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+// expo-notifications removed (requires paid Apple Developer account)
+// import * as Notifications from 'expo-notifications';
 import { supabase } from '@/lib/supabase';
 import { geocodeSearch, type SearchItem, GeocodingNetworkError } from '@/lib/services/geocoding';
 import { DEFAULT_USER_LOCATION } from '@/constants/map';
@@ -163,15 +163,7 @@ function eventGroupId(e: { groupId?: unknown; group_id?: unknown }): string | nu
 
 const TODAY = getTodayString();
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+// Notifications disabled (requires paid Apple Developer account)
 
 export default function CalendarScreen() {
   const router = useRouter();
@@ -268,12 +260,7 @@ export default function CalendarScreen() {
 
   useEffect(() => {
     fetchEvents();
-    (async () => {
-      const { status: existingStatus } = await Notifications.getPermissionsAsync();
-      if (existingStatus !== 'granted') {
-        await Notifications.requestPermissionsAsync();
-      }
-    })();
+    // Notification permissions disabled
   }, []);
 
   // Refresh events and handle group filter when screen comes into focus
@@ -541,18 +528,7 @@ export default function CalendarScreen() {
         timeValue.getMinutes()
       );
       const triggerDate = new Date(eventTime.getTime() - newEvent.notifyInAdvance * 60000);
-      if (triggerDate > new Date()) {
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title: newEvent.title,
-            body: combinedLocation ? `Head to ${combinedLocation}` : 'Your event is starting!',
-            sound: true,
-          },
-          trigger: { type: 'date', date: triggerDate } as Notifications.DateTriggerInput,
-        });
-      } else {
-        Alert.alert('Note', "The notification time is in the past — you won't be notified for this event.");
-      }
+      // Notifications disabled — skip scheduling
     }
 
     const eventId = editingEventId ?? Date.now().toString();
@@ -902,7 +878,6 @@ type EventFormModalProps = {
 };
 
 function EventFormModal(props: EventFormModalProps) {
-  const insets = useSafeAreaInsets();
   const {
     visible,
     onClose,
@@ -931,259 +906,233 @@ function EventFormModal(props: EventFormModalProps) {
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable onPress={onClose} className="flex-1 bg-[rgba(15,23,42,0.45)] justify-end">
-        <Pressable
-          onPress={(e) => e.stopPropagation()}
-          style={shadows.sheet}
-          className="bg-white rounded-t-[28px] w-full max-h-[90%] overflow-hidden"
-        >
-          <KeyboardAvoidingView 
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        className="flex-1"
+      >
+        <Pressable onPress={onClose} className="flex-1 bg-[rgba(15,23,42,0.45)] justify-end">
+          <Pressable
+            onPress={(e) => e.stopPropagation()}
+            style={shadows.sheet}
+            className="bg-white rounded-t-3xl"
           >
-            <View className="self-center w-12 h-[5px] rounded-full bg-slate-300 mt-3 mb-2" />
-            <View className="px-5 pb-3.5 pt-2 border-b border-line">
-              <Text className="text-[22px] font-bold text-primary mb-0.5">
-                {editingEventId ? 'Edit Event' : 'New Event'}
-              </Text>
-              <Text className="text-[13px] text-ink-subtle font-medium">
-                {formatSelectedDate(selectedDate)}
-              </Text>
-            </View>
-
-            <ScrollView
-              className="shrink px-5 pt-1"
-              contentContainerClassName="pb-4"
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-            >
-              <FormLabel
-                onInfoPress={
-                  groups.length > 0
-                    ? () => Alert.alert('Group Events', "Only admins can create group events. Disabled groups are ones you're not an admin of.")
-                    : undefined
-                }
-              >
-                Group
-              </FormLabel>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-1 mt-1" contentContainerStyle={{ flexGrow: 0 }}>
-                <FormChip
-                  label="None"
-                  active={!newEvent.groupId}
-                  onPress={() => setNewEvent((prev) => ({ ...prev, groupId: null }))}
-                />
-                {/* Admin groups first */}
-                {groups
-                  .filter((group) => adminGroupIds.has(group.id))
-                  .map((group) => (
-                    <FormChip
-                      key={group.id}
-                      label={group.name}
-                      active={String(newEvent.groupId) === String(group.id)}
-                      disabled={false}
-                      onPress={() => {
-                        setNewEvent((prev) => ({ ...prev, groupId: String(group.id) }));
-                      }}
-                    />
-                  ))}
-                {/* Non-admin groups after */}
-                {groups
-                  .filter((group) => !adminGroupIds.has(group.id))
-                  .map((group) => (
-                    <FormChip
-                      key={group.id}
-                      label={group.name}
-                      active={String(newEvent.groupId) === String(group.id)}
-                      disabled={true}
-                      onPress={() => {}}
-                    />
-                  ))}
-              </ScrollView>
-
-              <FormLabel>Event Title *</FormLabel>
-              <FormInput
-                placeholder="e.g. CS313E Class"
-                value={newEvent.title}
-                onChangeText={(text) => setNewEvent((prev) => ({ ...prev, title: text }))}
-              />
-
-              <FormLabel>Location</FormLabel>
-              <View className="flex-row items-start gap-2">
-                <View className="flex-1">
-                  <FormInput
-                    placeholder="Building (GDC, PCL…)"
-                    value={newEvent.building}
-                    onChangeText={onBuildingChange}
-                  />
-                  {locationSearching && <Text className="text-ink-dim text-xs mt-1">Searching…</Text>}
-                  {locationSuggestions.length > 0 && (
-                    <View className="mt-1 border border-line-neutral rounded-xl bg-white overflow-hidden">
-                      {locationSuggestions.map((item) => (
-                        <TouchableOpacity
-                          key={item.id}
-                          className="flex-row items-center py-2.5 px-3.5 border-b border-line-neutral"
-                          onPress={() => onSelectBuildingSuggestion(item)}
-                        >
-                          <MaterialIcons name="location-on" size={16} color={PRIMARY} style={{ marginRight: 8 }} />
-                          <View className="flex-1">
-                            <Text className="text-sm font-semibold text-ink" numberOfLines={1}>
-                              {item.name}
-                            </Text>
-                            {item.address ? (
-                              <Text className="text-xs text-ink-dim mt-[1px]" numberOfLines={1}>
-                                {item.address}
-                              </Text>
-                            ) : null}
-                          </View>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  )}
-                </View>
-                <View style={{ width: 90 }}>
-                  <FormInput
-                    placeholder="Room"
-                    value={newEvent.room}
-                    onChangeText={onRoomChange}
-                    editable={!!newEvent.building.trim()}
-                    className={!newEvent.building.trim() ? 'opacity-50' : ''}
-                  />
-                  {roomSearching && <Text className="text-ink-dim text-xs mt-1">…</Text>}
-                  {roomSuggestions.length > 0 && (
-                    <View className="mt-1 border border-line-neutral rounded-xl bg-white overflow-hidden">
-                      {roomSuggestions.map((node) => (
-                        <TouchableOpacity
-                          key={node.id}
-                          className="flex-row items-center py-2.5 px-3.5 border-b border-line-neutral"
-                          onPress={() => onSelectRoomSuggestion(node)}
-                        >
-                          <Text className="text-sm font-semibold text-ink">{node.label}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  )}
-                  {roomError ? <Text className="text-danger text-xs mt-1">{roomError}</Text> : null}
-                </View>
+            <View style={{ maxHeight: '88%' }}>
+              <View className="self-center w-10 h-[5px] rounded-[3px] bg-[#d4d8de] mt-3 mb-1" />
+              <View className="px-5 pb-3.5 pt-2 border-b border-line">
+                <Text className="text-[22px] font-bold text-primary mb-0.5">
+                  {editingEventId ? 'Edit Event' : 'New Event'}
+                </Text>
+                <Text className="text-[13px] text-ink-subtle font-medium">
+                  {formatSelectedDate(selectedDate)}
+                </Text>
               </View>
 
-              <FormLabel>Time *</FormLabel>
-              <TouchableOpacity
-                className="flex-row items-center border border-line-neutral rounded-xl p-3.5 bg-surface-subtle"
-                onPress={() => setShowTimePicker(true)}
+              <ScrollView
+                className="px-5 pt-1"
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
               >
-                <MaterialIcons name="access-time" size={20} color={PRIMARY} style={{ marginRight: 8 }} />
-                <Text className={cn('text-base', newEvent.time ? 'text-ink' : 'text-ink-faint')}>
-                  {newEvent.time || 'Tap to select time'}
-                </Text>
-              </TouchableOpacity>
-              {showTimePicker && (
-                <View
-                  className={cn(
-                    Platform.OS === 'ios' &&
-                      'bg-surface-subtle rounded-xl mt-2 overflow-hidden border border-line-neutral'
-                  )}
-                >
-                  <DateTimePicker
-                    value={timeValue}
-                    mode="time"
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    onChange={onTimeChange}
-                    textColor="#000000"
-                    themeVariant="light"
-                  />
-                  {Platform.OS === 'ios' && (
-                    <TouchableOpacity
-                      className="bg-line-neutral p-3 items-center"
-                      onPress={() => setShowTimePicker(false)}
-                    >
-                      <Text className="text-base font-semibold text-primary">Done</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              )}
-
-              <FormLabel>Alert</FormLabel>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-1 mt-1">
-                {[
-                  { label: 'None', value: null },
-                  { label: 'At start', value: 0 },
-                  { label: '10 min before', value: 10 },
-                  { label: '1 hour before', value: 60 },
-                ].map((option) => (
+                <FormLabel>Group</FormLabel>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-1 mt-1" contentContainerStyle={{ flexGrow: 0 }}>
                   <FormChip
-                    key={option.label}
-                    label={option.label}
-                    active={newEvent.notifyInAdvance === option.value}
-                    onPress={() =>
-                      setNewEvent((prev) => ({
-                        ...prev,
-                        notifyInAdvance: option.value,
-                        notify: option.value !== null,
-                      }))
-                    }
+                    label="None"
+                    active={!newEvent.groupId}
+                    onPress={() => setNewEvent((prev) => ({ ...prev, groupId: null }))}
                   />
-                ))}
+                  {/* Admin groups first */}
+                  {groups
+                    .filter((group) => adminGroupIds.has(group.id))
+                    .map((group) => (
+                      <FormChip
+                        key={group.id}
+                        label={group.name}
+                        active={String(newEvent.groupId) === String(group.id)}
+                        disabled={false}
+                        onPress={() => {
+                          setNewEvent((prev) => ({ ...prev, groupId: String(group.id) }));
+                        }}
+                      />
+                    ))}
+                  {/* Non-admin groups after */}
+                  {groups
+                    .filter((group) => !adminGroupIds.has(group.id))
+                    .map((group) => (
+                      <FormChip
+                        key={group.id}
+                        label={group.name}
+                        active={String(newEvent.groupId) === String(group.id)}
+                        disabled={true}
+                        onPress={() => {}}
+                      />
+                    ))}
+                </ScrollView>
+                {groups.length > 0 && groups.some(g => !adminGroupIds.has(g.id)) && (
+                  <Text className="text-[11px] text-ink-dim mt-1 mb-1">
+                    Only admins can create group events. Disabled groups are ones you&apos;re not an admin of.
+                  </Text>
+                )}
+
+                <FormLabel>Event Title *</FormLabel>
+                <FormInput
+                  placeholder="e.g. CS313E Class"
+                  value={newEvent.title}
+                  onChangeText={(text) => setNewEvent((prev) => ({ ...prev, title: text }))}
+                />
+
+                <FormLabel>Location</FormLabel>
+                <View className="flex-row items-start gap-2">
+                  <View className="flex-1">
+                    <FormInput
+                      placeholder="Building (GDC, PCL…)"
+                      value={newEvent.building}
+                      onChangeText={onBuildingChange}
+                    />
+                    {locationSearching && <Text className="text-ink-dim text-xs mt-1">Searching…</Text>}
+                    {locationSuggestions.length > 0 && (
+                      <View className="mt-1 border border-line-neutral rounded-xl bg-white overflow-hidden">
+                        {locationSuggestions.map((item) => (
+                          <TouchableOpacity
+                            key={item.id}
+                            className="flex-row items-center py-2.5 px-3.5 border-b border-line-neutral"
+                            onPress={() => onSelectBuildingSuggestion(item)}
+                          >
+                            <MaterialIcons name="location-on" size={16} color={PRIMARY} style={{ marginRight: 8 }} />
+                            <View className="flex-1">
+                              <Text className="text-sm font-semibold text-ink" numberOfLines={1}>
+                                {item.name}
+                              </Text>
+                              {item.address ? (
+                                <Text className="text-xs text-ink-dim mt-[1px]" numberOfLines={1}>
+                                  {item.address}
+                                </Text>
+                              ) : null}
+                            </View>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                  <View style={{ width: 90 }}>
+                    <FormInput
+                      placeholder="Room"
+                      value={newEvent.room}
+                      onChangeText={onRoomChange}
+                      editable={!!newEvent.building.trim()}
+                      className={!newEvent.building.trim() ? 'opacity-50' : ''}
+                    />
+                    {roomSearching && <Text className="text-ink-dim text-xs mt-1">…</Text>}
+                    {roomSuggestions.length > 0 && (
+                      <View className="mt-1 border border-line-neutral rounded-xl bg-white overflow-hidden">
+                        {roomSuggestions.map((node) => (
+                          <TouchableOpacity
+                            key={node.id}
+                            className="flex-row items-center py-2.5 px-3.5 border-b border-line-neutral"
+                            onPress={() => onSelectRoomSuggestion(node)}
+                          >
+                            <Text className="text-sm font-semibold text-ink">{node.label}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+                    {roomError ? <Text className="text-danger text-xs mt-1">{roomError}</Text> : null}
+                  </View>
+                </View>
+
+                <FormLabel>Time *</FormLabel>
+                <TouchableOpacity
+                  className="flex-row items-center border border-line-neutral rounded-xl p-3.5 bg-surface-subtle"
+                  onPress={() => setShowTimePicker(true)}
+                >
+                  <MaterialIcons name="access-time" size={20} color={PRIMARY} style={{ marginRight: 8 }} />
+                  <Text className={cn('text-base', newEvent.time ? 'text-ink' : 'text-ink-faint')}>
+                    {newEvent.time || 'Tap to select time'}
+                  </Text>
+                </TouchableOpacity>
+                {showTimePicker && (
+                  <View
+                    className={cn(
+                      Platform.OS === 'ios' &&
+                        'bg-surface-subtle rounded-xl mt-2 overflow-hidden border border-line-neutral'
+                    )}
+                  >
+                    <DateTimePicker
+                      value={timeValue}
+                      mode="time"
+                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                      onChange={onTimeChange}
+                      textColor="#000000"
+                      themeVariant="light"
+                    />
+                    {Platform.OS === 'ios' && (
+                      <TouchableOpacity
+                        className="bg-line-neutral p-3 items-center"
+                        onPress={() => setShowTimePicker(false)}
+                      >
+                        <Text className="text-base font-semibold text-primary">Done</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+
+                <FormLabel>Alert</FormLabel>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-1 mt-1">
+                  {[
+                    { label: 'None', value: null },
+                    { label: 'At start', value: 0 },
+                    { label: '10 min before', value: 10 },
+                    { label: '1 hour before', value: 60 },
+                  ].map((option) => (
+                    <FormChip
+                      key={option.label}
+                      label={option.label}
+                      active={newEvent.notifyInAdvance === option.value}
+                      onPress={() =>
+                        setNewEvent((prev) => ({
+                          ...prev,
+                          notifyInAdvance: option.value,
+                          notify: option.value !== null,
+                        }))
+                      }
+                    />
+                  ))}
+                </ScrollView>
+
+                {editingEventId && (
+                  <TouchableOpacity
+                    className="flex-row items-center justify-center bg-danger-bgAlt py-3.5 rounded-xl mb-2 mt-2 border border-danger-borderAlt"
+                    onPress={onDelete}
+                  >
+                    <MaterialIcons name="delete-outline" size={18} color="#dc2626" style={{ marginRight: 6 }} />
+                    <Text className="text-[15px] font-semibold text-danger">Delete Event</Text>
+                  </TouchableOpacity>
+                )}
               </ScrollView>
 
-              {editingEventId && (
+              <View className="flex-row p-5 pt-3 border-t border-line-faint">
                 <TouchableOpacity
-                  className="flex-row items-center justify-center bg-danger-bgAlt py-3.5 rounded-xl mb-2 mt-2 border border-danger-borderAlt"
-                  onPress={onDelete}
+                  onPress={onClose}
+                  className="flex-1 py-3.5 rounded-xl bg-surface-raised items-center mr-2"
                 >
-                  <MaterialIcons name="delete-outline" size={18} color="#dc2626" style={{ marginRight: 6 }} />
-                  <Text className="text-[15px] font-semibold text-danger">Delete Event</Text>
+                  <Text className="text-base font-semibold text-ink-subtle">Cancel</Text>
                 </TouchableOpacity>
-              )}
-            </ScrollView>
-
-            <View 
-              className="flex-row px-5 pt-3 border-t border-line-faint"
-              style={{ paddingBottom: Math.max(insets.bottom, 16) }}
-            >
-              <TouchableOpacity
-                onPress={onClose}
-                className="flex-1 py-3.5 rounded-xl bg-surface-raised items-center mr-2"
-              >
-                <Text className="text-base font-semibold text-ink-subtle">Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={onSave}
-                className="flex-1 py-3.5 rounded-xl bg-primary items-center ml-2"
-              >
-                <Text className="text-base font-bold text-white">
-                  {editingEventId ? 'Update' : 'Save'}
-                </Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={onSave}
+                  className="flex-1 py-3.5 rounded-xl bg-primary items-center ml-2"
+                >
+                  <Text className="text-base font-bold text-white">
+                    {editingEventId ? 'Update' : 'Save'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          </KeyboardAvoidingView>
+          </Pressable>
         </Pressable>
-      </Pressable>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
-function FormLabel({
-  children,
-  onInfoPress,
-}: {
-  children: React.ReactNode;
-  onInfoPress?: () => void;
-}) {
-  if (onInfoPress) {
-    return (
-      <View className="flex-row items-center mb-2 mt-4">
-        <Text className="text-[11px] font-bold text-ink-subtle tracking-[0.8px] uppercase">
-          {children}
-        </Text>
-        <TouchableOpacity
-          className="ml-2"
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          onPress={onInfoPress}
-        >
-          <MaterialIcons name="info-outline" size={16} color="#94a3b8" />
-        </TouchableOpacity>
-      </View>
-    );
-  }
+function FormLabel({ children }: { children: React.ReactNode }) {
   return (
     <Text className="text-[11px] font-bold text-ink-subtle mb-2 mt-4 tracking-[0.8px] uppercase">
       {children}
