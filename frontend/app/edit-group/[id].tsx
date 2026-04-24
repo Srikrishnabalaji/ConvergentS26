@@ -70,7 +70,6 @@ export default function EditGroupScreen() {
 
   const [enablePassword, setEnablePassword] = useState(false);
   const [passwordValue, setPasswordValue] = useState('');
-  /** True if group already had a join password when the screen loaded (value is not fetched for security). */
   const [hadJoinPasswordOnLoad, setHadJoinPasswordOnLoad] = useState(false);
 
   const [joinCode, setJoinCode] = useState<string | null>(null);
@@ -85,6 +84,10 @@ export default function EditGroupScreen() {
 
   const [members, setMembers] = useState<MemberRow[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
+  
+  // Member Management Modal State
+  const [showMembersModal, setShowMembersModal] = useState(false);
+  const [memberSearch, setMemberSearch] = useState('');
 
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
   const [loadingRequests, setLoadingRequests] = useState(false);
@@ -109,6 +112,14 @@ export default function EditGroupScreen() {
       .sort((a, b) => (a.joined_at! < b.joined_at! ? -1 : 1));
     return admins[0]?.user_id ?? null;
   }, [members]);
+
+  const filteredMembers = useMemo(() => {
+    const q = memberSearch.trim().toLowerCase();
+    if (!q) return members;
+    return members.filter((m) =>
+      (m.profiles?.full_name ?? 'Member').toLowerCase().includes(q)
+    );
+  }, [members, memberSearch]);
 
   const showPasswordOption = isAdmin && !isPrivate && !isCampusOrg;
   const showJoinCode = isAdmin && isPrivate;
@@ -262,6 +273,33 @@ export default function EditGroupScreen() {
       return;
     }
     loadMembers(id);
+  }
+
+  async function removeMember(targetUserId: string) {
+    if (!id) return;
+    Alert.alert(
+      'Remove Member',
+      'Are you sure you want to remove this member from the group?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await supabase
+              .from('group_members')
+              .delete()
+              .eq('group_id', id)
+              .eq('user_id', targetUserId);
+            if (error) {
+              Alert.alert('Error', error.message);
+            } else {
+              loadMembers(id);
+            }
+          },
+        },
+      ]
+    );
   }
 
   useEffect(() => {
@@ -509,6 +547,35 @@ export default function EditGroupScreen() {
     );
   }
 
+  const openMemberOptions = (m: MemberRow) => {
+    const isMe = m.user_id === myUserId;
+    const canMakeAdmin = myRole === 'admin' && !isMe && m.role === 'member';
+    const canRemoveAdmin = myRole === 'admin' && myUserId === originalAdminId && !isMe && (m.role === 'admin' || m.role === 'editor');
+    const canRemoveMember = myRole === 'admin' && !isMe;
+
+    if (!canMakeAdmin && !canRemoveAdmin && !canRemoveMember) return;
+
+    const options: any[] = [];
+
+    if (canMakeAdmin) {
+      options.push({ text: 'Make admin', onPress: () => setMemberRole(m.user_id, 'admin') });
+    }
+    if (canRemoveAdmin) {
+      options.push({ text: 'Revoke admin', onPress: () => setMemberRole(m.user_id, 'member') });
+    }
+    if (canRemoveMember) {
+      options.push({ text: 'Remove from group', style: 'destructive', onPress: () => removeMember(m.user_id) });
+    }
+    
+    options.push({ text: 'Cancel', style: 'cancel' });
+
+    Alert.alert(
+      m.profiles?.full_name ?? 'Member',
+      'Manage group member',
+      options
+    );
+  };
+
   if (loadingGroup) {
     return (
       <SafeAreaView className="flex-1 bg-white">
@@ -731,25 +798,37 @@ export default function EditGroupScreen() {
               </>
             )}
 
-            <View className="flex-row items-center justify-between mt-6 mb-1">
-              <SectionLabel>
+            <View className="flex-row items-center mt-6 mb-3">
+              <SectionLabel className="mb-0">
                 {`INVITES${sentInvites.length > 0 ? ` (${sentInvites.length})` : ''}`}
               </SectionLabel>
               <TouchableOpacity
-                className="flex-row items-center px-3 py-1.5 rounded-lg bg-primary"
-                onPress={() => {
-                  setInviteSearch('');
-                  setInviteSearchResults([]);
-                  setShowInviteModal(true);
-                }}
+                className="ml-2 mb-1"
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                onPress={() => Alert.alert('Invites', "Invite people directly. They'll see the invite in their Groups tab.")}
               >
-                <MaterialIcons name="person-add" size={14} color="#fff" style={{ marginRight: 4 }} />
-                <Text className="text-xs font-semibold text-white">Invite</Text>
+                <MaterialIcons name="info-outline" size={18} color="#94a3b8" />
               </TouchableOpacity>
             </View>
-            <Text className="text-xs text-ink-muted mb-2 leading-[17px]">
-              Invite people directly. They&apos;ll see the invite in their Groups tab.
-            </Text>
+
+            <TouchableOpacity
+              className="flex-row items-center justify-between px-4 py-3.5 bg-surface-subtle border border-line-neutral rounded-2xl mb-3"
+              activeOpacity={0.7}
+              onPress={() => {
+                setInviteSearch('');
+                setInviteSearchResults([]);
+                setShowInviteModal(true);
+              }}
+            >
+              <View className="flex-row items-center gap-3">
+                <MaterialIcons name="person-add" size={22} color="#475569" />
+                <Text className="text-[15px] font-medium text-ink-strong">
+                  Invite members
+                </Text>
+              </View>
+              <MaterialIcons name="chevron-right" size={20} color="#94a3b8" />
+            </TouchableOpacity>
+
             {loadingSentInvites ? (
               <View className="py-4 items-center">
                 <ActivityIndicator color={PRIMARY_HEX} />
@@ -790,46 +869,40 @@ export default function EditGroupScreen() {
               </View>
             )}
 
-            <SectionLabel className="mt-6 mb-1">MEMBERS</SectionLabel>
-            <Text className="text-xs text-ink-muted mb-2 leading-[17px]">
-              Admins have full control of the group.
-            </Text>
+            <View className="flex-row items-center mt-6 mb-3">
+              <SectionLabel className="mb-0">
+                {`MEMBERS${members.length > 0 ? ` (${members.length})` : ''}`}
+              </SectionLabel>
+              <TouchableOpacity
+                className="ml-2 mb-1"
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                onPress={() => Alert.alert('Members', 'Admins have full control of the group.')}
+              >
+                <MaterialIcons name="info-outline" size={18} color="#94a3b8" />
+              </TouchableOpacity>
+            </View>
+            
             {loadingMembers ? (
               <View className="py-4 items-center">
                 <ActivityIndicator color={PRIMARY_HEX} />
               </View>
             ) : (
-              <View className="border border-line-neutral rounded-2xl overflow-hidden mb-2">
-                {members.map((m) => (
-                  <View
-                    key={m.user_id}
-                    className="flex-row items-center justify-between px-3.5 py-3 border-b border-line-muted/40 bg-white"
-                  >
-                    <View className="flex-1 mr-2">
-                      <Text className="text-[15px] text-ink-strong font-medium" numberOfLines={1}>
-                        {m.profiles?.full_name ?? 'Member'}
-                      </Text>
-                      <Text className="text-xs text-ink-muted mt-0.5 capitalize">{m.role}</Text>
-                    </View>
-                    {myRole === 'admin' && m.user_id !== myUserId && m.role === 'member' && (
-                      <TouchableOpacity
-                        className="px-3 py-1.5 rounded-lg bg-primary/10"
-                        onPress={() => setMemberRole(m.user_id, 'admin')}
-                      >
-                        <Text className="text-xs font-semibold text-primary">Make admin</Text>
-                      </TouchableOpacity>
-                    )}
-                    {myRole === 'admin' && myUserId === originalAdminId && m.user_id !== myUserId && (m.role === 'admin' || m.role === 'editor') && (
-                      <TouchableOpacity
-                        className="px-3 py-1.5 rounded-lg bg-surface-alt"
-                        onPress={() => setMemberRole(m.user_id, 'member')}
-                      >
-                        <Text className="text-xs font-semibold text-ink-muted">Remove admin</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                ))}
-              </View>
+              <TouchableOpacity
+                className="flex-row items-center justify-between px-4 py-3.5 bg-surface-subtle border border-line-neutral rounded-2xl mb-2"
+                activeOpacity={0.7}
+                onPress={() => {
+                  setMemberSearch('');
+                  setShowMembersModal(true);
+                }}
+              >
+                <View className="flex-row items-center gap-3">
+                  <MaterialIcons name="people-outline" size={22} color="#475569" />
+                  <Text className="text-[15px] font-medium text-ink-strong">
+                    Manage members
+                  </Text>
+                </View>
+                <MaterialIcons name="chevron-right" size={20} color="#94a3b8" />
+              </TouchableOpacity>
             )}
           </>
         )}
@@ -883,6 +956,7 @@ export default function EditGroupScreen() {
         <View className="h-8" />
       </ScrollView>
 
+      {/* Invite Modal */}
       <Modal
         visible={showInviteModal}
         transparent
@@ -893,12 +967,12 @@ export default function EditGroupScreen() {
           className="flex-1 bg-[rgba(15,23,42,0.5)] justify-end"
           onPress={() => setShowInviteModal(false)}
         >
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-            <Pressable
-              onPress={(e) => e.stopPropagation()}
-              style={shadows.sheet}
-              className="bg-white rounded-t-[28px] w-full max-h-[80%] overflow-hidden"
-            >
+          <Pressable
+            onPress={(e) => e.stopPropagation()}
+            style={shadows.sheet}
+            className="bg-white rounded-t-[28px] w-full h-[85%] overflow-hidden"
+          >
+            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} className="flex-1">
               <View className="self-center w-10 h-[5px] rounded-[3px] bg-[#d4d8de] mt-3 mb-2" />
               <View className="flex-row items-center justify-between px-5 pt-2 pb-3">
                 <Text className="text-[19px] font-bold text-ink-strong">Invite Members</Text>
@@ -973,10 +1047,130 @@ export default function EditGroupScreen() {
                   </View>
                 )}
               </ScrollView>
-            </Pressable>
-          </KeyboardAvoidingView>
+            </KeyboardAvoidingView>
+          </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Manage Members Modal */}
+      <Modal
+        visible={showMembersModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowMembersModal(false)}
+      >
+        <Pressable
+          className="flex-1 bg-[rgba(15,23,42,0.5)] justify-end"
+          onPress={() => setShowMembersModal(false)}
+        >
+          <Pressable
+            onPress={(e) => e.stopPropagation()}
+            style={shadows.sheet}
+            className="bg-white rounded-t-[28px] w-full h-[85%] overflow-hidden"
+          >
+            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} className="flex-1">
+              {/* Handle */}
+              <View className="self-center w-12 h-[5px] rounded-full bg-slate-300 mt-3 mb-2" />
+              
+              {/* Header */}
+              <View className="flex-row items-center justify-between px-5 pt-2 pb-4">
+                <Text className="text-[20px] font-bold text-ink-strong tracking-tight">Members</Text>
+                <TouchableOpacity 
+                  onPress={() => setShowMembersModal(false)} 
+                  className="w-8 h-8 rounded-full bg-surface-subtle items-center justify-center"
+                >
+                  <MaterialIcons name="close" size={20} color="#64748b" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Search */}
+              <View className="px-5 pb-4">
+                <View className="flex-row items-center bg-surface-subtle border border-line-neutral rounded-xl px-3.5 py-2.5">
+                  <MaterialIcons name="search" size={20} color="#94a3b8" style={{ marginRight: 8 }} />
+                  <TextInput
+                    className="flex-1 text-[15px] text-ink-strong"
+                    placeholder="Search people..."
+                    placeholderTextColor="#94a3b8"
+                    value={memberSearch}
+                    onChangeText={setMemberSearch}
+                    autoCapitalize="words"
+                    returnKeyType="search"
+                  />
+                  {memberSearch.length > 0 && (
+                    <TouchableOpacity onPress={() => setMemberSearch('')} hitSlop={10}>
+                      <MaterialIcons name="cancel" size={18} color="#94a3b8" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+
+              {/* List */}
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ paddingBottom: 40 }}
+              >
+                {filteredMembers.length === 0 ? (
+                  <View className="py-10 items-center">
+                    <View className="w-16 h-16 rounded-full bg-surface-subtle items-center justify-center mb-4">
+                      <MaterialIcons name="search-off" size={28} color="#94a3b8" />
+                    </View>
+                    <Text className="text-[15px] font-medium text-ink-strong">No members found</Text>
+                    <Text className="text-sm text-ink-muted mt-1">Try a different name.</Text>
+                  </View>
+                ) : (
+                  <View>
+                    {filteredMembers.map((m) => {
+                      const isMe = m.user_id === myUserId;
+                      const canManage = myRole === 'admin' && !isMe && (m.role !== 'admin' || myUserId === originalAdminId);
+
+                      return (
+                        <TouchableOpacity
+                          key={m.user_id}
+                          activeOpacity={canManage ? 0.6 : 1}
+                          onPress={() => canManage && openMemberOptions(m)}
+                          className="flex-row items-center justify-between px-5 py-3.5 bg-white"
+                        >
+                          <View className="flex-1 mr-3 flex-row items-center">
+                            <Avatar name={m.profiles?.full_name} size="md" className="mr-3" />
+                            <View className="flex-1 flex-row items-center pr-2">
+                              <Text className="text-[16px] text-ink-strong font-medium" numberOfLines={1}>
+                                {m.profiles?.full_name ?? 'Member'}
+                              </Text>
+                              {isMe && (
+                                <Text className="text-[15px] text-ink-muted ml-1.5">(You)</Text>
+                              )}
+                            </View>
+                          </View>
+                          
+                          <View className="flex-row items-center gap-2">
+                            {/* Role Badge */}
+                            {m.role === 'admin' && (
+                              <View className="bg-primary/10 px-2.5 py-1 rounded-md">
+                                <Text className="text-[11px] font-bold text-primary uppercase tracking-wide">Admin</Text>
+                              </View>
+                            )}
+                            {m.role === 'editor' && (
+                              <View className="bg-surface-alt px-2.5 py-1 rounded-md border border-line-neutral">
+                                <Text className="text-[11px] font-bold text-ink-subtle uppercase tracking-wide">Editor</Text>
+                              </View>
+                            )}
+
+                            {/* Options Icon */}
+                            {canManage && (
+                              <MaterialIcons name="more-vert" size={20} color="#94a3b8" style={{ marginLeft: 4 }} />
+                            )}
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+              </ScrollView>
+            </KeyboardAvoidingView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -993,10 +1187,18 @@ function ToggleRow({
   onValueChange: (v: boolean) => void;
 }) {
   return (
-    <View className="flex-row items-center justify-between py-3.5 border-b border-line-muted/40">
-      <View className="flex-1 mr-3">
+    <View className="flex-row items-center justify-between py-4 border-b border-line-muted/40">
+      <View className="flex-1 mr-3 flex-row items-center">
         <Text className="text-[15px] font-medium text-ink-strong">{title}</Text>
-        <Text className="text-xs text-ink-muted mt-0.5 leading-[17px]">{subtitle}</Text>
+        {subtitle ? (
+          <TouchableOpacity
+            className="ml-2"
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            onPress={() => Alert.alert(title, subtitle)}
+          >
+            <MaterialIcons name="info-outline" size={18} color="#94a3b8" />
+          </TouchableOpacity>
+        ) : null}
       </View>
       <Switch
         value={value}

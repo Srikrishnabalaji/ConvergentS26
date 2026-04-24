@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { parseLocationString, UT_BUILDINGS } from '@/lib/data/utBuildings';
 import { supabase } from '@/lib/supabase';
 import { geocodeSearch, type SearchItem } from '@/lib/services/geocoding';
@@ -68,6 +69,7 @@ const SEARCH_PLACEHOLDERS: Record<FriendsTab, string> = {
 };
 
 export default function FriendsScreen() {
+  const insets = useSafeAreaInsets();
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<FriendsTab>('my_friends');
   const [loading, setLoading] = useState(true);
@@ -543,10 +545,16 @@ export default function FriendsScreen() {
       }
     >
       <BottomSheet visible={pinModalVisible} onClose={() => setPinModalVisible(false)}>
-        <Text className="text-xl font-bold text-primary mb-1">Drop Your Pin</Text>
-        <Text className="text-[13px] text-ink-subtle mb-5">
-          Set your location and choose who can see it.
-        </Text>
+        <View className="flex-row items-center mb-5">
+          <Text className="text-xl font-bold text-primary">Drop Your Pin</Text>
+          <TouchableOpacity
+            className="ml-2"
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            onPress={() => Alert.alert('Share Location', 'Set your location and choose who can see it.')}
+          >
+            <MaterialIcons name="info-outline" size={18} color="#94a3b8" />
+          </TouchableOpacity>
+        </View>
 
         <Text className="text-[13px] font-semibold text-ink-body mb-1">Building</Text>
         <TextInput
@@ -669,29 +677,34 @@ export default function FriendsScreen() {
           </ScrollView>
         )}
 
-        <Button
-          label={
-            pinSelectedIds.size > 0
-              ? `Save · share with ${pinSelectedIds.size} friend${pinSelectedIds.size > 1 ? 's' : ''}`
-              : 'Save · only visible to you'
-          }
-          onPress={savePin}
-          loading={pinSaving}
-          size="lg"
-          block
-          className="mb-2.5"
-        />
-        <Button
-          label="Clear My Location"
-          onPress={clearPin}
-          variant="secondary"
-          size="md"
-          block
-          className="mb-1.5"
-        />
-        <TouchableOpacity onPress={() => setPinModalVisible(false)} className="mt-2 items-center">
-          <Text className="text-sm text-ink-subtle">Cancel</Text>
-        </TouchableOpacity>
+        {/* Clean, calendar-style action buttons */}
+        <View 
+          className="flex-row items-center justify-between pt-4 mt-2 border-t border-line-faint"
+          style={{ paddingBottom: Math.max(insets.bottom, 16) }}
+        >
+          <View className="flex-row items-center">
+            <TouchableOpacity
+              onPress={() => setPinModalVisible(false)}
+              className="py-2 pr-4"
+            >
+              <Text className="text-[15px] font-semibold text-ink-subtle">Cancel</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              onPress={clearPin}
+              className="py-2 px-4"
+            >
+              <Text className="text-[15px] font-semibold text-danger">Clear</Text>
+            </TouchableOpacity>
+          </View>
+          
+          <TouchableOpacity
+            onPress={savePin}
+            className="bg-primary py-2.5 px-6 rounded-[10px]"
+          >
+            <Text className="text-[15px] font-bold text-white">Save</Text>
+          </TouchableOpacity>
+        </View>
       </BottomSheet>
 
       <ScrollView
