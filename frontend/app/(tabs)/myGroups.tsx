@@ -18,6 +18,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { supabase } from '@/lib/supabase';
 import {
+  BottomSheet,
   Chip,
   IconButton,
   PageShell,
@@ -49,6 +50,18 @@ type DetailMember = {
   user_id: string;
   role: string;
   profiles: { full_name: string | null; avatar_url: string | null } | null;
+};
+
+type IncomingInvite = {
+  invite_id: string;
+  group_id: string;
+  group_name: string;
+  group_description: string | null;
+  group_image_url: string | null;
+  group_type: GroupType;
+  group_is_private: boolean;
+  inviter_name: string | null;
+  created_at: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -160,7 +173,7 @@ function GroupCard({
                     <ActivityIndicator size="small" color="#dc2626" />
                   ) : (
                     <>
-                      <MaterialIcons name="logout" size={14} color="#b91c1c" style={{ marginRight: 3 }} />
+                      <MaterialIcons name="logout" size={14} color="#dc2626" style={{ marginRight: 3 }} />
                       <Text className="text-danger text-[13px] font-semibold">Leave</Text>
                     </>
                   )}
@@ -214,6 +227,82 @@ function GroupCard({
               )}
             </View>
           )}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// InviteCard — pending invitation a user has received
+// ---------------------------------------------------------------------------
+
+function InviteCard({
+  invite,
+  responding,
+  onAccept,
+  onDecline,
+}: {
+  invite: IncomingInvite;
+  responding: boolean;
+  onAccept: () => void;
+  onDecline: () => void;
+}) {
+  const typeLabel = invite.group_type === 'campus_org' ? 'Campus' : 'Friends';
+  const inviterLine = invite.inviter_name
+    ? `Invited by ${invite.inviter_name}`
+    : 'You have been invited';
+
+  return (
+    <View style={shadows.brand} className="bg-white rounded-[18px] mb-3 border border-primary/20">
+      <View className="px-4 py-3.5">
+        <View className="flex-row items-center mb-3">
+          {invite.group_image_url ? (
+            <Image
+              source={{ uri: invite.group_image_url }}
+              className="w-[50px] h-[50px] rounded-[15px] mr-3.5 bg-surface-raised"
+            />
+          ) : (
+            <View className="w-[50px] h-[50px] rounded-[15px] mr-3.5 bg-primary/[0.07] items-center justify-center">
+              <MaterialIcons name="groups" size={22} color="#94a3b8" />
+            </View>
+          )}
+          <View className="flex-1 min-w-0">
+            <Text className="text-base font-semibold text-ink leading-[22px]" numberOfLines={1}>
+              {invite.group_name}
+            </Text>
+            <Text className="text-[13px] text-ink-subtle font-medium" numberOfLines={1}>
+              {`${typeLabel} · ${inviterLine}`}
+            </Text>
+          </View>
+        </View>
+        <View className="flex-row gap-2">
+          <TouchableOpacity
+            onPress={onDecline}
+            disabled={responding}
+            activeOpacity={0.75}
+            className="flex-1 py-2.5 rounded-[10px] bg-surface-raised items-center"
+          >
+            <Text className="text-ink-subtle text-[13px] font-semibold">Decline</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={onAccept}
+            disabled={responding}
+            activeOpacity={0.85}
+            className={cn(
+              'flex-1 py-2.5 rounded-[10px] bg-primary items-center flex-row justify-center',
+              responding && 'opacity-[0.65]'
+            )}
+          >
+            {responding ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <>
+                <MaterialIcons name="check" size={15} color="#fff" style={{ marginRight: 4 }} />
+                <Text className="text-white text-[13px] font-bold">Accept</Text>
+              </>
+            )}
+          </TouchableOpacity>
         </View>
       </View>
     </View>
@@ -397,9 +486,21 @@ export default function MyGroupsScreen() {
   const [passwordInput, setPasswordInput] = useState('');
   const [joiningWithPassword, setJoiningWithPassword] = useState(false);
 
-  const [collapsedMyGroups, setCollapsedMyGroups] = useState<Set<'friends' | 'campus'>>(new Set());
+  const [incomingInvites, setIncomingInvites] = useState<IncomingInvite[]>([]);
+  const [respondingInviteId, setRespondingInviteId] = useState<string | null>(null);
 
-  const [discoverFilter, setDiscoverFilter] = useState<'all' | 'friends' | 'campus'>('all');
+  const [collapsedMyGroups, setCollapsedMyGroups] = useState<Set<'friends' | 'campus'>>(new Set());
+  const [collapsedDiscover, setCollapsedDiscover] = useState<Set<'friends' | 'campus'>>(new Set());
+
+  const [myGroupsSearch, setMyGroupsSearch] = useState('');
+
+  const [showMyGroupsFilter, setShowMyGroupsFilter] = useState(false);
+  const [myGroupsTypeFilter, setMyGroupsTypeFilter] = useState<Set<'friends' | 'campus'>>(new Set());
+  const [myGroupsRoleFilter, setMyGroupsRoleFilter] = useState<Set<'admin' | 'member'>>(new Set());
+
+  const [showDiscoverFilter, setShowDiscoverFilter] = useState(false);
+  const [discoverTypeFilter, setDiscoverTypeFilter] = useState<Set<'friends' | 'campus'>>(new Set());
+  const [discoverVisibilityFilter, setDiscoverVisibilityFilter] = useState<Set<'open' | 'password'>>(new Set());
 
   const isMemberOfSelected = useMemo(() => {
     if (!selectedGroup) return false;
@@ -458,12 +559,15 @@ export default function MyGroupsScreen() {
       return;
     }
 
-    const [memberRes, groupsRes, countRes, requestsRes] = await Promise.all([
+    const [memberRes, groupsRes, countRes, requestsRes, invitesRes] = await Promise.all([
       supabase.from('group_members').select('group_id, role').eq('user_id', user.id),
       supabase.from('groups').select('id, name, description, image_url, type, is_private, has_join_password'),
       supabase.rpc('get_group_member_counts'),
       supabase.rpc('get_my_join_requests'),
+      supabase.rpc('get_my_group_invites'),
     ]);
+
+    setIncomingInvites((invitesRes.data ?? []) as IncomingInvite[]);
 
     const memberRows = memberRes.data ?? [];
     const allGroups = groupsRes.data ?? [];
@@ -609,9 +713,45 @@ export default function MyGroupsScreen() {
     fetchGroups();
   }
 
+  async function handleRespondInvite(inviteId: string, action: 'accept' | 'decline') {
+    setRespondingInviteId(inviteId);
+    const { data, error } = await supabase.rpc('respond_to_group_invite', {
+      p_invite_id: inviteId,
+      p_action: action,
+    });
+    setRespondingInviteId(null);
+    if (error || data?.error) {
+      Alert.alert('Error', error?.message ?? data?.error ?? 'Could not respond to invite.');
+      return;
+    }
+    setIncomingInvites((prev) => prev.filter((i) => i.invite_id !== inviteId));
+    if (action === 'accept') fetchGroups();
+  }
+
   async function handleLeave(groupId: string) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
+
+    if (adminGroupIds.has(groupId)) {
+      const { data: adminMembers } = await supabase
+        .from('group_members')
+        .select('user_id')
+        .eq('group_id', groupId)
+        .eq('role', 'admin');
+
+      if ((adminMembers?.length ?? 0) <= 1) {
+        Alert.alert(
+          'Assign an admin first',
+          'You are the only admin. Please assign another member as admin before leaving.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Manage Group', onPress: () => router.push(`/edit-group/${groupId}` as never) },
+          ],
+        );
+        return;
+      }
+    }
+
     setLeavingId(groupId);
     const { error } = await supabase
       .from('group_members')
@@ -627,8 +767,35 @@ export default function MyGroupsScreen() {
     }
   }
 
-  const myFriendGroups = useMemo(() => myGroups.filter((g) => g.type === 'friends'), [myGroups]);
-  const myCampusGroups = useMemo(() => myGroups.filter((g) => g.type === 'campus_org'), [myGroups]);
+  const searchedMyGroups = useMemo(() => {
+    const q = myGroupsSearch.trim().toLowerCase();
+    if (!q) return myGroups;
+    return myGroups.filter((g) => g.name.toLowerCase().startsWith(q));
+  }, [myGroups, myGroupsSearch]);
+
+  const myFriendGroups = useMemo(() => {
+    if (myGroupsTypeFilter.size > 0 && !myGroupsTypeFilter.has('friends')) return [];
+    let groups = searchedMyGroups.filter((g) => g.type === 'friends');
+    if (myGroupsRoleFilter.size > 0) {
+      groups = groups.filter((g) => {
+        const role = adminGroupIds.has(g.id) ? 'admin' : editorGroupIds.has(g.id) ? 'editor' : 'member';
+        return myGroupsRoleFilter.has(role);
+      });
+    }
+    return groups;
+  }, [searchedMyGroups, myGroupsTypeFilter, myGroupsRoleFilter, adminGroupIds, editorGroupIds]);
+
+  const myCampusGroups = useMemo(() => {
+    if (myGroupsTypeFilter.size > 0 && !myGroupsTypeFilter.has('campus')) return [];
+    let groups = searchedMyGroups.filter((g) => g.type === 'campus_org');
+    if (myGroupsRoleFilter.size > 0) {
+      groups = groups.filter((g) => {
+        const role = adminGroupIds.has(g.id) ? 'admin' : editorGroupIds.has(g.id) ? 'editor' : 'member';
+        return myGroupsRoleFilter.has(role);
+      });
+    }
+    return groups;
+  }, [searchedMyGroups, myGroupsTypeFilter, myGroupsRoleFilter, adminGroupIds, editorGroupIds]);
 
   const searchedDiscover = useMemo(() => {
     const q = discoverSearch.trim().toLowerCase();
@@ -636,23 +803,34 @@ export default function MyGroupsScreen() {
     return discoverGroups.filter((g) => g.name.toLowerCase().startsWith(q));
   }, [discoverGroups, discoverSearch]);
 
-  const discoverFriendGroups = useMemo(
-    () => searchedDiscover.filter((g) => g.type === 'friends'),
-    [searchedDiscover]
-  );
-  const discoverCampusGroups = useMemo(
-    () => searchedDiscover.filter((g) => g.type === 'campus_org'),
-    [searchedDiscover]
-  );
+  const discoverFriendGroups = useMemo(() => {
+    if (discoverTypeFilter.size > 0 && !discoverTypeFilter.has('friends')) return [];
+    return searchedDiscover.filter((g) => {
+      if (g.type !== 'friends') return false;
+      if (discoverVisibilityFilter.size === 0) return true;
+      return (discoverVisibilityFilter.has('open') && !g.has_join_password) ||
+             (discoverVisibilityFilter.has('password') && g.has_join_password);
+    });
+  }, [searchedDiscover, discoverTypeFilter, discoverVisibilityFilter]);
+
+  const discoverCampusGroups = useMemo(() => {
+    if (discoverTypeFilter.size > 0 && !discoverTypeFilter.has('campus')) return [];
+    return searchedDiscover.filter((g) => {
+      if (g.type !== 'campus_org') return false;
+      if (discoverVisibilityFilter.size === 0) return true;
+      return (discoverVisibilityFilter.has('open') && !g.has_join_password) ||
+             (discoverVisibilityFilter.has('password') && g.has_join_password);
+    });
+  }, [searchedDiscover, discoverTypeFilter, discoverVisibilityFilter]);
+
+  const myGroupsActiveFilterCount = myGroupsTypeFilter.size + myGroupsRoleFilter.size;
+  const discoverActiveFilterCount = discoverTypeFilter.size + discoverVisibilityFilter.size;
 
   const hasDiscoverSearch = discoverSearch.trim().length > 0;
   const noSearchResults =
     hasDiscoverSearch &&
-    (discoverFilter === 'friends'
-      ? discoverFriendGroups.length === 0
-      : discoverFilter === 'campus'
-      ? discoverCampusGroups.length === 0
-      : discoverFriendGroups.length === 0 && discoverCampusGroups.length === 0);
+    discoverFriendGroups.length === 0 &&
+    discoverCampusGroups.length === 0;
 
   const panelOptions: SegmentedOption<PanelType>[] = [
     { value: 'my_groups', label: 'Your Groups' },
@@ -726,6 +904,70 @@ export default function MyGroupsScreen() {
         }}
       />
 
+      <BottomSheet visible={showMyGroupsFilter} onClose={() => setShowMyGroupsFilter(false)} maxHeight="60%">
+        <Text className="text-[18px] font-bold text-ink-strong mb-5">Filter Groups</Text>
+        <FilterSection label="Type">
+          {([['friends', 'Friends'], ['campus', 'Campus']] as const).map(([val, lbl]) => (
+            <Chip
+              key={val}
+              label={lbl}
+              active={myGroupsTypeFilter.has(val)}
+              onPress={() => setMyGroupsTypeFilter((prev) => toggleSetItem(prev, val))}
+            />
+          ))}
+        </FilterSection>
+        <FilterSection label="Role">
+          {([['admin', 'Admin'], ['member', 'Member']] as const).map(([val, lbl]) => (
+            <Chip
+              key={val}
+              label={lbl}
+              active={myGroupsRoleFilter.has(val)}
+              onPress={() => setMyGroupsRoleFilter((prev) => toggleSetItem(prev, val))}
+            />
+          ))}
+        </FilterSection>
+        {myGroupsActiveFilterCount > 0 && (
+          <TouchableOpacity
+            className="mt-5 py-3 rounded-[14px] bg-surface-raised items-center"
+            onPress={() => { setMyGroupsTypeFilter(new Set()); setMyGroupsRoleFilter(new Set()); }}
+          >
+            <Text className="text-sm font-semibold text-ink-subtle">Clear all filters</Text>
+          </TouchableOpacity>
+        )}
+      </BottomSheet>
+
+      <BottomSheet visible={showDiscoverFilter} onClose={() => setShowDiscoverFilter(false)} maxHeight="55%">
+        <Text className="text-[18px] font-bold text-ink-strong mb-5">Filter Results</Text>
+        <FilterSection label="Type">
+          {([['friends', 'Friends'], ['campus', 'Campus']] as const).map(([val, lbl]) => (
+            <Chip
+              key={val}
+              label={lbl}
+              active={discoverTypeFilter.has(val)}
+              onPress={() => setDiscoverTypeFilter((prev) => toggleSetItem(prev, val))}
+            />
+          ))}
+        </FilterSection>
+        <FilterSection label="Access">
+          {([['open', 'Open'], ['password', 'Password required']] as const).map(([val, lbl]) => (
+            <Chip
+              key={val}
+              label={lbl}
+              active={discoverVisibilityFilter.has(val)}
+              onPress={() => setDiscoverVisibilityFilter((prev) => toggleSetItem(prev, val))}
+            />
+          ))}
+        </FilterSection>
+        {discoverActiveFilterCount > 0 && (
+          <TouchableOpacity
+            className="mt-5 py-3 rounded-[14px] bg-surface-raised items-center"
+            onPress={() => { setDiscoverTypeFilter(new Set()); setDiscoverVisibilityFilter(new Set()); }}
+          >
+            <Text className="text-sm font-semibold text-ink-subtle">Clear all filters</Text>
+          </TouchableOpacity>
+        )}
+      </BottomSheet>
+
       <View className="px-5 pt-4 pb-1">
         <SegmentedTabs<PanelType>
           value={activePanel}
@@ -750,78 +992,135 @@ export default function MyGroupsScreen() {
               </View>
             ) : (
               <>
-                <SectionHeader
-                  title="Friend Groups"
-                  count={myFriendGroups.length}
-                  collapsed={collapsedMyGroups.has('friends')}
-                  onToggle={() =>
-                    setCollapsedMyGroups((prev) => {
-                      const n = new Set(prev);
-                      if (n.has('friends')) n.delete('friends'); else n.add('friends');
-                      return n;
-                    })
-                  }
-                />
-                {!collapsedMyGroups.has('friends') &&
-                  (myFriendGroups.length === 0 ? (
-                    <EmptyCard
-                      icon="people"
-                      title="No friend groups yet"
-                      subtitle="Create one with the + button or join one in Discover."
+                <View className="flex-row items-center mt-4 mb-1 gap-2.5">
+                  <View className="flex-1">
+                    <SearchInput
+                      placeholder="Search groups…"
+                      value={myGroupsSearch}
+                      onChangeText={setMyGroupsSearch}
+                      onClear={() => setMyGroupsSearch('')}
+                      returnKeyType="search"
                     />
-                  ) : (
-                    myFriendGroups.map((group) => (
-                      <GroupCard
-                        key={group.id}
-                        group={group}
-                        subtitle={`${group.member_count ?? 0} members`}
-                        canEdit={adminGroupIds.has(group.id) || editorGroupIds.has(group.id)}
-                        onEdit={() => router.push(`/edit-group/${group.id}` as never)}
-                        onPress={() => setSelectedGroup(group)}
-                        onLeave={
-                          !adminGroupIds.has(group.id) ? () => !leavingId && handleLeave(group.id) : undefined
-                        }
-                        leaving={leavingId === group.id}
-                      />
-                    ))
-                  ))}
+                  </View>
+                </View>
 
-                <SectionHeader
-                  title="Campus Groups"
-                  count={myCampusGroups.length}
-                  topSpacing
-                  collapsed={collapsedMyGroups.has('campus')}
-                  onToggle={() =>
-                    setCollapsedMyGroups((prev) => {
-                      const n = new Set(prev);
-                      if (n.has('campus')) n.delete('campus'); else n.add('campus');
-                      return n;
-                    })
-                  }
-                />
-                {!collapsedMyGroups.has('campus') &&
-                  (myCampusGroups.length === 0 ? (
-                    <EmptyCard
-                      icon="school"
-                      title="No campus groups yet"
-                      subtitle="Request to join a campus org in Discover."
-                    />
-                  ) : (
-                    myCampusGroups.map((group) => (
-                      <GroupCard
-                        key={group.id}
-                        group={group}
-                        subtitle={`${group.member_count ?? 0} members`}
-                        canEdit={adminGroupIds.has(group.id) || editorGroupIds.has(group.id)}
-                        onEdit={() => router.push(`/edit-group/${group.id}` as never)}
-                        onPress={() => setSelectedGroup(group)}
-                        onLeave={
-                          !adminGroupIds.has(group.id) ? () => !leavingId && handleLeave(group.id) : undefined
-                        }
-                        leaving={leavingId === group.id}
+                <View className="flex-row justify-end pb-0">
+                  <TouchableOpacity
+                    onPress={() => setShowMyGroupsFilter(true)}
+                    activeOpacity={0.75}
+                    className="flex-row items-center gap-1.5 py-1.5 px-2.5 rounded-xl bg-surface-raised"
+                  >
+                    <MaterialIcons name="tune" size={16} color={myGroupsActiveFilterCount > 0 ? PRIMARY : '#64748b'} />
+                    <Text className={cn('text-xs font-semibold', myGroupsActiveFilterCount > 0 ? 'text-primary' : 'text-ink-subtle')}>
+                      {myGroupsActiveFilterCount > 0 ? `Filters (${myGroupsActiveFilterCount})` : 'Filter'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {incomingInvites.length > 0 && (
+                  <>
+                    <SectionHeader title="Invitations" count={incomingInvites.length} />
+                    {incomingInvites.map((inv) => (
+                      <InviteCard
+                        key={inv.invite_id}
+                        invite={inv}
+                        responding={respondingInviteId === inv.invite_id}
+                        onAccept={() => handleRespondInvite(inv.invite_id, 'accept')}
+                        onDecline={() => handleRespondInvite(inv.invite_id, 'decline')}
                       />
-                    ))
-                  ))}
+                    ))}
+                  </>
+                )}
+
+                {(myGroupsTypeFilter.size === 0 || myGroupsTypeFilter.has('friends')) &&
+                  (!myGroupsSearch.trim() || myFriendGroups.length > 0) && (
+                  <>
+                    <SectionHeader
+                      title="Friend Groups"
+                      count={myFriendGroups.length}
+                      collapsed={collapsedMyGroups.has('friends')}
+                      onToggle={() =>
+                        setCollapsedMyGroups((prev) => {
+                          const n = new Set(prev);
+                          if (n.has('friends')) n.delete('friends'); else n.add('friends');
+                          return n;
+                        })
+                      }
+                    />
+                    {!collapsedMyGroups.has('friends') &&
+                      (myFriendGroups.length === 0 ? (
+                        <EmptyCard
+                          icon="people"
+                          title="No friend groups yet"
+                          subtitle="Create one with the + button or join one in Discover."
+                        />
+                      ) : (
+                        myFriendGroups.map((group) => (
+                          <GroupCard
+                            key={group.id}
+                            group={group}
+                            subtitle={`${group.member_count ?? 0} members`}
+                            canEdit={adminGroupIds.has(group.id) || editorGroupIds.has(group.id)}
+                            onEdit={() => router.push(`/edit-group/${group.id}` as never)}
+                            onPress={() => setSelectedGroup(group)}
+                            onLeave={
+                              !adminGroupIds.has(group.id) && !editorGroupIds.has(group.id)
+                                ? () => !leavingId && handleLeave(group.id)
+                                : undefined
+                            }
+                            leaving={leavingId === group.id}
+                          />
+                        ))
+                      ))}
+                  </>
+                )}
+
+                {(myGroupsTypeFilter.size === 0 || myGroupsTypeFilter.has('campus')) &&
+                  (!myGroupsSearch.trim() || myCampusGroups.length > 0) && (
+                  <>
+                    <SectionHeader
+                      title="Campus Groups"
+                      count={myCampusGroups.length}
+                      topSpacing={
+                        (myGroupsTypeFilter.size === 0 || myGroupsTypeFilter.has('friends')) &&
+                        (!myGroupsSearch.trim() || myFriendGroups.length > 0)
+                      }
+                      collapsed={collapsedMyGroups.has('campus')}
+                      onToggle={() =>
+                        setCollapsedMyGroups((prev) => {
+                          const n = new Set(prev);
+                          if (n.has('campus')) n.delete('campus'); else n.add('campus');
+                          return n;
+                        })
+                      }
+                    />
+                    {!collapsedMyGroups.has('campus') &&
+                      (myCampusGroups.length === 0 ? (
+                        <EmptyCard
+                          icon="school"
+                          title="No campus groups yet"
+                          subtitle="Request to join a campus org in Discover."
+                        />
+                      ) : (
+                        myCampusGroups.map((group) => (
+                          <GroupCard
+                            key={group.id}
+                            group={group}
+                            subtitle={`${group.member_count ?? 0} members`}
+                            canEdit={adminGroupIds.has(group.id) || editorGroupIds.has(group.id)}
+                            onEdit={() => router.push(`/edit-group/${group.id}` as never)}
+                            onPress={() => setSelectedGroup(group)}
+                            onLeave={
+                              !adminGroupIds.has(group.id) && !editorGroupIds.has(group.id)
+                                ? () => !leavingId && handleLeave(group.id)
+                                : undefined
+                            }
+                            leaving={leavingId === group.id}
+                          />
+                        ))
+                      ))}
+                  </>
+                )}
               </>
             )}
           </>
@@ -852,18 +1151,17 @@ export default function MyGroupsScreen() {
               </TouchableOpacity>
             </View>
 
-            <View className="flex-row mt-3 mb-4 gap-2">
-              {(['all', 'friends', 'campus'] as const).map((f) => {
-                const label = f === 'all' ? 'All' : f === 'friends' ? 'Friend Groups' : 'Campus Groups';
-                return (
-                  <Chip
-                    key={f}
-                    label={label}
-                    active={discoverFilter === f}
-                    onPress={() => setDiscoverFilter(f)}
-                  />
-                );
-              })}
+            <View className="flex-row justify-end">
+              <TouchableOpacity
+                onPress={() => setShowDiscoverFilter(true)}
+                activeOpacity={0.75}
+                className="flex-row items-center gap-1.5 py-1.5 px-2.5 rounded-xl bg-surface-raised"
+              >
+                <MaterialIcons name="tune" size={16} color={discoverActiveFilterCount > 0 ? PRIMARY : '#64748b'} />
+                <Text className={cn('text-xs font-semibold', discoverActiveFilterCount > 0 ? 'text-primary' : 'text-ink-subtle')}>
+                  {discoverActiveFilterCount > 0 ? `Filters (${discoverActiveFilterCount})` : 'Filter'}
+                </Text>
+              </TouchableOpacity>
             </View>
 
             {loading && discoverGroups.length === 0 ? (
@@ -876,111 +1174,92 @@ export default function MyGroupsScreen() {
                 title={`No results for "${discoverSearch.trim()}"`}
                 subtitle="Try a different search term."
               />
-            ) : discoverFilter === 'friends' ? (
-              discoverFriendGroups.length === 0 ? (
-                <EmptyCard
-                  icon="people-outline"
-                  title="No friend groups to join"
-                  subtitle="All available friend groups will appear here."
-                />
-              ) : (
-                discoverFriendGroups.map((group) => (
-                  <GroupCard
-                    key={group.id}
-                    group={group}
-                    subtitle={`${group.member_count ?? 0} members`}
-                    onJoin={() => handleJoinPress(group)}
-                    joinLabel="Join"
-                    joinLoading={joiningId === group.id}
-                    onPress={() => setSelectedGroup(group)}
-                  />
-                ))
-              )
-            ) : discoverFilter === 'campus' ? (
-              discoverCampusGroups.length === 0 ? (
-                <EmptyCard
-                  icon="school"
-                  title="No campus orgs to join"
-                  subtitle="Available campus organizations will appear here."
-                />
-              ) : (
-                discoverCampusGroups.map((group) => {
-                  const isPending = pendingRequestIds.has(group.id);
-                  return (
-                    <GroupCard
-                      key={group.id}
-                      group={group}
-                      subtitle={`${group.member_count ?? 0} members`}
-                      onJoin={!isPending ? () => handleJoinPress(group) : undefined}
-                      joinLabel="Request"
-                      joinLoading={requestingId === group.id}
-                      isPending={isPending}
-                      onCancelRequest={isPending ? () => handleCancelRequest(group.id) : undefined}
-                      cancellingRequest={cancellingRequestId === group.id}
-                      onPress={() => setSelectedGroup(group)}
-                    />
-                  );
-                })
-              )
             ) : (
               <>
-                {(!hasDiscoverSearch || discoverFriendGroups.length > 0) && (
-                  <>
-                    <SectionHeader title="Friend Groups" count={discoverFriendGroups.length} />
-                    {discoverFriendGroups.length === 0 ? (
-                      <EmptyCard
-                        icon="people-outline"
-                        title="No friend groups to join"
-                        subtitle="All available friend groups will appear here."
-                      />
-                    ) : (
-                      discoverFriendGroups.map((group) => (
-                        <GroupCard
-                          key={group.id}
-                          group={group}
-                          subtitle={`${group.member_count ?? 0} members`}
-                          onJoin={() => handleJoinPress(group)}
-                          joinLabel="Join"
-                          joinLoading={joiningId === group.id}
-                          onPress={() => setSelectedGroup(group)}
-                        />
-                      ))
-                    )}
-                  </>
-                )}
-
-                {(!hasDiscoverSearch || discoverCampusGroups.length > 0) && (
+                {(discoverTypeFilter.size === 0 || discoverTypeFilter.has('friends')) &&
+                  (!discoverSearch.trim() || discoverFriendGroups.length > 0) && (
                   <>
                     <SectionHeader
-                      title="Campus Groups"
-                      count={discoverCampusGroups.length}
-                      topSpacing={!hasDiscoverSearch || discoverFriendGroups.length > 0}
+                      title="Friend Groups"
+                      count={discoverFriendGroups.length}
+                      topSpacing
+                      collapsed={collapsedDiscover.has('friends')}
+                      onToggle={() =>
+                        setCollapsedDiscover((prev) => {
+                          const n = new Set(prev);
+                          if (n.has('friends')) n.delete('friends'); else n.add('friends');
+                          return n;
+                        })
+                      }
                     />
-                    {discoverCampusGroups.length === 0 ? (
-                      <EmptyCard
-                        icon="school"
-                        title="No campus orgs to join"
-                        subtitle="Available campus organizations will appear here."
-                      />
-                    ) : (
-                      discoverCampusGroups.map((group) => {
-                        const isPending = pendingRequestIds.has(group.id);
-                        return (
+                    {!collapsedDiscover.has('friends') &&
+                      (discoverFriendGroups.length === 0 ? (
+                        <EmptyCard
+                          icon="people-outline"
+                          title="No friend groups to join"
+                          subtitle="All available friend groups will appear here."
+                        />
+                      ) : (
+                        discoverFriendGroups.map((group) => (
                           <GroupCard
                             key={group.id}
                             group={group}
                             subtitle={`${group.member_count ?? 0} members`}
-                            onJoin={!isPending ? () => handleJoinPress(group) : undefined}
-                            joinLabel="Request"
-                            joinLoading={requestingId === group.id}
-                            isPending={isPending}
-                            onCancelRequest={isPending ? () => handleCancelRequest(group.id) : undefined}
-                            cancellingRequest={cancellingRequestId === group.id}
+                            onJoin={() => handleJoinPress(group)}
+                            joinLabel="Join"
+                            joinLoading={joiningId === group.id}
                             onPress={() => setSelectedGroup(group)}
                           />
-                        );
-                      })
-                    )}
+                        ))
+                      ))}
+                  </>
+                )}
+
+                {(discoverTypeFilter.size === 0 || discoverTypeFilter.has('campus')) &&
+                  (!discoverSearch.trim() || discoverCampusGroups.length > 0) && (
+                  <>
+                    <SectionHeader
+                      title="Campus Groups"
+                      count={discoverCampusGroups.length}
+                      topSpacing={
+                        (discoverTypeFilter.size === 0 || discoverTypeFilter.has('friends')) &&
+                        (!discoverSearch.trim() || discoverFriendGroups.length > 0)
+                      }
+                      collapsed={collapsedDiscover.has('campus')}
+                      onToggle={() =>
+                        setCollapsedDiscover((prev) => {
+                          const n = new Set(prev);
+                          if (n.has('campus')) n.delete('campus'); else n.add('campus');
+                          return n;
+                        })
+                      }
+                    />
+                    {!collapsedDiscover.has('campus') &&
+                      (discoverCampusGroups.length === 0 ? (
+                        <EmptyCard
+                          icon="school"
+                          title="No campus orgs to join"
+                          subtitle="Available campus organizations will appear here."
+                        />
+                      ) : (
+                        discoverCampusGroups.map((group) => {
+                          const isPending = pendingRequestIds.has(group.id);
+                          return (
+                            <GroupCard
+                              key={group.id}
+                              group={group}
+                              subtitle={`${group.member_count ?? 0} members`}
+                              onJoin={!isPending ? () => handleJoinPress(group) : undefined}
+                              joinLabel="Request"
+                              joinLoading={requestingId === group.id}
+                              isPending={isPending}
+                              onCancelRequest={isPending ? () => handleCancelRequest(group.id) : undefined}
+                              cancellingRequest={cancellingRequestId === group.id}
+                              onPress={() => setSelectedGroup(group)}
+                            />
+                          );
+                        })
+                      ))}
                   </>
                 )}
               </>
@@ -989,6 +1268,21 @@ export default function MyGroupsScreen() {
         )}
       </ScrollView>
     </PageShell>
+  );
+}
+
+function toggleSetItem<T>(prev: Set<T>, val: T): Set<T> {
+  const next = new Set(prev);
+  if (next.has(val)) next.delete(val); else next.add(val);
+  return next;
+}
+
+function FilterSection({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <View className="mb-4">
+      <Text className="text-xs font-bold text-ink-dim uppercase tracking-[0.8px] mb-2.5">{label}</Text>
+      <View className="flex-row flex-wrap gap-2">{children}</View>
+    </View>
   );
 }
 

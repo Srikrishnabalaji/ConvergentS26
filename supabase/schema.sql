@@ -79,7 +79,8 @@ create table public.group_invites (
   invited_user_id uuid not null references auth.users(id) on delete cascade,
   invited_by      uuid not null references auth.users(id) on delete cascade,
   status          text not null default 'pending' check (status in ('pending', 'accepted', 'declined')),
-  created_at      timestamptz default now()
+  created_at      timestamptz default now(),
+  unique(group_id, invited_user_id)
 );
 
 -- Group join requests: campus org approval queue
@@ -499,6 +500,224 @@ end;
 $$;
 
 grant execute on function public.get_group_join_requests(uuid) to authenticated;
+
+-- Admin: search profiles to invite (excludes existing members & pending invites)
+create or replace function public.search_users_for_invite(p_group_id uuid, p_query text)
+returns table(user_id uuid, full_name text, avatar_url text)
+language plpgsql security definer stable
+as $$
+declare
+  v_query text;
+begin
+  if not public.is_admin_of_group(p_group_id) then
+    return;
+  end if;
+
+  v_query := trim(coalesce(p_query, ''));
+  if v_query = '' then
+    return;
+  end if;
+
+  return query
+    select p.id, p.full_name, p.avatar_url
+    from public.profiles p
+    where p.full_name ilike '%' || v_query || '%'
+      and p.id <> auth.uid()
+      and not exists (
+        select 1 from public.group_members gm
+        where gm.group_id = p_group_id and gm.user_id = p.id
+      )
+      and not exists (
+        select 1 from public.group_invites gi
+        where gi.group_id = p_group_id
+          and gi.invited_user_id = p.id
+          and gi.status = 'pending'
+      )
+    order by p.full_name asc
+    limit 20;
+end;
+$$;
+
+grant execute on function public.search_users_for_invite(uuid, text) to authenticated;
+
+-- Admin: invite a user to a group
+create or replace function public.invite_user_to_group(p_group_id uuid, p_user_id uuid)
+returns json
+language plpgsql security definer
+as $$
+declare
+  v_invite_id uuid;
+  v_existing_status text;
+begin
+  if not public.is_admin_of_group(p_group_id) then
+    return json_build_object('error', 'not_authorized');
+  end if;
+
+  if p_user_id = auth.uid() then
+    return json_build_object('error', 'cannot_invite_self');
+  end if;
+
+  if exists (
+    select 1 from public.group_members
+    where group_id = p_group_id and user_id = p_user_id
+  ) then
+    return json_build_object('error', 'already_member');
+  end if;
+
+  select id, status into v_invite_id, v_existing_status
+  from public.group_invites
+  where group_id = p_group_id and invited_user_id = p_user_id;
+
+  if v_invite_id is not null then
+    if v_existing_status = 'pending' then
+      return json_build_object('error', 'already_invited');
+    end if;
+    update public.group_invites
+       set status = 'pending', invited_by = auth.uid(), created_at = now()
+     where id = v_invite_id;
+    return json_build_object('success', true, 'invite_id', v_invite_id);
+  end if;
+
+  insert into public.group_invites (group_id, invited_user_id, invited_by)
+  values (p_group_id, p_user_id, auth.uid())
+  returning id into v_invite_id;
+
+  return json_build_object('success', true, 'invite_id', v_invite_id);
+end;
+$$;
+
+grant execute on function public.invite_user_to_group(uuid, uuid) to authenticated;
+
+-- Admin: list pending invites sent for a group
+create or replace function public.get_group_invites(p_group_id uuid)
+returns table(
+  invite_id  uuid,
+  user_id    uuid,
+  full_name  text,
+  avatar_url text,
+  created_at timestamptz
+)
+language plpgsql security definer stable
+as $$
+begin
+  if not public.is_admin_of_group(p_group_id) then
+    return;
+  end if;
+
+  return query
+    select gi.id, gi.invited_user_id, p.full_name, p.avatar_url, gi.created_at
+    from public.group_invites gi
+    left join public.profiles p on p.id = gi.invited_user_id
+    where gi.group_id = p_group_id and gi.status = 'pending'
+    order by gi.created_at desc;
+end;
+$$;
+
+grant execute on function public.get_group_invites(uuid) to authenticated;
+
+-- Admin: revoke a pending invite
+create or replace function public.revoke_group_invite(p_invite_id uuid)
+returns json
+language plpgsql security definer
+as $$
+declare
+  v_group_id uuid;
+begin
+  select group_id into v_group_id
+  from public.group_invites
+  where id = p_invite_id and status = 'pending';
+
+  if v_group_id is null then
+    return json_build_object('error', 'not_found');
+  end if;
+
+  if not public.is_admin_of_group(v_group_id) then
+    return json_build_object('error', 'not_authorized');
+  end if;
+
+  delete from public.group_invites where id = p_invite_id;
+  return json_build_object('success', true);
+end;
+$$;
+
+grant execute on function public.revoke_group_invite(uuid) to authenticated;
+
+-- Invitee: list pending invites received (with group + inviter info)
+create or replace function public.get_my_group_invites()
+returns table(
+  invite_id         uuid,
+  group_id          uuid,
+  group_name        text,
+  group_description text,
+  group_image_url   text,
+  group_type        text,
+  group_is_private  boolean,
+  inviter_name      text,
+  created_at        timestamptz
+)
+language plpgsql security definer stable
+as $$
+begin
+  return query
+    select
+      gi.id,
+      gi.group_id,
+      g.name,
+      g.description,
+      g.image_url,
+      g.type,
+      g.is_private,
+      p.full_name,
+      gi.created_at
+    from public.group_invites gi
+    join public.groups g on g.id = gi.group_id
+    left join public.profiles p on p.id = gi.invited_by
+    where gi.invited_user_id = auth.uid()
+      and gi.status = 'pending'
+    order by gi.created_at desc;
+end;
+$$;
+
+grant execute on function public.get_my_group_invites() to authenticated;
+
+-- Invitee: accept or decline an invite
+create or replace function public.respond_to_group_invite(p_invite_id uuid, p_action text)
+returns json
+language plpgsql security definer
+as $$
+declare
+  v_group_id   uuid;
+  v_group_name text;
+begin
+  select gi.group_id, g.name into v_group_id, v_group_name
+  from public.group_invites gi
+  join public.groups g on g.id = gi.group_id
+  where gi.id = p_invite_id
+    and gi.invited_user_id = auth.uid()
+    and gi.status = 'pending';
+
+  if v_group_id is null then
+    return json_build_object('error', 'not_found');
+  end if;
+
+  if p_action = 'accept' then
+    update public.group_invites set status = 'accepted' where id = p_invite_id;
+    insert into public.group_members (group_id, user_id, role)
+    values (v_group_id, auth.uid(), 'member')
+    on conflict (group_id, user_id) do nothing;
+    return json_build_object('success', true, 'action', 'accepted', 'group_name', v_group_name);
+
+  elsif p_action = 'decline' then
+    update public.group_invites set status = 'declined' where id = p_invite_id;
+    return json_build_object('success', true, 'action', 'declined');
+
+  else
+    return json_build_object('error', 'invalid_action');
+  end if;
+end;
+$$;
+
+grant execute on function public.respond_to_group_invite(uuid, text) to authenticated;
 
 -- Member counts for all groups (bypasses RLS so browse UI shows correct counts)
 create or replace function public.get_group_member_counts()

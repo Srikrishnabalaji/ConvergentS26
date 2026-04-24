@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,11 @@ import {
   ScrollView,
   Clipboard,
   StyleSheet,
+  Modal,
+  Pressable,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -18,6 +23,7 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { supabase } from '@/lib/supabase';
 import { switchTrackColors, switchThumbColor } from '@/lib/switchTheme';
 import { Button, TextField, SectionLabel, Avatar, initialsFromName } from '@/components/ui';
+import { shadows } from '@/constants/shadows';
 
 const PRIMARY_HEX = '#0B617E';
 
@@ -26,6 +32,7 @@ type MemberRole = 'admin' | 'editor' | 'member';
 type MemberRow = {
   user_id: string;
   role: MemberRole;
+  joined_at: string | null;
   profiles: { full_name: string | null } | null;
 };
 
@@ -34,6 +41,20 @@ type JoinRequest = {
   user_id: string;
   full_name: string | null;
   created_at: string;
+};
+
+type SentInvite = {
+  invite_id: string;
+  user_id: string;
+  full_name: string | null;
+  avatar_url: string | null;
+  created_at: string;
+};
+
+type SearchedUser = {
+  user_id: string;
+  full_name: string | null;
+  avatar_url: string | null;
 };
 
 export default function EditGroupScreen() {
@@ -56,6 +77,7 @@ export default function EditGroupScreen() {
   const [regeneratingCode, setRegeneratingCode] = useState(false);
 
   const [loading, setLoading] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [loadingGroup, setLoadingGroup] = useState(true);
   const [myRole, setMyRole] = useState<MemberRole | null>(null);
@@ -68,8 +90,26 @@ export default function EditGroupScreen() {
   const [loadingRequests, setLoadingRequests] = useState(false);
   const [handlingRequestId, setHandlingRequestId] = useState<string | null>(null);
 
+  const [sentInvites, setSentInvites] = useState<SentInvite[]>([]);
+  const [loadingSentInvites, setLoadingSentInvites] = useState(false);
+  const [revokingInviteId, setRevokingInviteId] = useState<string | null>(null);
+
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteSearch, setInviteSearch] = useState('');
+  const [inviteSearchResults, setInviteSearchResults] = useState<SearchedUser[]>([]);
+  const [inviteSearching, setInviteSearching] = useState(false);
+  const [invitingUserId, setInvitingUserId] = useState<string | null>(null);
+
   const isEditorOnly = myRole === 'editor';
   const isAdmin = myRole === 'admin';
+
+  const originalAdminId = useMemo(() => {
+    const admins = members
+      .filter((m) => m.role === 'admin' && m.joined_at != null)
+      .sort((a, b) => (a.joined_at! < b.joined_at! ? -1 : 1));
+    return admins[0]?.user_id ?? null;
+  }, [members]);
+
   const showPasswordOption = isAdmin && !isPrivate && !isCampusOrg;
   const showJoinCode = isAdmin && isPrivate;
   const showJoinRequests = isAdmin && isCampusOrg;
@@ -78,7 +118,7 @@ export default function EditGroupScreen() {
     setLoadingMembers(true);
     const { data: rows, error: e1 } = await supabase
       .from('group_members')
-      .select('user_id, role')
+      .select('user_id, role, joined_at')
       .eq('group_id', groupId);
     if (e1 || !rows?.length) {
       setLoadingMembers(false);
@@ -95,6 +135,7 @@ export default function EditGroupScreen() {
     const merged: MemberRow[] = rows.map((r) => ({
       user_id: r.user_id,
       role: r.role as MemberRole,
+      joined_at: r.joined_at ?? null,
       profiles: byId.get(r.user_id) ? { full_name: byId.get(r.user_id)!.full_name } : null,
     }));
     const order = { admin: 0, editor: 1, member: 2 };
@@ -111,6 +152,21 @@ export default function EditGroupScreen() {
         id: r.id,
         user_id: r.user_id,
         full_name: r.full_name,
+        created_at: r.created_at,
+      })),
+    );
+  }, []);
+
+  const loadSentInvites = useCallback(async (groupId: string) => {
+    setLoadingSentInvites(true);
+    const { data } = await supabase.rpc('get_group_invites', { p_group_id: groupId });
+    setLoadingSentInvites(false);
+    setSentInvites(
+      (data ?? []).map((r: SentInvite) => ({
+        invite_id: r.invite_id,
+        user_id: r.user_id,
+        full_name: r.full_name,
+        avatar_url: r.avatar_url,
         created_at: r.created_at,
       })),
     );
@@ -166,13 +222,14 @@ export default function EditGroupScreen() {
       if (role === 'admin') {
         await Promise.all([
           loadMembers(id),
+          loadSentInvites(id),
           groupRow.type === 'campus_org' ? loadJoinRequests(id) : Promise.resolve(),
         ]);
       }
 
       setLoadingGroup(false);
     })();
-  }, [id, loadMembers, loadJoinRequests, router]);
+  }, [id, loadMembers, loadJoinRequests, loadSentInvites, router]);
 
   async function pickImage() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -205,6 +262,70 @@ export default function EditGroupScreen() {
       return;
     }
     loadMembers(id);
+  }
+
+  useEffect(() => {
+    if (!showInviteModal || !id) {
+      setInviteSearchResults([]);
+      return;
+    }
+    const q = inviteSearch.trim();
+    if (!q) {
+      setInviteSearchResults([]);
+      setInviteSearching(false);
+      return;
+    }
+    setInviteSearching(true);
+    let cancelled = false;
+    const handle = setTimeout(async () => {
+      const { data } = await supabase.rpc('search_users_for_invite', {
+        p_group_id: id,
+        p_query: q,
+      });
+      if (cancelled) return;
+      setInviteSearching(false);
+      setInviteSearchResults((data ?? []) as SearchedUser[]);
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [inviteSearch, showInviteModal, id]);
+
+  async function handleSendInvite(targetUserId: string) {
+    if (!id) return;
+    setInvitingUserId(targetUserId);
+    const { data, error } = await supabase.rpc('invite_user_to_group', {
+      p_group_id: id,
+      p_user_id: targetUserId,
+    });
+    setInvitingUserId(null);
+    if (error || data?.error) {
+      const msg =
+        data?.error === 'already_member' ? 'That user is already a member.' :
+        data?.error === 'already_invited' ? 'That user already has a pending invite.' :
+        data?.error === 'cannot_invite_self' ? 'You cannot invite yourself.' :
+        data?.error === 'not_authorized' ? 'Only admins can invite members.' :
+        error?.message ?? 'Could not send invite.';
+      Alert.alert('Error', msg);
+      return;
+    }
+    setInviteSearchResults((prev) => prev.filter((u) => u.user_id !== targetUserId));
+    loadSentInvites(id);
+  }
+
+  async function handleRevokeInvite(inviteId: string) {
+    if (!id) return;
+    setRevokingInviteId(inviteId);
+    const { data, error } = await supabase.rpc('revoke_group_invite', {
+      p_invite_id: inviteId,
+    });
+    setRevokingInviteId(null);
+    if (error || data?.error) {
+      Alert.alert('Error', error?.message ?? data?.error ?? 'Could not revoke invite.');
+      return;
+    }
+    setSentInvites((prev) => prev.filter((i) => i.invite_id !== inviteId));
   }
 
   async function handleJoinRequest(requestId: string, action: 'approve' | 'decline') {
@@ -325,6 +446,45 @@ export default function EditGroupScreen() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleLeave() {
+    if (!id || !myUserId) return;
+
+    if (isAdmin) {
+      const { data: adminMembers } = await supabase
+        .from('group_members')
+        .select('user_id')
+        .eq('group_id', id)
+        .eq('role', 'admin');
+
+      if ((adminMembers?.length ?? 0) <= 1) {
+        Alert.alert(
+          'Assign an admin first',
+          'You are the only admin. Please assign another member as admin before leaving.',
+        );
+        return;
+      }
+    }
+
+    Alert.alert('Leave Group', 'Are you sure you want to leave this group?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Leave',
+        style: 'destructive',
+        onPress: async () => {
+          setLeaving(true);
+          const { error } = await supabase
+            .from('group_members')
+            .delete()
+            .eq('group_id', id)
+            .eq('user_id', myUserId);
+          setLeaving(false);
+          if (error) Alert.alert('Error', error.message);
+          else router.back();
+        },
+      },
+    ]);
   }
 
   async function handleDelete() {
@@ -571,9 +731,68 @@ export default function EditGroupScreen() {
               </>
             )}
 
+            <View className="flex-row items-center justify-between mt-6 mb-1">
+              <SectionLabel>
+                {`INVITES${sentInvites.length > 0 ? ` (${sentInvites.length})` : ''}`}
+              </SectionLabel>
+              <TouchableOpacity
+                className="flex-row items-center px-3 py-1.5 rounded-lg bg-primary"
+                onPress={() => {
+                  setInviteSearch('');
+                  setInviteSearchResults([]);
+                  setShowInviteModal(true);
+                }}
+              >
+                <MaterialIcons name="person-add" size={14} color="#fff" style={{ marginRight: 4 }} />
+                <Text className="text-xs font-semibold text-white">Invite</Text>
+              </TouchableOpacity>
+            </View>
+            <Text className="text-xs text-ink-muted mb-2 leading-[17px]">
+              Invite people directly. They&apos;ll see the invite in their Groups tab.
+            </Text>
+            {loadingSentInvites ? (
+              <View className="py-4 items-center">
+                <ActivityIndicator color={PRIMARY_HEX} />
+              </View>
+            ) : sentInvites.length === 0 ? (
+              <View className="bg-surface-subtle rounded-xl py-5 items-center mb-2">
+                <MaterialIcons name="mail-outline" size={24} color="#94a3b8" style={{ marginBottom: 6 }} />
+                <Text className="text-sm text-ink-muted font-medium">No pending invites</Text>
+              </View>
+            ) : (
+              <View className="border border-line-neutral rounded-2xl overflow-hidden mb-2">
+                {sentInvites.map((inv) => (
+                  <View
+                    key={inv.invite_id}
+                    className="flex-row items-center px-3.5 py-3 border-b border-line-muted/40 bg-white"
+                  >
+                    <Avatar name={inv.full_name} uri={inv.avatar_url} size="md" className="mr-3" />
+                    <Text className="flex-1 text-[15px] font-medium text-ink-strong" numberOfLines={1}>
+                      {inv.full_name ?? 'Unknown user'}
+                    </Text>
+                    <TouchableOpacity
+                      className="flex-row items-center py-1.5 px-3 rounded-[10px] bg-danger-bgSoft"
+                      activeOpacity={0.7}
+                      onPress={() => handleRevokeInvite(inv.invite_id)}
+                      disabled={revokingInviteId === inv.invite_id}
+                    >
+                      {revokingInviteId === inv.invite_id ? (
+                        <ActivityIndicator size="small" color="#dc2626" />
+                      ) : (
+                        <>
+                          <MaterialIcons name="close" size={14} color="#dc2626" style={{ marginRight: 3 }} />
+                          <Text className="text-danger text-[13px] font-semibold">Cancel</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+
             <SectionLabel className="mt-6 mb-1">MEMBERS</SectionLabel>
             <Text className="text-xs text-ink-muted mb-2 leading-[17px]">
-              Editors can update the group description. Admins have full control.
+              Admins have full control of the group.
             </Text>
             {loadingMembers ? (
               <View className="py-4 items-center">
@@ -595,17 +814,17 @@ export default function EditGroupScreen() {
                     {myRole === 'admin' && m.user_id !== myUserId && m.role === 'member' && (
                       <TouchableOpacity
                         className="px-3 py-1.5 rounded-lg bg-primary/10"
-                        onPress={() => setMemberRole(m.user_id, 'editor')}
+                        onPress={() => setMemberRole(m.user_id, 'admin')}
                       >
-                        <Text className="text-xs font-semibold text-primary">Make editor</Text>
+                        <Text className="text-xs font-semibold text-primary">Make admin</Text>
                       </TouchableOpacity>
                     )}
-                    {myRole === 'admin' && m.user_id !== myUserId && m.role === 'editor' && (
+                    {myRole === 'admin' && myUserId === originalAdminId && m.user_id !== myUserId && (m.role === 'admin' || m.role === 'editor') && (
                       <TouchableOpacity
                         className="px-3 py-1.5 rounded-lg bg-surface-alt"
                         onPress={() => setMemberRole(m.user_id, 'member')}
                       >
-                        <Text className="text-xs font-semibold text-ink-muted">Remove editor</Text>
+                        <Text className="text-xs font-semibold text-ink-muted">Remove admin</Text>
                       </TouchableOpacity>
                     )}
                   </View>
@@ -622,26 +841,142 @@ export default function EditGroupScreen() {
           disabled={loading}
           block
           size="lg"
-          className="mt-7 mb-3"
+          className="mt-7 mb-4"
         />
 
-        {!isEditorOnly && (
+        <View className={`flex-row gap-3 ${isAdmin ? '' : 'justify-center'}`}>
           <TouchableOpacity
-            className="border-[1.5px] border-danger rounded-2xl py-[15px] items-center"
-            style={deleting ? { opacity: 0.7 } : undefined}
-            onPress={handleDelete}
-            disabled={deleting}
+            className="flex-1 flex-row items-center justify-center gap-1.5 py-3 rounded-xl border border-line-neutral bg-surface-subtle"
+            style={leaving ? { opacity: 0.6 } : undefined}
+            onPress={handleLeave}
+            disabled={leaving}
           >
-            {deleting ? (
-              <ActivityIndicator size="small" color="#ef4444" />
+            {leaving ? (
+              <ActivityIndicator size="small" color="#64748b" />
             ) : (
-              <Text className="text-danger text-[15px] font-semibold">Delete Group</Text>
+              <>
+                <MaterialIcons name="logout" size={16} color="#64748b" />
+                <Text className="text-ink-subtle text-[14px] font-semibold">Leave</Text>
+              </>
             )}
           </TouchableOpacity>
-        )}
+
+          {isAdmin && (
+            <TouchableOpacity
+              className="flex-1 flex-row items-center justify-center gap-1.5 py-3 rounded-xl bg-danger-bgAlt border border-danger-borderAlt"
+              style={deleting ? { opacity: 0.6 } : undefined}
+              onPress={handleDelete}
+              disabled={deleting}
+            >
+              {deleting ? (
+                <ActivityIndicator size="small" color="#dc2626" />
+              ) : (
+                <>
+                  <MaterialIcons name="delete-outline" size={16} color="#dc2626" />
+                  <Text className="text-danger text-[14px] font-semibold">Delete</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
 
         <View className="h-8" />
       </ScrollView>
+
+      <Modal
+        visible={showInviteModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowInviteModal(false)}
+      >
+        <Pressable
+          className="flex-1 bg-[rgba(15,23,42,0.5)] justify-end"
+          onPress={() => setShowInviteModal(false)}
+        >
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <Pressable
+              onPress={(e) => e.stopPropagation()}
+              style={shadows.sheet}
+              className="bg-white rounded-t-[28px] w-full max-h-[80%] overflow-hidden"
+            >
+              <View className="self-center w-10 h-[5px] rounded-[3px] bg-[#d4d8de] mt-3 mb-2" />
+              <View className="flex-row items-center justify-between px-5 pt-2 pb-3">
+                <Text className="text-[19px] font-bold text-ink-strong">Invite Members</Text>
+                <TouchableOpacity onPress={() => setShowInviteModal(false)} className="p-1 -mr-1">
+                  <MaterialIcons name="close" size={24} color="#64748b" />
+                </TouchableOpacity>
+              </View>
+
+              <View className="px-5 pb-3">
+                <View className="flex-row items-center bg-surface-subtle rounded-xl px-3 py-2.5">
+                  <MaterialIcons name="search" size={18} color="#94a3b8" style={{ marginRight: 8 }} />
+                  <TextInput
+                    className="flex-1 text-[15px] text-ink-strong"
+                    placeholder="Search by name…"
+                    placeholderTextColor="#94a3b8"
+                    value={inviteSearch}
+                    onChangeText={setInviteSearch}
+                    autoFocus
+                    autoCapitalize="words"
+                    returnKeyType="search"
+                  />
+                  {inviteSearch.length > 0 && (
+                    <TouchableOpacity onPress={() => setInviteSearch('')} hitSlop={10}>
+                      <MaterialIcons name="cancel" size={18} color="#94a3b8" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 32 }}
+              >
+                {inviteSearch.trim().length === 0 ? (
+                  <View className="py-10 items-center">
+                    <MaterialIcons name="search" size={32} color="#cbd5e1" style={{ marginBottom: 8 }} />
+                    <Text className="text-sm text-ink-muted">Start typing to find people.</Text>
+                  </View>
+                ) : inviteSearching ? (
+                  <View className="py-10 items-center">
+                    <ActivityIndicator color={PRIMARY_HEX} />
+                  </View>
+                ) : inviteSearchResults.length === 0 ? (
+                  <View className="py-10 items-center">
+                    <MaterialIcons name="person-off" size={32} color="#cbd5e1" style={{ marginBottom: 8 }} />
+                    <Text className="text-sm text-ink-muted">No people found.</Text>
+                  </View>
+                ) : (
+                  <View className="border border-line-neutral rounded-2xl overflow-hidden">
+                    {inviteSearchResults.map((u) => (
+                      <View
+                        key={u.user_id}
+                        className="flex-row items-center px-3.5 py-3 border-b border-line-muted/40 bg-white"
+                      >
+                        <Avatar name={u.full_name} uri={u.avatar_url} size="md" className="mr-3" />
+                        <Text className="flex-1 text-[15px] font-medium text-ink-strong" numberOfLines={1}>
+                          {u.full_name ?? 'Unknown user'}
+                        </Text>
+                        <TouchableOpacity
+                          className="px-3 py-1.5 rounded-lg bg-primary"
+                          onPress={() => handleSendInvite(u.user_id)}
+                          disabled={invitingUserId === u.user_id}
+                        >
+                          {invitingUserId === u.user_id ? (
+                            <ActivityIndicator size="small" color="#fff" />
+                          ) : (
+                            <Text className="text-xs font-semibold text-white">Invite</Text>
+                          )}
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </ScrollView>
+            </Pressable>
+          </KeyboardAvoidingView>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
