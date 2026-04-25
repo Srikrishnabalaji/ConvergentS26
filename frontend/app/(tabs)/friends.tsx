@@ -111,6 +111,7 @@ export default function FriendsScreen() {
   const [pinBuildingSearching, setPinBuildingSearching] = useState(false);
   const [pinRoomSuggestions, setPinRoomSuggestions] = useState<GraphNode[]>([]);
   const pinBuildingDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pinShareSearch, setPinShareSearch] = useState('');
 
   const knownIdsRef = useRef<Set<string>>(new Set());
 
@@ -450,6 +451,7 @@ export default function FriendsScreen() {
     setPinRoomSuggestions([]);
     setPinBuildingSearching(false);
     setPinSelectedIds(new Set(sharedWithIds));
+    setPinShareSearch('');
     setPinModalVisible(true);
   }
 
@@ -634,75 +636,97 @@ export default function FriendsScreen() {
             You have no friends to share with yet.
           </Text>
         ) : (
-          <ScrollView
-            style={{ maxHeight: 180 }}
-            className="mb-4"
-            nestedScrollEnabled
-            showsVerticalScrollIndicator={false}
-          >
-            {myFriends.map((friend) => {
-              const selected = pinSelectedIds.has(friend.id);
-              return (
-                <TouchableOpacity
-                  key={friend.id}
-                  className={cn(
-                    'flex-row items-center py-2.5 px-2.5 rounded-[10px] mb-1',
-                    selected ? 'bg-primary-soft' : 'bg-surface-alt'
-                  )}
-                  onPress={() => togglePinSelection(friend.id)}
-                  activeOpacity={0.7}
-                >
-                  <Avatar
-                    name={friend.name}
-                    size="sm"
-                    tone={selected ? 'primary' : 'neutral'}
-                    className="mr-2.5"
-                  />
-                  <Text
-                    className={cn(
-                      'flex-1 text-[15px]',
-                      selected ? 'text-primary font-semibold' : 'text-ink-body font-medium'
-                    )}
-                  >
-                    {friend.name}
+          <View className="mb-4">
+            {pinSelectedIds.size > 0 && (
+              <View className="flex-row flex-wrap gap-1.5 mb-2">
+                {myFriends
+                  .filter((f) => pinSelectedIds.has(f.id))
+                  .map((friend) => (
+                    <TouchableOpacity
+                      key={friend.id}
+                      onPress={() => togglePinSelection(friend.id)}
+                      className="flex-row items-center bg-primary-soft rounded-full pl-2.5 pr-2 py-1 gap-1"
+                      activeOpacity={0.7}
+                    >
+                      <Text className="text-[13px] font-semibold text-primary">{friend.name}</Text>
+                      <MaterialIcons name="close" size={14} color="#0B617E" />
+                    </TouchableOpacity>
+                  ))}
+              </View>
+            )}
+
+            <TextInput
+              className="border border-line-muted rounded-[10px] px-3.5 py-2.5 text-[14px] text-ink-strong bg-surface-alt"
+              placeholder="Search friends to share with…"
+              placeholderTextColor="#9ca3af"
+              value={pinShareSearch}
+              onChangeText={setPinShareSearch}
+            />
+
+            {pinShareSearch.trim().length > 0 && (
+              <View className="mt-1.5 border border-line-muted rounded-xl bg-white overflow-hidden">
+                {myFriends
+                  .filter(
+                    (f) =>
+                      !pinSelectedIds.has(f.id) &&
+                      f.name.toLowerCase().includes(pinShareSearch.trim().toLowerCase())
+                  )
+                  .slice(0, 6)
+                  .map((friend) => (
+                    <TouchableOpacity
+                      key={friend.id}
+                      className="flex-row items-center py-2.5 px-3.5 border-b border-line-muted"
+                      onPress={() => {
+                        togglePinSelection(friend.id);
+                        setPinShareSearch('');
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Avatar name={friend.name} size="sm" tone="neutral" className="mr-2.5" />
+                      <Text className="flex-1 text-[14px] font-medium text-ink-strong">
+                        {friend.name}
+                      </Text>
+                      <MaterialIcons name="add-circle-outline" size={20} color="#0B617E" />
+                    </TouchableOpacity>
+                  ))}
+                {myFriends.filter(
+                  (f) =>
+                    !pinSelectedIds.has(f.id) &&
+                    f.name.toLowerCase().includes(pinShareSearch.trim().toLowerCase())
+                ).length === 0 && (
+                  <Text className="text-[13px] italic text-ink-faint px-3.5 py-2.5">
+                    No matching friends.
                   </Text>
-                  <MaterialIcons
-                    name={selected ? 'check-circle' : 'radio-button-unchecked'}
-                    size={22}
-                    color={selected ? '#0B617E' : '#d1d5db'}
-                  />
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+                )}
+              </View>
+            )}
+          </View>
         )}
 
-        {/* Clean, calendar-style action buttons */}
-        <View 
-          className="flex-row items-center justify-between pt-4 mt-2 border-t border-line-faint"
+        <TouchableOpacity
+          onPress={clearPin}
+          className="flex-row items-center justify-center bg-danger-bgAlt py-3.5 rounded-xl mt-2 mb-2 border border-danger-borderAlt"
+        >
+          <Text className="text-base font-semibold text-danger">Clear Pin</Text>
+        </TouchableOpacity>
+
+        <View
+          className="flex-row pt-3 border-t border-line-faint"
           style={{ paddingBottom: Math.max(insets.bottom, 16) }}
         >
-          <View className="flex-row items-center">
-            <TouchableOpacity
-              onPress={() => setPinModalVisible(false)}
-              className="py-2 pr-4"
-            >
-              <Text className="text-[15px] font-semibold text-ink-subtle">Cancel</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              onPress={clearPin}
-              className="py-2 px-4"
-            >
-              <Text className="text-[15px] font-semibold text-danger">Clear</Text>
-            </TouchableOpacity>
-          </View>
-          
+          <TouchableOpacity
+            onPress={() => setPinModalVisible(false)}
+            className="flex-1 py-3.5 rounded-xl bg-surface-raised items-center mr-2"
+          >
+            <Text className="text-base font-semibold text-ink-subtle">Cancel</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity
             onPress={savePin}
-            className="bg-primary py-2.5 px-6 rounded-[10px]"
+            disabled={pinSaving}
+            className="flex-1 py-3.5 rounded-xl bg-primary items-center ml-2"
           >
-            <Text className="text-[15px] font-bold text-white">Save</Text>
+            <Text className="text-base font-bold text-white">Save</Text>
           </TouchableOpacity>
         </View>
       </BottomSheet>
