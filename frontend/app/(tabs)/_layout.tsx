@@ -1,9 +1,10 @@
 import { Tabs } from 'expo-router';
 import React from 'react';
 import { View } from 'react-native';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 import { HapticTab } from '@/components/haptic-tab';
-import { IconSymbol } from '@/components/ui/icon-symbol';
 import { shadows } from '@/constants/shadows';
 import { cn } from '@/lib/cn';
 
@@ -12,31 +13,41 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         tabBarActiveTintColor: '#0B617E',
-        tabBarInactiveTintColor: '#a0aab4',
+        tabBarInactiveTintColor: '#94a3b8',
         headerShown: false,
         tabBarButton: HapticTab,
         tabBarStyle: {
           borderTopWidth: 0,
           elevation: 0,
-          shadowColor: '#0f172a',
+          backgroundColor: 'rgba(255,255,255,0.96)',
+          shadowColor: '#16140F',
           shadowOffset: { width: 0, height: -2 },
-          shadowOpacity: 0.06,
-          shadowRadius: 8,
+          shadowOpacity: 0.05,
+          shadowRadius: 10,
         },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        tabBarLabelStyle: { fontSize: 10.5, fontWeight: '600' },
       }}>
       <Tabs.Screen
         name="myGroups"
         options={{
           title: 'Groups',
-          tabBarIcon: ({ color }) => <IconSymbol size={24} name="person.3.fill" color={color} />,
+          tabBarIcon: ({ color, focused }) => (
+            <MaterialCommunityIcons
+              name="account-group-outline"
+              size={24}
+              color={color}
+              style={{ opacity: focused ? 1 : 0.95 }}
+            />
+          ),
         }}
       />
       <Tabs.Screen
         name="friends"
         options={{
           title: 'Friends',
-          tabBarIcon: ({ color }) => <IconSymbol size={24} name="person.2.fill" color={color} />,
+          tabBarIcon: ({ color }) => (
+            <MaterialCommunityIcons name="account-outline" size={24} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
@@ -47,11 +58,11 @@ export default function TabLayout() {
             <View
               style={shadows.primaryGlow}
               className={cn(
-                'w-[54px] h-[54px] rounded-[27px] items-center justify-center mb-6',
+                'w-[56px] h-[56px] rounded-[28px] items-center justify-center mb-6 border-[4px] border-canvas',
                 focused ? 'bg-primary-dark' : 'bg-primary'
               )}
             >
-              <IconSymbol size={26} name="map.fill" color="#fff" />
+              <MaterialCommunityIcons name="map-outline" size={26} color="#fff" />
             </View>
           ),
         }}
@@ -60,14 +71,18 @@ export default function TabLayout() {
         name="calendar"
         options={{
           title: 'Calendar',
-          tabBarIcon: ({ color }) => <IconSymbol size={24} name="calendar" color={color} />,
+          tabBarIcon: ({ color }) => (
+            <MaterialIcons name="calendar-today" size={22} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="settings"
         options={{
           title: 'Settings',
-          tabBarIcon: ({ color }) => <IconSymbol size={24} name="gearshape.fill" color={color} />,
+          tabBarIcon: ({ color }) => (
+            <MaterialIcons name="settings" size={24} color={color} />
+          ),
         }}
       />
     </Tabs>

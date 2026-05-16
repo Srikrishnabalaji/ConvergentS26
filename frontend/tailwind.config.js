@@ -66,6 +66,29 @@ module.exports = {
           text: "#92400e",
           bg: "#fef3c7",
         },
+        // Warm secondary (sand) — quiet warm accent paired with teal primary
+        secondary: {
+          DEFAULT: "#C08A5E",
+          deep: "#9F6E45",
+          soft: "rgba(192, 138, 94, 0.10)",
+          ring: "rgba(192, 138, 94, 0.22)",
+        },
+        // Vibrant per-group avatar tile accents (used for default no-pfp tiles)
+        accent: {
+          teal:  "#0B617E",
+          aqua:  "#2A8AA5",
+          sand:  "#C08A5E",
+          amber: "#D89E3A",
+          coral: "#D26A4A",
+          rose:  "#C95F76",
+          plum:  "#8B5470",
+          olive: "#7A8740",
+        },
+        // Warm app background (matches design theme.bg / bgSoft)
+        canvas: {
+          DEFAULT: "#F7F6F2",
+          soft: "#EFEDE6",
+        },
       },
       borderRadius: {
         sheet: "28px",

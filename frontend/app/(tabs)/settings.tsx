@@ -11,9 +11,33 @@ import { router, useFocusEffect } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { supabase } from '@/lib/supabase';
 import { switchTrackColors, switchThumbColor } from '@/lib/switchTheme';
-import { Avatar, Card, Hairline, PageShell, SectionLabel } from '@/components/ui';
+import { Hairline, PageShell } from '@/components/ui';
+import { shadows } from '@/constants/shadows';
 
 const PRIMARY = '#0B617E';
+
+// Vibrant accent palette (matches Groups Rebrand design)
+const ACCENT = {
+  teal: '#0B617E',
+  aqua: '#2A8AA5',
+  sand: '#C08A5E',
+  amber: '#D89E3A',
+  coral: '#D26A4A',
+  rose: '#C95F76',
+  plum: '#8B5470',
+  olive: '#7A8740',
+};
+
+const CLAY = '#B85A38';
+const CLAY_RING = 'rgba(184, 90, 56, 0.25)';
+
+function initialsFromName(name?: string | null): string {
+  if (!name) return 'U';
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return 'U';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+}
 
 type GroupStats = {
   friendGroups: number;
@@ -25,6 +49,7 @@ export default function SettingsScreen() {
   const [loading, setLoading] = useState(true);
   const [statsLoading, setStatsLoading] = useState(true);
   const [displayName, setDisplayName] = useState('User');
+  const [email, setEmail] = useState<string>('');
   const [groupStats, setGroupStats] = useState<GroupStats>({
     friendGroups: 0,
     campusOrgs: 0,
@@ -38,6 +63,7 @@ export default function SettingsScreen() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       setDisplayName('User');
+      setEmail('');
       return;
     }
     const { data: profile } = await supabase
@@ -53,6 +79,7 @@ export default function SettingsScreen() {
       user.email?.split('@')[0] ||
       'User';
     setDisplayName(name);
+    setEmail(user.email ?? '');
   }, []);
 
   const loadGroupStats = useCallback(async () => {
@@ -126,77 +153,170 @@ export default function SettingsScreen() {
 
   if (loading) {
     return (
-      <PageShell hideBanner contentClassName="bg-surface-muted items-center justify-center">
+      <PageShell hideBanner safeAreaClassName="bg-canvas" contentClassName="bg-canvas items-center justify-center">
         <ActivityIndicator size="large" color={PRIMARY} />
       </PageShell>
     );
   }
 
   return (
-    <PageShell title="Settings">
+    <PageShell hideBanner safeAreaClassName="bg-canvas" contentClassName="bg-canvas">
       <ScrollView
         className="flex-1"
-        contentContainerClassName="px-5 pt-5 pb-12"
+        contentContainerClassName="px-4 pt-6 pb-32"
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <Card className="flex-row items-center p-3.5 mb-5">
-          <Avatar name={displayName} size="xl" className="mr-3.5" />
+        {/* Flat header */}
+        <View className="px-1 mb-4">
+          <Text className="text-[36px] font-bold text-ink-strong tracking-[-1.2px] leading-[36px] mb-2">
+            Settings
+          </Text>
+          <Text className="text-[13.5px] font-medium text-ink-subtle" numberOfLines={1}>
+            UT Austin
+          </Text>
+        </View>
+
+        {/* Profile card */}
+        <View className="flex-row items-center p-4 mb-1 bg-white rounded-[18px] overflow-hidden" style={shadows.card}>
+          <View
+            style={{ backgroundColor: ACCENT.teal }}
+            className="w-16 h-16 rounded-[20px] items-center justify-center mr-3.5"
+          >
+            <Text className="text-white text-[22px] font-bold tracking-[-0.5px]">
+              {initialsFromName(displayName)}
+            </Text>
+          </View>
           <View className="flex-1 min-w-0">
-            <Text className="text-xl font-bold text-ink" numberOfLines={2}>
+            <Text className="text-[20px] font-bold text-ink-strong tracking-[-0.5px] mb-0.5" numberOfLines={2}>
               {displayName}
             </Text>
-            <Text className="mt-1 text-[13px] font-medium text-ink-dim">UT Austin</Text>
+            {email ? (
+              <Text className="text-[13px] font-medium text-ink-subtle" numberOfLines={1}>
+                {email}
+              </Text>
+            ) : null}
           </View>
-        </Card>
+        </View>
 
-        <SectionLabel>Your communities</SectionLabel>
-        <Card className="flex-row mb-5">
-          <StatCell value={groupStats.friendGroups} label="Friend groups" loading={statsLoading} withBorder />
-          <StatCell value={groupStats.campusOrgs} label="Campus orgs" loading={statsLoading} withBorder />
-          <StatCell value={groupStats.totalGroups} label="All groups" loading={statsLoading} />
-        </Card>
+        <SLabel>Your communities</SLabel>
+        <View className="flex-row mb-1 bg-white rounded-[18px] overflow-hidden" style={shadows.card}>
+          <StatCell
+            icon="people"
+            iconBg={ACCENT.coral}
+            value={groupStats.friendGroups}
+            label="Friend groups"
+            loading={statsLoading}
+            withBorder
+          />
+          <StatCell
+            icon="school"
+            iconBg={ACCENT.plum}
+            value={groupStats.campusOrgs}
+            label="Campus orgs"
+            loading={statsLoading}
+            withBorder
+          />
+          <StatCell
+            icon="event"
+            iconBg={ACCENT.aqua}
+            value={groupStats.totalGroups}
+            label="All groups"
+            loading={statsLoading}
+          />
+        </View>
 
-        <SectionLabel>Notifications</SectionLabel>
-        <Card className="mb-4">
-          <RowSwitch label="Share my location" value={shareLocation} onValueChange={setShareLocation} />
+        <SLabel>Privacy</SLabel>
+        <View className="mb-1 bg-white rounded-[18px] overflow-hidden" style={shadows.card}>
+          <RowSwitch
+            icon="place"
+            iconBg={ACCENT.olive}
+            label="Share my location"
+            sub="Friends can see your pin when you drop one"
+            value={shareLocation}
+            onValueChange={setShareLocation}
+          />
+        </View>
+
+        <SLabel>Notifications</SLabel>
+        <View className="mb-1 bg-white rounded-[18px] overflow-hidden" style={shadows.card}>
+          <RowSwitch
+            icon="notifications"
+            iconBg={ACCENT.amber}
+            label="Event reminders"
+            sub="Push before your scheduled events"
+            value={eventNotifications}
+            onValueChange={setEventNotifications}
+          />
           <Hairline />
-          <RowSwitch label="Event notifications" value={eventNotifications} onValueChange={setEventNotifications} />
+          <RowSwitch
+            icon="schedule"
+            iconBg={ACCENT.coral}
+            label="Leave-by alerts"
+            sub="When it's time to head out based on walking time"
+            value={leaveByAlerts}
+            onValueChange={setLeaveByAlerts}
+          />
+        </View>
+
+        <SLabel>Display</SLabel>
+        <View className="mb-1 bg-white rounded-[18px] overflow-hidden" style={shadows.card}>
+          <Row icon="map" iconBg={ACCENT.sand} label="Map style" value="Default" />
           <Hairline />
-          <RowSwitch label="Leave-by alerts" value={leaveByAlerts} onValueChange={setLeaveByAlerts} />
-        </Card>
+          <Row icon="school" iconBg={ACCENT.teal} label="Campus" value="UT Austin" />
+        </View>
 
-        <SectionLabel>Integrations</SectionLabel>
-        <Card className="mb-4">
-          <Row label="Campus" value="UT Austin" />
-        </Card>
-
-        <SectionLabel>Display</SectionLabel>
-        <Card className="mb-4">
-          <Row label="Appearance" value="Light" />
+        <SLabel>About</SLabel>
+        <View className="mb-5 bg-white rounded-[18px] overflow-hidden" style={shadows.card}>
+          <Row icon="mail-outline" iconBg={ACCENT.rose} label="Support" />
           <Hairline />
-          <Row label="Map style" value="Default" />
-        </Card>
+          <Row icon="auto-awesome" iconBg={ACCENT.amber} label="What's new" />
+          <Hairline />
+          <Row icon="lock-outline" iconBg={ACCENT.olive} label="Privacy policy" />
+        </View>
 
+        {/* Sign out */}
         <TouchableOpacity
           onPress={handleSignOut}
           activeOpacity={0.85}
-          className="flex-row items-center justify-center self-stretch mt-2 py-3.5 rounded-xl bg-white border border-danger-border"
+          style={{ borderColor: CLAY_RING }}
+          className="flex-row items-center justify-center mt-1 py-3.5 rounded-2xl bg-white border"
         >
-          <MaterialIcons name="logout" size={20} color="#b91c1c" style={{ marginRight: 8 }} />
-          <Text className="text-base font-bold text-danger-strong">Log out</Text>
+          <MaterialIcons name="logout" size={18} color={CLAY} style={{ marginRight: 8 }} />
+          <Text style={{ color: CLAY }} className="text-[14.5px] font-semibold">
+            Sign out
+          </Text>
         </TouchableOpacity>
+
+        <Text className="text-center text-[11.5px] text-ink-dim font-medium mt-3">
+          Wavepoint · v2.6.0
+        </Text>
       </ScrollView>
     </PageShell>
   );
 }
 
+function SLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <Text
+      style={{ color: PRIMARY }}
+      className="text-[12px] font-semibold uppercase tracking-[1.2px] mt-5 mb-2.5 px-1"
+    >
+      {children}
+    </Text>
+  );
+}
+
 function StatCell({
+  icon,
+  iconBg,
   value,
   label,
   loading,
   withBorder,
 }: {
+  icon: React.ComponentProps<typeof MaterialIcons>['name'];
+  iconBg: string;
   value: number;
   label: string;
   loading: boolean;
@@ -204,51 +324,113 @@ function StatCell({
 }) {
   return (
     <View
-      className="flex-1 items-center justify-center py-4 min-h-[88px]"
-      style={withBorder ? { borderRightWidth: 0.5, borderRightColor: '#e8eef2' } : undefined}
+      className="flex-1 items-center justify-center py-4 px-2"
+      style={withBorder ? { borderRightWidth: 1, borderRightColor: '#F0EDE5' } : undefined}
     >
+      <View
+        style={{ backgroundColor: iconBg }}
+        className="w-8 h-8 rounded-[10px] items-center justify-center mb-2"
+      >
+        <MaterialIcons name={icon} size={15} color="#fff" />
+      </View>
       {loading ? (
         <ActivityIndicator color={PRIMARY} />
       ) : (
         <>
-          <Text className="text-[26px] font-bold text-primary mb-1">{value}</Text>
-          <Text className="text-[11px] font-semibold text-ink-subtle text-center px-1">{label}</Text>
+          <Text className="text-[22px] font-bold text-ink-strong tracking-[-0.5px] leading-[22px] mb-1">
+            {value}
+          </Text>
+          <Text className="text-[11px] font-semibold text-ink-subtle text-center" numberOfLines={1}>
+            {label}
+          </Text>
         </>
       )}
     </View>
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <View className="min-h-[54px] px-3.5 flex-row items-center justify-between">
-      <Text className="text-base font-semibold text-ink-body flex-1 pr-3">{label}</Text>
-      <Text className="text-[15px] font-semibold text-ink-dim">{value}</Text>
+function Row({
+  icon,
+  iconBg,
+  label,
+  value,
+  onPress,
+}: {
+  icon: React.ComponentProps<typeof MaterialIcons>['name'];
+  iconBg: string;
+  label: string;
+  value?: string;
+  onPress?: () => void;
+}) {
+  const inner = (
+    <View className="min-h-[54px] px-3.5 flex-row items-center gap-3">
+      <View
+        style={{ backgroundColor: iconBg }}
+        className="w-[30px] h-[30px] rounded-lg items-center justify-center"
+      >
+        <MaterialIcons name={icon} size={15} color="#fff" />
+      </View>
+      <Text className="text-[14.5px] font-medium text-ink-strong flex-1 pr-2" numberOfLines={1}>
+        {label}
+      </Text>
+      {value ? (
+        <Text className="text-[13.5px] font-medium text-ink-subtle" numberOfLines={1}>
+          {value}
+        </Text>
+      ) : null}
+      <MaterialIcons name="chevron-right" size={18} color="#C7C1B6" />
     </View>
   );
+  if (onPress) {
+    return (
+      <TouchableOpacity onPress={onPress} activeOpacity={0.7}>
+        {inner}
+      </TouchableOpacity>
+    );
+  }
+  return inner;
 }
 
 function RowSwitch({
+  icon,
+  iconBg,
   label,
+  sub,
   value,
   onValueChange,
 }: {
+  icon: React.ComponentProps<typeof MaterialIcons>['name'];
+  iconBg: string;
   label: string;
+  sub?: string;
   value: boolean;
   onValueChange: (v: boolean) => void;
 }) {
   return (
-    <View className="min-h-[54px] px-3.5 flex-row items-center justify-between">
-      <Text className="text-base font-semibold text-ink-body flex-1 pr-3">{label}</Text>
-      <View className="w-[52px] items-center justify-center">
-        <Switch
-          value={value}
-          onValueChange={onValueChange}
-          trackColor={switchTrackColors}
-          thumbColor={switchThumbColor(value, PRIMARY)}
-          ios_backgroundColor={switchTrackColors.false}
-        />
+    <View className="min-h-[54px] px-3.5 py-3 flex-row items-center gap-3">
+      <View
+        style={{ backgroundColor: iconBg }}
+        className="w-[30px] h-[30px] rounded-lg items-center justify-center"
+      >
+        <MaterialIcons name={icon} size={15} color="#fff" />
       </View>
+      <View className="flex-1 min-w-0 pr-2">
+        <Text className="text-[14.5px] font-medium text-ink-strong" numberOfLines={1}>
+          {label}
+        </Text>
+        {sub ? (
+          <Text className="text-[12px] font-medium text-ink-subtle mt-0.5" numberOfLines={2}>
+            {sub}
+          </Text>
+        ) : null}
+      </View>
+      <Switch
+        value={value}
+        onValueChange={onValueChange}
+        trackColor={switchTrackColors}
+        thumbColor={switchThumbColor(value, PRIMARY)}
+        ios_backgroundColor={switchTrackColors.false}
+      />
     </View>
   );
 }
