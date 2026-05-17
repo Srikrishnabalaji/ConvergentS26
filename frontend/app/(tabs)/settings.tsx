@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   ScrollView,
   Switch,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useFocusEffect } from 'expo-router';
 import Constants from 'expo-constants';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -17,6 +19,13 @@ import { shadows } from '@/constants/shadows';
 import { initialsFromName } from '@/lib/utils';
 
 const PRIMARY = '#0B617E';
+const SETTINGS_PREFS_KEY = 'wavepoint:settings:prefs';
+
+type SettingsPrefs = {
+  shareLocation?: boolean;
+  eventNotifications?: boolean;
+  leaveByAlerts?: boolean;
+};
 
 // Vibrant accent palette (matches Groups Rebrand design)
 const ACCENT = {
@@ -52,6 +61,16 @@ export default function SettingsScreen() {
   const [shareLocation, setShareLocation] = useState(true);
   const [eventNotifications, setEventNotifications] = useState(true);
   const [leaveByAlerts, setLeaveByAlerts] = useState(true);
+
+  const savePrefs = useCallback(async (next: SettingsPrefs) => {
+    const prefs = {
+      shareLocation,
+      eventNotifications,
+      leaveByAlerts,
+      ...next,
+    };
+    await AsyncStorage.setItem(SETTINGS_PREFS_KEY, JSON.stringify(prefs));
+  }, [eventNotifications, leaveByAlerts, shareLocation]);
 
   const loadProfile = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -126,7 +145,20 @@ export default function SettingsScreen() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      await loadProfile();
+      const [stored] = await Promise.all([
+        AsyncStorage.getItem(SETTINGS_PREFS_KEY),
+        loadProfile(),
+      ]);
+      if (!cancelled && stored) {
+        try {
+          const prefs = JSON.parse(stored) as SettingsPrefs;
+          if (typeof prefs.shareLocation === 'boolean') setShareLocation(prefs.shareLocation);
+          if (typeof prefs.eventNotifications === 'boolean') setEventNotifications(prefs.eventNotifications);
+          if (typeof prefs.leaveByAlerts === 'boolean') setLeaveByAlerts(prefs.leaveByAlerts);
+        } catch {
+          await AsyncStorage.removeItem(SETTINGS_PREFS_KEY);
+        }
+      }
       if (!cancelled) setLoading(false);
     })();
     return () => {
@@ -143,6 +175,27 @@ export default function SettingsScreen() {
   async function handleSignOut() {
     await supabase.auth.signOut();
     router.replace('/(auth)/login');
+  }
+
+  async function handleShareLocationChange(value: boolean) {
+    setShareLocation(value);
+    await savePrefs({ shareLocation: value });
+    if (!value) {
+      const { error } = await supabase.rpc('clear_location_pin');
+      if (error) {
+        Alert.alert('Location sharing', 'Location sharing was turned off locally, but your existing pin could not be cleared. Try again when you are online.');
+      }
+    }
+  }
+
+  async function handleEventNotificationsChange(value: boolean) {
+    setEventNotifications(value);
+    await savePrefs({ eventNotifications: value });
+  }
+
+  async function handleLeaveByAlertsChange(value: boolean) {
+    setLeaveByAlerts(value);
+    await savePrefs({ leaveByAlerts: value });
   }
 
   if (loading) {
@@ -228,7 +281,7 @@ export default function SettingsScreen() {
             label="Share my location"
             sub="Friends can see your pin when you drop one"
             value={shareLocation}
-            onValueChange={setShareLocation}
+            onValueChange={(value) => void handleShareLocationChange(value)}
           />
         </View>
 
@@ -240,7 +293,7 @@ export default function SettingsScreen() {
             label="Event reminders"
             sub="Push before your scheduled events"
             value={eventNotifications}
-            onValueChange={setEventNotifications}
+            onValueChange={(value) => void handleEventNotificationsChange(value)}
           />
           <Hairline />
           <RowSwitch
@@ -249,7 +302,7 @@ export default function SettingsScreen() {
             label="Leave-by alerts"
             sub="When it's time to head out based on walking time"
             value={leaveByAlerts}
-            onValueChange={setLeaveByAlerts}
+            onValueChange={(value) => void handleLeaveByAlertsChange(value)}
           />
         </View>
 

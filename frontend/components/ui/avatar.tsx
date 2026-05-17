@@ -24,12 +24,23 @@ type AvatarProps = {
   tone?: 'primary' | 'neutral';
 };
 
+function safeRemoteImageUri(uri?: string | null): string | null {
+  if (!uri) return null;
+  try {
+    const url = new URL(uri);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 export function Avatar({ name, uri, size = 'md', className, tone = 'primary' }: AvatarProps) {
   const initials = useMemo(() => initialsFromName(name), [name]);
+  const imageUri = useMemo(() => safeRemoteImageUri(uri), [uri]);
   const s = sizeMap[size];
 
-  if (uri) {
-    return <Image source={{ uri }} className={cn(s.box, className)} />;
+  if (imageUri) {
+    return <Image source={{ uri: imageUri }} className={cn(s.box, className)} />;
   }
 
   return (

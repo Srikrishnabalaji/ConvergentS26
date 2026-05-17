@@ -3,7 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <title>Floor Plan Node Editor</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script
+  src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"
+  integrity="sha512-q+4liFwdPC/bNdhUpZx6aXDx/h77yEQtn4I1slHydcbZK34nLaR3cAeYSJshoxIOq3mjEf7xJE8YWIUHMn+oCQ=="
+  crossorigin="anonymous"
+></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: system-ui, sans-serif; background: #12121e; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -195,7 +199,7 @@ body { font-family: system-ui, sans-serif; background: #12121e; color: #e0e0e0; 
 </div>
 
 <!-- STATUS BAR -->
-<div id="statusbar" id="statusbar">Ready — load a PDF to begin.</div>
+<div id="statusbar">Ready — load a PDF to begin.</div>
 
 <!-- LEGEND -->
 <div id="legend" style="display:none">
@@ -257,6 +261,18 @@ const S = {
   pendingX: 0, pendingY: 0,   // normalized coords of pending placement
   cursorSVG: null,      // {x,y} for connect preview
 };
+
+function escHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+const escAttr = escHtml;
+const safeNum = (n, fallback = 0) => Number.isFinite(Number(n)) ? Number(n) : fallback;
+const safeId = (id) => /^[A-Za-z0-9_-]+$/.test(String(id ?? ''));
 
 function uid() { return Math.random().toString(36).slice(2, 9); }
 function floorId() { return S.floors[S.curFloor]?.id; }
@@ -330,7 +346,7 @@ function renderFloorList() {
   list.innerHTML = S.floors.map((f, i) => {
     const count = S.nodes.filter(n => n.floorId === f.id).length;
     return `<div class="floor-tab ${i === S.curFloor ? 'active' : ''}" onclick="switchFloor(${i})">
-      ${f.name} <span class="floor-tab-badge">${count}</span>
+      ${escHtml(f.name)} <span class="floor-tab-badge">${count}</span>
     </div>`;
   }).join('');
 }
@@ -373,17 +389,19 @@ function renderGraph() {
 
     // Use corridor path waypoints if available, otherwise straight line
     if (edge.path && edge.path.length >= 2) {
-      const pts = edge.path.map(p => `${p[0]*S.W},${p[1]*S.H}`).join(' ');
+      const pts = edge.path
+        .map(p => `${safeNum(p[0])*S.W},${safeNum(p[1])*S.H}`)
+        .join(' ');
       edgeBase += `<polyline points="${pts}"
         stroke="rgba(0,0,0,0.82)" stroke-width="${sel?7:5}" stroke-linecap="round"
         stroke-linejoin="round" fill="none"/>`;
-      edgeTop  += `<polyline class="edge" data-id="${edge.id}" points="${pts}"
+      edgeTop  += `<polyline class="edge" data-id="${escAttr(edge.id)}" points="${pts}"
         stroke="${sel?'#f0d060':'#c8d8ff'}" stroke-width="${sel?3.5:2.5}"
         stroke-linecap="round" stroke-linejoin="round" fill="none" cursor="pointer"/>`;
     } else {
       edgeBase += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
         stroke="rgba(0,0,0,0.82)" stroke-width="${sel?7:5}" stroke-linecap="round"/>`;
-      edgeTop  += `<line class="edge" data-id="${edge.id}"
+      edgeTop  += `<line class="edge" data-id="${escAttr(edge.id)}"
         x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
         stroke="${sel?'#f0d060':'#c8d8ff'}" stroke-width="${sel?3.5:2.5}"
         stroke-linecap="round" cursor="pointer"/>`;
@@ -441,19 +459,19 @@ function renderGraph() {
 
     let shape = '';
     if (node.type === 'stairwell' || node.type === 'elevator') {
-      shape = `<rect class="node" data-id="${node.id}" ${F}
+      shape = `<rect class="node" data-id="${escAttr(node.id)}" ${F}
         x="${cx-r}" y="${cy-r}" width="${r*2}" height="${r*2}" rx="3"
         fill="${c}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="${sw}" cursor="pointer"/>`;
     } else if (node.type === 'hallway') {
-      shape = `<polygon class="node" data-id="${node.id}" ${F}
+      shape = `<polygon class="node" data-id="${escAttr(node.id)}" ${F}
         points="${cx},${cy-r} ${cx+r},${cy} ${cx},${cy+r} ${cx-r},${cy}"
         fill="${c}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="${sw}" cursor="pointer"/>`;
     } else if (node.type === 'door') {
-      shape = `<path class="node" data-id="${node.id}" ${F}
+      shape = `<path class="node" data-id="${escAttr(node.id)}" ${F}
         d="M${cx-r},${cy} A${r},${r} 0 0,1 ${cx},${cy-r} L${cx-r},${cy-r} Z"
         fill="${c}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="${sw}" cursor="pointer"/>`;
     } else {
-      shape = `<circle class="node" data-id="${node.id}" ${F}
+      shape = `<circle class="node" data-id="${escAttr(node.id)}" ${F}
         cx="${cx}" cy="${cy}" r="${r}"
         fill="${c}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="${sw}" cursor="pointer"/>`;
     }
@@ -463,7 +481,7 @@ function renderGraph() {
       html += `<text x="${cx}" y="${cy + r + 11}" text-anchor="middle"
         font-size="9.5" font-weight="600" fill="#fff"
         style="pointer-events:none;user-select:none;paint-order:stroke;stroke:#000;stroke-width:3;stroke-linejoin:round"
-      >${node.label}</text>`;
+      >${escHtml(node.label)}</text>`;
     }
   }
   html += '</g>';
@@ -725,16 +743,16 @@ function updateInfoPanel() {
       <div class="info-label">Label</div>
       <input class="info-input" id="ei-label" value="${escHtml(node.label)}" onchange="updateNode('label', this.value)">
       <div class="info-label">Type</div>
-      <div class="info-val">${node.type}</div>
+      <div class="info-val">${escHtml(node.type)}</div>
       <div class="info-label">Floor</div>
-      <div class="info-val">${floorName}</div>
+      <div class="info-val">${escHtml(floorName)}</div>
       <div class="info-label">Group ID</div>
       <input class="info-input" id="ei-group" value="${escHtml(node.groupId||'')}" placeholder="(none)" onchange="updateNode('groupId', this.value||null)">
       <div class="info-label">Position</div>
       <div class="info-val">${(node.x*100).toFixed(1)}%, ${(node.y*100).toFixed(1)}%</div>
       <div class="info-label">Connections</div>
       <div class="info-val">${S.edges.filter(e => e.from===id||e.to===id).length} edge(s)</div>
-      <button class="info-delete-btn" onclick="deleteNode('${id}'); updateInfoPanel()">Delete Node</button>
+      <button class="info-delete-btn" onclick="deleteNode(S.selectedId); updateInfoPanel()">Delete Node</button>
     `;
     return;
   }
@@ -743,14 +761,14 @@ function updateInfoPanel() {
     const a = getNode(edge.from), b = getNode(edge.to);
     panel.innerHTML = `
       <div class="info-label">From</div>
-      <div class="info-val">${a ? (a.label || a.id) : '?'}</div>
+      <div class="info-val">${escHtml(a ? (a.label || a.id) : '?')}</div>
       <div class="info-label">To</div>
-      <div class="info-val">${b ? (b.label || b.id) : '?'}</div>
+      <div class="info-val">${escHtml(b ? (b.label || b.id) : '?')}</div>
       <div class="info-label">Weight (px distance)</div>
       <input class="info-input" type="number" value="${Math.round(edge.weight)}" onchange="updateEdge('weight', +this.value)">
       <div class="info-label">Inter-Floor</div>
       <div class="info-val">${edge.interFloor ? 'Yes' : 'No'}</div>
-      <button class="info-delete-btn" onclick="deleteEdge('${id}'); updateInfoPanel()">Delete Edge</button>
+      <button class="info-delete-btn" onclick="deleteEdge(S.selectedId); updateInfoPanel()">Delete Edge</button>
     `;
   }
 }
@@ -763,8 +781,6 @@ function updateEdge(field, val) {
   const edge = getEdge(S.selectedId);
   if (edge) { edge[field] = val; renderGraph(); }
 }
-
-function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 // ────────────────────────────────────────────────────────────
 // CLEAR
@@ -804,16 +820,79 @@ function exportJSON() {
   setStatus(`Exported ${S.nodes.length} nodes, ${S.edges.length} edges.`);
 }
 
+function validateImportedGraph(data) {
+  if (!data || typeof data !== 'object') throw new Error('JSON must be an object.');
+  if (!Array.isArray(data.nodes) || !Array.isArray(data.edges)) {
+    throw new Error('JSON must include nodes and edges arrays.');
+  }
+  if (data.nodes.length > 10000 || data.edges.length > 20000) {
+    throw new Error('Graph is too large for this editor.');
+  }
+
+  const allowedTypes = new Set(Object.keys(NODE_COLORS));
+  const nodes = data.nodes.map((n) => {
+    if (!n || typeof n !== 'object') throw new Error('Invalid node.');
+    if (!safeId(n.id)) throw new Error(`Invalid node id: ${n.id}`);
+    if (!safeId(n.floorId)) throw new Error(`Invalid floor id: ${n.floorId}`);
+    const type = allowedTypes.has(n.type) ? n.type : 'room';
+    return {
+      id: String(n.id),
+      floorId: String(n.floorId),
+      x: Math.max(0, Math.min(1, safeNum(n.x))),
+      y: Math.max(0, Math.min(1, safeNum(n.y))),
+      label: String(n.label ?? '').slice(0, 120),
+      type,
+      groupId: n.groupId == null || n.groupId === '' ? null : String(n.groupId).slice(0, 120),
+    };
+  });
+  const nodeIds = new Set(nodes.map(n => n.id));
+
+  const edges = data.edges.map((e) => {
+    if (!e || typeof e !== 'object') throw new Error('Invalid edge.');
+    if (!safeId(e.id)) throw new Error(`Invalid edge id: ${e.id}`);
+    if (!nodeIds.has(String(e.from)) || !nodeIds.has(String(e.to))) {
+      throw new Error(`Edge references an unknown node: ${e.id}`);
+    }
+    const out = {
+      id: String(e.id),
+      from: String(e.from),
+      to: String(e.to),
+      weight: Math.max(0, safeNum(e.weight, 1)),
+      interFloor: Boolean(e.interFloor),
+    };
+    if (Array.isArray(e.path)) {
+      out.path = e.path
+        .filter(p => Array.isArray(p) && p.length >= 2)
+        .map(p => [Math.max(0, Math.min(1, safeNum(p[0]))), Math.max(0, Math.min(1, safeNum(p[1])))]);
+    }
+    return out;
+  });
+
+  return { nodes, edges };
+}
+
 async function importJSON(file) {
-  const text = await file.text();
-  const data = JSON.parse(text);
-  if (data.buildingName) document.getElementById('building-name').value = data.buildingName;
-  // Only import nodes/edges; floors come from the loaded PDF
-  S.nodes = data.nodes || [];
-  S.edges = data.edges || [];
-  S.selectedId = null;
-  renderGraph(); renderFloorList(); updateInfoPanel();
-  setStatus(`Imported ${S.nodes.length} nodes, ${S.edges.length} edges.`);
+  try {
+    if (!file || file.size > 5 * 1024 * 1024) {
+      throw new Error('Choose a graph JSON file under 5 MB.');
+    }
+    const text = await file.text();
+    const data = JSON.parse(text);
+    const { nodes, edges } = validateImportedGraph(data);
+    if (typeof data.buildingName === 'string') {
+      document.getElementById('building-name').value = data.buildingName.slice(0, 120);
+    }
+    // Only import nodes/edges; floors come from the loaded PDF
+    S.nodes = nodes;
+    S.edges = edges;
+    S.selectedId = null;
+    renderGraph(); renderFloorList(); updateInfoPanel();
+    setStatus(`Imported ${S.nodes.length} nodes, ${S.edges.length} edges.`);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Invalid graph JSON.';
+    setStatus(`Import failed: ${msg}`);
+    alert(`Import failed: ${msg}`);
+  }
 }
 
 // ────────────────────────────────────────────────────────────

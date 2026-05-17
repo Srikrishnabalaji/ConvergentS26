@@ -287,7 +287,7 @@ export default function EditGroupScreen() {
       .eq('group_id', id)
       .eq('user_id', targetUserId);
     if (error) {
-      Alert.alert('Could not update role', error.message);
+      Alert.alert('Could not update role', 'Please try again.');
       return;
     }
     loadMembers(id);
@@ -310,7 +310,7 @@ export default function EditGroupScreen() {
               .eq('group_id', id)
               .eq('user_id', targetUserId);
             if (error) {
-              Alert.alert('Error', error.message);
+              Alert.alert('Error', 'Could not remove this member.');
             } else {
               loadMembers(id);
             }
@@ -435,12 +435,19 @@ export default function EditGroupScreen() {
 
     if (isEditorOnly) {
       setLoading(true);
-      const { error } = await supabase
-        .from('groups')
-        .update({ description: description.trim() || null })
-        .eq('id', id);
+      const { data, error } = await supabase.rpc('update_group_description', {
+        p_group_id: id,
+        p_description: description.trim() || null,
+      });
       setLoading(false);
-      if (error) { Alert.alert('Failed to save', error.message); return; }
+      if (error || data?.error) {
+        const msg =
+          data?.error === 'description_too_long' ? 'Descriptions must be 1,000 characters or less.' :
+          data?.error === 'not_authorized' ? 'Only admins and editors can update this group.' :
+          'Could not save this group right now.';
+        Alert.alert('Failed to save', msg);
+        return;
+      }
       router.back();
       return;
     }
@@ -463,10 +470,12 @@ export default function EditGroupScreen() {
         const { error: uploadError } = await supabase.storage
           .from('group-images')
           .upload(path, decodeBase64(imageBase64), { contentType: imageMime, upsert: false });
-        if (!uploadError) {
-          const { data: urlData } = supabase.storage.from('group-images').getPublicUrl(path);
-          imageUrl = urlData.publicUrl;
+        if (uploadError) {
+          Alert.alert('Image upload failed', 'Please try a different image or save without changing it.');
+          return;
         }
+        const { data: urlData } = supabase.storage.from('group-images').getPublicUrl(path);
+        imageUrl = urlData.publicUrl;
       }
 
       const type = isCampusOrg ? 'campus_org' : 'friends';
@@ -494,14 +503,14 @@ export default function EditGroupScreen() {
       const { error: updateError } = await supabase.from('groups').update(updatePayload).eq('id', id);
 
       if (updateError) {
-        Alert.alert('Failed to update group', updateError.message);
+        Alert.alert('Failed to update group', 'Could not save this group right now.');
         setLoading(false);
         return;
       }
 
       router.back();
-    } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Something went wrong.');
+    } catch {
+      Alert.alert('Error', 'Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -539,7 +548,7 @@ export default function EditGroupScreen() {
             .eq('group_id', id)
             .eq('user_id', myUserId);
           setLeaving(false);
-          if (error) Alert.alert('Error', error.message);
+          if (error) Alert.alert('Error', 'Could not leave this group.');
           else router.back();
         },
       },
@@ -560,7 +569,7 @@ export default function EditGroupScreen() {
             setDeleting(true);
             const { error } = await supabase.from('groups').delete().eq('id', id);
             setDeleting(false);
-            if (error) Alert.alert('Error', error.message);
+            if (error) Alert.alert('Error', 'Could not delete this group.');
             else router.back();
           },
         },

@@ -243,7 +243,7 @@ export default function CalendarScreen() {
 
     const { data: eventData, error } = await supabase
       .from('events')
-      .select('*')
+      .select('id, title, location, time, notify, notify_in_advance, event_date, group_id')
       .eq('user_id', user.id);
 
     if (error) {
@@ -607,7 +607,16 @@ export default function CalendarScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          const { error } = await supabase.from('events').delete().eq('id', editingEventId);
+          const { data: { user } } = await supabase.auth.getUser();
+          if (!user) {
+            Alert.alert('Error', 'You must be signed in to delete events.');
+            return;
+          }
+          const { error } = await supabase
+            .from('events')
+            .delete()
+            .eq('id', editingEventId)
+            .eq('user_id', user.id);
           if (error) {
             Alert.alert('Error', 'Could not delete event.');
             return;

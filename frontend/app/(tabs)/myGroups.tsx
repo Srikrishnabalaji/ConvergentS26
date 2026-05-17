@@ -34,6 +34,16 @@ const PRIMARY = '#0B617E';
 const SECONDARY = '#C08A5E';
 const SECONDARY_RING = 'rgba(192, 138, 94, 0.22)';
 
+function safeRemoteImageUri(uri?: string | null): string | null {
+  if (!uri) return null;
+  try {
+    const url = new URL(uri);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 type GroupType = 'friends' | 'campus_org';
 type PanelType = 'my_groups' | 'discover';
 
@@ -109,10 +119,11 @@ function GroupCard({
   const hasActions = (canEdit && onEdit) || onLeave || showJoinBtn || showPendingState;
 
   const tileColor = accentForId(group.id);
+  const groupImageUri = safeRemoteImageUri(group.image_url);
   const mainContent = (
     <>
-      {group.image_url ? (
-        <Image source={{ uri: group.image_url }} className="w-[50px] h-[50px] rounded-[15px] mr-3.5 bg-surface-raised" />
+      {groupImageUri ? (
+        <Image source={{ uri: groupImageUri }} className="w-[50px] h-[50px] rounded-[15px] mr-3.5 bg-surface-raised" />
       ) : (
         <View
           style={{ backgroundColor: tileColor }}
@@ -260,6 +271,7 @@ function InviteCard({
     : 'You have been invited';
 
   const tileColor = accentForId(invite.group_id);
+  const inviteImageUri = safeRemoteImageUri(invite.group_image_url);
   return (
     <View
       style={[shadows.brand, { borderColor: SECONDARY_RING }]}
@@ -271,9 +283,9 @@ function InviteCard({
       />
       <View className="px-4 py-3.5">
         <View className="flex-row items-center mb-3">
-          {invite.group_image_url ? (
+          {inviteImageUri ? (
             <Image
-              source={{ uri: invite.group_image_url }}
+              source={{ uri: inviteImageUri }}
               className="w-[50px] h-[50px] rounded-[15px] mr-3.5 bg-surface-raised"
             />
           ) : (
@@ -657,7 +669,7 @@ export default function MyGroupsScreen() {
     });
     setJoiningId(null);
     if (error || data?.error) {
-      Alert.alert('Error', error?.message ?? data?.error ?? 'Could not join group.');
+      Alert.alert('Error', 'Could not join this group.');
     } else {
       fetchGroups();
     }
@@ -675,7 +687,7 @@ export default function MyGroupsScreen() {
       if (data?.error === 'incorrect_password') {
         Alert.alert('Wrong password', 'The password you entered is incorrect. Try again.');
       } else {
-        Alert.alert('Error', error?.message ?? data?.error ?? 'Could not join group.');
+        Alert.alert('Error', 'Could not join this group.');
       }
       return;
     }
@@ -694,7 +706,7 @@ export default function MyGroupsScreen() {
     });
     setRequestingId(null);
     if (error) {
-      Alert.alert('Error', error.message);
+      Alert.alert('Error', 'Could not request to join this group.');
     } else {
       fetchGroups();
     }
@@ -711,7 +723,7 @@ export default function MyGroupsScreen() {
       .eq('user_id', user.id);
     setCancellingRequestId(null);
     if (error) {
-      Alert.alert('Error', error.message);
+      Alert.alert('Error', 'Could not cancel your request.');
     } else {
       fetchGroups();
     }
@@ -723,7 +735,7 @@ export default function MyGroupsScreen() {
     setJoiningByCode(true);
     const { data, error } = await supabase.rpc('join_group_by_code', { p_code: code });
     setJoiningByCode(false);
-    if (error || data?.error) {
+    if (error || data?.error || !data?.success) {
       if (data?.error === 'invalid_code') {
         Alert.alert('Invalid code', 'No private group found with that code. Double-check and try again.');
       } else if (data?.error === 'already_member') {
@@ -733,7 +745,7 @@ export default function MyGroupsScreen() {
       } else if (data?.error === 'rate_limited') {
         Alert.alert('Too many attempts', 'You’ve tried too many codes. Wait a minute and try again.');
       } else {
-        Alert.alert('Error', error?.message ?? data?.error ?? 'Something went wrong.');
+        Alert.alert('Error', 'Could not join with that code.');
       }
       return;
     }
@@ -751,7 +763,7 @@ export default function MyGroupsScreen() {
     });
     setRespondingInviteId(null);
     if (error || data?.error) {
-      Alert.alert('Error', error?.message ?? data?.error ?? 'Could not respond to invite.');
+      Alert.alert('Error', 'Could not respond to this invite.');
       return;
     }
     setIncomingInvites((prev) => prev.filter((i) => i.invite_id !== inviteId));
@@ -790,7 +802,7 @@ export default function MyGroupsScreen() {
       .eq('user_id', user.id);
     setLeavingId(null);
     if (error) {
-      Alert.alert('Error', error.message);
+      Alert.alert('Error', 'Could not leave this group.');
     } else {
       setSelectedGroup(null);
       fetchGroups();
@@ -1371,6 +1383,7 @@ function GroupDetailModal({
   onClose: () => void;
   onNavigateToEvents: (g: Group) => void;
 }) {
+  const selectedGroupImageUri = safeRemoteImageUri(group?.image_url);
   return (
     <Modal visible={!!group} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable className="flex-1 bg-[rgba(15,23,42,0.5)] justify-end" onPress={onClose}>
@@ -1386,9 +1399,9 @@ function GroupDetailModal({
             >
               <View className="self-center w-10 h-[5px] rounded-[3px] bg-[#d4d8de] mt-3 mb-2" />
               <View className="items-center px-6 pb-5 pt-2">
-                {group.image_url ? (
+                {selectedGroupImageUri ? (
                   <Image
-                    source={{ uri: group.image_url }}
+                    source={{ uri: selectedGroupImageUri }}
                     className="w-[100px] h-[100px] rounded-3xl mb-4 bg-surface-raised"
                   />
                 ) : (
@@ -1468,9 +1481,9 @@ function GroupDetailModal({
                           index === detailMembers.length - 1 && 'border-b-0'
                         )}
                       >
-                        {m.profiles?.avatar_url ? (
+                        {safeRemoteImageUri(m.profiles?.avatar_url) ? (
                           <Image
-                            source={{ uri: m.profiles.avatar_url }}
+                            source={{ uri: safeRemoteImageUri(m.profiles?.avatar_url)! }}
                             className="w-10 h-10 rounded-[14px] mr-3 bg-line-neutral"
                           />
                         ) : (

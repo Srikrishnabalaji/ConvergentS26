@@ -16,6 +16,11 @@ def main():
     parser.add_argument("--prefix", default="floor", help="Filename prefix")
     args = parser.parse_args()
 
+    if os.path.basename(args.prefix) != args.prefix:
+        parser.error("--prefix must be a filename prefix, not a path")
+    if args.scale <= 0 or args.scale > 5:
+        parser.error("--scale must be between 0 and 5")
+
     os.makedirs(args.outdir, exist_ok=True)
 
     with fitz.open(args.pdf) as doc:

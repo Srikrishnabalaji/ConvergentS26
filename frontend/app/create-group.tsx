@@ -102,10 +102,12 @@ export default function CreateGroupScreen() {
         const { error: uploadError } = await supabase.storage
           .from('group-images')
           .upload(path, decodeBase64(imageBase64), { contentType: imageMime, upsert: false });
-        if (!uploadError) {
-          const { data: urlData } = supabase.storage.from('group-images').getPublicUrl(path);
-          imageUrl = urlData.publicUrl;
+        if (uploadError) {
+          Alert.alert('Image upload failed', 'Please try a different image or create the group without one.');
+          return;
         }
+        const { data: urlData } = supabase.storage.from('group-images').getPublicUrl(path);
+        imageUrl = urlData.publicUrl;
       }
 
       const type = isCampusOrg ? 'campus_org' : 'friends';
@@ -122,7 +124,12 @@ export default function CreateGroupScreen() {
       });
 
       if (groupError || rpcData?.error) {
-        Alert.alert('Failed to create group', groupError?.message ?? rpcData?.error ?? 'Something went wrong.');
+        const msg =
+          rpcData?.error === 'invalid_name' ? 'Group names must be between 1 and 120 characters.' :
+          rpcData?.error === 'description_too_long' ? 'Descriptions must be 1,000 characters or less.' :
+          rpcData?.error === 'invalid_type' ? 'Choose a valid group type.' :
+          'Please check your group details and try again.';
+        Alert.alert('Failed to create group', groupError ? 'Please try again in a moment.' : msg);
         setLoading(false);
         return;
       }
@@ -135,8 +142,8 @@ export default function CreateGroupScreen() {
       }
 
       router.back();
-    } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Something went wrong.');
+    } catch {
+      Alert.alert('Error', 'Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }

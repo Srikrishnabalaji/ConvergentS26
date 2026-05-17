@@ -1,6 +1,6 @@
-pymupdf
-opencv-python-headless
-numpy
-Pillow
-pytesseract
-easyocr
+pymupdf==1.27.2.3
+opencv-python-headless==4.13.0.92
+numpy==2.4.5
+Pillow==12.2.0
+pytesseract==0.3.13
+easyocr==1.7.2
