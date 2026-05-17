@@ -29,6 +29,7 @@ export default function CreateGroupScreen() {
   const [joinPassword, setJoinPassword] = useState('');
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [imageMime, setImageMime] = useState<string>('image/jpeg');
   const [loading, setLoading] = useState(false);
 
   const showPasswordOption = !isPrivate && !isCampusOrg;
@@ -55,10 +56,21 @@ export default function CreateGroupScreen() {
       quality: 0.8,
       base64: true,
     });
-    if (!result.canceled) {
-      setImageUri(result.assets[0].uri);
-      setImageBase64(result.assets[0].base64 ?? null);
+    if (result.canceled) return;
+    const asset = result.assets[0];
+    // Fail-fast size + MIME check. The storage policy (0009) re-checks both.
+    if (typeof asset.fileSize === 'number' && asset.fileSize > 5 * 1024 * 1024) {
+      Alert.alert('Image too large', 'Please choose an image under 5 MB.');
+      return;
     }
+    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+    if (asset.mimeType && !allowed.includes(asset.mimeType)) {
+      Alert.alert('Unsupported format', 'Use a JPEG, PNG, or WebP image.');
+      return;
+    }
+    setImageUri(asset.uri);
+    setImageBase64(asset.base64 ?? null);
+    setImageMime(asset.mimeType ?? 'image/jpeg');
   }
 
   async function handleCreate() {
@@ -81,11 +93,14 @@ export default function CreateGroupScreen() {
 
     try {
       if (imageUri && imageBase64) {
-        const ext = 'jpg';
+        const ext =
+          imageMime === 'image/png'  ? 'png'  :
+          imageMime === 'image/webp' ? 'webp' :
+                                       'jpg';
         const path = `${user.id}/${Date.now()}.${ext}`;
         const { error: uploadError } = await supabase.storage
           .from('group-images')
-          .upload(path, decode(imageBase64), { contentType: `image/${ext}`, upsert: false });
+          .upload(path, decode(imageBase64), { contentType: imageMime, upsert: false });
         if (!uploadError) {
           const { data: urlData } = supabase.storage.from('group-images').getPublicUrl(path);
           imageUrl = urlData.publicUrl;

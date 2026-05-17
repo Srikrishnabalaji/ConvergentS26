@@ -738,6 +738,8 @@ export default function MyGroupsScreen() {
         Alert.alert('Already a member', `You're already in ${data?.group_name ?? 'that group'}.`);
         setShowCodeModal(false);
         setCodeInput('');
+      } else if (data?.error === 'rate_limited') {
+        Alert.alert('Too many attempts', 'You’ve tried too many codes. Wait a minute and try again.');
       } else {
         Alert.alert('Error', error?.message ?? data?.error ?? 'Something went wrong.');
       }
@@ -814,24 +816,26 @@ export default function MyGroupsScreen() {
     let groups = searchedMyGroups.filter((g) => g.type === 'friends');
     if (myGroupsRoleFilter.size > 0) {
       groups = groups.filter((g) => {
-        const role = adminGroupIds.has(g.id) ? 'admin' : editorGroupIds.has(g.id) ? 'editor' : 'member';
+        // Filter chips are admin/member only — editors sort under "member".
+        const role: 'admin' | 'member' = adminGroupIds.has(g.id) ? 'admin' : 'member';
         return myGroupsRoleFilter.has(role);
       });
     }
     return groups;
-  }, [searchedMyGroups, myGroupsTypeFilter, myGroupsRoleFilter, adminGroupIds, editorGroupIds]);
+  }, [searchedMyGroups, myGroupsTypeFilter, myGroupsRoleFilter, adminGroupIds]);
 
   const myCampusGroups = useMemo(() => {
     if (myGroupsTypeFilter.size > 0 && !myGroupsTypeFilter.has('campus')) return [];
     let groups = searchedMyGroups.filter((g) => g.type === 'campus_org');
     if (myGroupsRoleFilter.size > 0) {
       groups = groups.filter((g) => {
-        const role = adminGroupIds.has(g.id) ? 'admin' : editorGroupIds.has(g.id) ? 'editor' : 'member';
+        // Filter chips are admin/member only — editors sort under "member".
+        const role: 'admin' | 'member' = adminGroupIds.has(g.id) ? 'admin' : 'member';
         return myGroupsRoleFilter.has(role);
       });
     }
     return groups;
-  }, [searchedMyGroups, myGroupsTypeFilter, myGroupsRoleFilter, adminGroupIds, editorGroupIds]);
+  }, [searchedMyGroups, myGroupsTypeFilter, myGroupsRoleFilter, adminGroupIds]);
 
   const searchedDiscover = useMemo(() => {
     const q = discoverSearch.trim().toLowerCase();

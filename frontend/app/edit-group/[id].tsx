@@ -8,7 +8,6 @@ import {
   Switch,
   Alert,
   ScrollView,
-  Clipboard,
   StyleSheet,
   Modal,
   Pressable,
@@ -19,6 +18,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+// react-native's Clipboard was removed in RN 0.74+. Use expo-clipboard.
+import * as Clipboard from 'expo-clipboard';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { supabase } from '@/lib/supabase';
 import { switchTrackColors, switchThumbColor } from '@/lib/switchTheme';
@@ -67,6 +68,7 @@ export default function EditGroupScreen() {
   const [isPrivate, setIsPrivate] = useState(false);
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [imageMime, setImageMime] = useState<string>('image/jpeg');
 
   const [enablePassword, setEnablePassword] = useState(false);
   const [passwordValue, setPasswordValue] = useState('');
@@ -191,7 +193,7 @@ export default function EditGroupScreen() {
 
       const { data: groupRow, error: gErr } = await supabase
         .from('groups')
-        .select('id, name, description, image_url, type, is_private, has_join_password, join_code')
+        .select('id, name, description, image_url, type, is_private, has_join_password')
         .eq('id', id)
         .single();
 
@@ -227,7 +229,12 @@ export default function EditGroupScreen() {
       setHadJoinPasswordOnLoad(hadPwd);
       setEnablePassword(hadPwd);
       setPasswordValue('');
-      setJoinCode(groupRow.join_code ?? null);
+      if (role === 'admin' && (groupRow.is_private ?? false)) {
+        const { data: codeData } = await supabase.rpc('get_group_join_code', { p_group_id: id });
+        setJoinCode((codeData as string | null) ?? null);
+      } else {
+        setJoinCode(null);
+      }
       if (groupRow.image_url) setImageUri(groupRow.image_url);
 
       if (role === 'admin') {
@@ -255,10 +262,20 @@ export default function EditGroupScreen() {
       quality: 0.8,
       base64: true,
     });
-    if (!result.canceled) {
-      setImageUri(result.assets[0].uri);
-      setImageBase64(result.assets[0].base64 ?? null);
+    if (result.canceled) return;
+    const asset = result.assets[0];
+    if (typeof asset.fileSize === 'number' && asset.fileSize > 5 * 1024 * 1024) {
+      Alert.alert('Image too large', 'Please choose an image under 5 MB.');
+      return;
     }
+    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+    if (asset.mimeType && !allowed.includes(asset.mimeType)) {
+      Alert.alert('Unsupported format', 'Use a JPEG, PNG, or WebP image.');
+      return;
+    }
+    setImageUri(asset.uri);
+    setImageBase64(asset.base64 ?? null);
+    setImageMime(asset.mimeType ?? 'image/jpeg');
   }
 
   async function setMemberRole(targetUserId: string, role: MemberRole) {
@@ -437,11 +454,14 @@ export default function EditGroupScreen() {
 
     try {
       if (imageUri && imageBase64) {
-        const ext = 'jpg';
+        const ext =
+          imageMime === 'image/png'  ? 'png'  :
+          imageMime === 'image/webp' ? 'webp' :
+                                       'jpg';
         const path = `${user.id}/${Date.now()}.${ext}`;
         const { error: uploadError } = await supabase.storage
           .from('group-images')
-          .upload(path, decode(imageBase64), { contentType: `image/${ext}`, upsert: false });
+          .upload(path, decode(imageBase64), { contentType: imageMime, upsert: false });
         if (!uploadError) {
           const { data: urlData } = supabase.storage.from('group-images').getPublicUrl(path);
           imageUrl = urlData.publicUrl;
@@ -687,8 +707,8 @@ export default function EditGroupScreen() {
                     {joinCode && (
                       <TouchableOpacity
                         className="w-[34px] h-[34px] rounded-[9px] bg-primary/10 items-center justify-center"
-                        onPress={() => {
-                          Clipboard.setString(joinCode);
+                        onPress={async () => {
+                          await Clipboard.setStringAsync(joinCode);
                           Alert.alert('Copied', 'Join code copied to clipboard.');
                         }}
                       >

@@ -40,3 +40,5 @@ yarn-error.*
 
 # Debug visualization images
 frontend/assets/debug_viz/
+
+AUDIT_REPORT.md

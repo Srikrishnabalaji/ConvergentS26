@@ -546,11 +546,12 @@ export default function CalendarScreen() {
       // Notifications disabled — skip scheduling
     }
 
-    const eventId = editingEventId ?? Date.now().toString();
     const { data: { user } } = await supabase.auth.getUser();
-    const { error } = await supabase.from('events').upsert({
-      id: eventId,
-      user_id: user?.id,
+    if (!user) {
+      Alert.alert('Error', 'You must be signed in to save events.');
+      return;
+    }
+    const payload = {
       event_date: selectedDate,
       title: newEvent.title,
       location: combinedLocation,
@@ -558,16 +559,39 @@ export default function CalendarScreen() {
       notify: newEvent.notify,
       notify_in_advance: newEvent.notifyInAdvance,
       group_id: newEvent.groupId,
-    });
-
-    if (error) {
-      Alert.alert('Error', 'Could not save event. Please try again.');
-      if (__DEV__) console.error('Supabase error:', error);
-      return;
+    };
+    // Never let the client choose the row id. On insert the DB default
+    // (gen_random_uuid::text) assigns it; on update we match by id + user_id
+    // so the row's user_id can't be rewritten.
+    let savedId: string;
+    if (editingEventId) {
+      const { error } = await supabase
+        .from('events')
+        .update(payload)
+        .eq('id', editingEventId)
+        .eq('user_id', user.id);
+      if (error) {
+        Alert.alert('Error', 'Could not save event. Please try again.');
+        if (__DEV__) console.error('Supabase error:', error);
+        return;
+      }
+      savedId = editingEventId;
+    } else {
+      const { data: inserted, error } = await supabase
+        .from('events')
+        .insert({ ...payload, user_id: user.id })
+        .select('id')
+        .single();
+      if (error || !inserted) {
+        Alert.alert('Error', 'Could not save event. Please try again.');
+        if (__DEV__) console.error('Supabase error:', error);
+        return;
+      }
+      savedId = inserted.id;
     }
 
     const localEvent = {
-      id: eventId,
+      id: savedId,
       title: newEvent.title,
       location: combinedLocation,
       time: newEvent.time,

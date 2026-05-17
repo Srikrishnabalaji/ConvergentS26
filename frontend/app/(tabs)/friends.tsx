@@ -284,14 +284,11 @@ export default function FriendsScreen() {
         return;
       }
 
-      const { data } = await supabase
-        .from('profiles')
-        .select('id, full_name')
-        .neq('id', user.id)
-        .ilike('full_name', `%${trimmed}%`)
-        .limit(30);
+      // Routed through a SECURITY DEFINER RPC instead of a direct profiles
+      // select so the frontend doesn't depend on broad profile SELECT policies.
+      const { data } = await supabase.rpc('search_profiles', { p_query: trimmed });
 
-      const raw = data ?? [];
+      const raw = (data ?? []) as { id: string; full_name: string | null }[];
       setFindSearchRawCount(raw.length);
       setFindFriends(
         raw
