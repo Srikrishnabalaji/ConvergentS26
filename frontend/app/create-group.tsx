@@ -15,6 +15,7 @@ import * as ImagePicker from 'expo-image-picker';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { supabase } from '@/lib/supabase';
 import { switchTrackColors, switchThumbColor } from '@/lib/switchTheme';
+import { decodeBase64 } from '@/lib/utils';
 import { Button, TextField, SectionLabel } from '@/components/ui';
 
 const PRIMARY_HEX = '#0B617E';
@@ -50,7 +51,7 @@ export default function CreateGroupScreen() {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.8,
@@ -100,7 +101,7 @@ export default function CreateGroupScreen() {
         const path = `${user.id}/${Date.now()}.${ext}`;
         const { error: uploadError } = await supabase.storage
           .from('group-images')
-          .upload(path, decode(imageBase64), { contentType: imageMime, upsert: false });
+          .upload(path, decodeBase64(imageBase64), { contentType: imageMime, upsert: false });
         if (!uploadError) {
           const { data: urlData } = supabase.storage.from('group-images').getPublicUrl(path);
           imageUrl = urlData.publicUrl;
@@ -275,15 +276,6 @@ function ToggleRow({
       />
     </View>
   );
-}
-
-function decode(base64: string): ArrayBuffer {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes.buffer;
 }
 
 const styles = StyleSheet.create({

@@ -33,23 +33,13 @@ import { parseLocationString, UT_BUILDINGS } from '@/lib/data/utBuildings';
 import { PageShell } from '@/components/ui';
 import { shadows } from '@/constants/shadows';
 import { cn } from '@/lib/cn';
+import { log } from '@/lib/logger';
+import { accentForId } from '@/lib/utils';
 
 const PRIMARY = '#0B617E';
 const SECONDARY = '#C08A5E';
 const SECONDARY_DEEP = '#9F6E45';
 
-const ACCENT_TILES = [
-  '#0B617E', '#2A8AA5', '#C08A5E', '#D89E3A',
-  '#D26A4A', '#C95F76', '#8B5470', '#7A8740',
-];
-function accentForId(id: string) {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) {
-    hash = ((hash << 5) - hash) + id.charCodeAt(i);
-    hash |= 0;
-  }
-  return ACCENT_TILES[Math.abs(hash) % ACCENT_TILES.length];
-}
 
 type MarkedDatesMap = NonNullable<CalendarProps['markedDates']>;
 
@@ -257,7 +247,7 @@ export default function CalendarScreen() {
       .eq('user_id', user.id);
 
     if (error) {
-      if (__DEV__) console.error('Error fetching events:', error);
+      log.error('Calendar', 'Error fetching events:', error);
       return;
     }
 
@@ -293,9 +283,7 @@ export default function CalendarScreen() {
       // Set group filter if navigating from group detail
       if (paramGroupIdSingle) {
         const groupIdStr = String(paramGroupIdSingle);
-        if (__DEV__) {
-          console.log('[Calendar] Received groupId param:', groupIdStr);
-        }
+        log.debug('Calendar', 'Received groupId param:', groupIdStr);
         setSelectedGroupFilterId(groupIdStr);
       }
     }, [paramGroupIdSingle])
@@ -565,7 +553,7 @@ export default function CalendarScreen() {
         .eq('user_id', user.id);
       if (error) {
         Alert.alert('Error', 'Could not save event. Please try again.');
-        if (__DEV__) console.error('Supabase error:', error);
+        log.error('Calendar', 'Supabase error:', error);
         return;
       }
       savedId = editingEventId;
@@ -577,7 +565,7 @@ export default function CalendarScreen() {
         .single();
       if (error || !inserted) {
         Alert.alert('Error', 'Could not save event. Please try again.');
-        if (__DEV__) console.error('Supabase error:', error);
+        log.error('Calendar', 'Supabase error:', error);
         return;
       }
       savedId = inserted.id;

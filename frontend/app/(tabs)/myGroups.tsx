@@ -23,35 +23,16 @@ import {
   PageShell,
   SearchInput,
   SegmentedTabs,
-  initialsFromName,
   type SegmentedOption,
 } from '@/components/ui';
 import { shadows } from '@/constants/shadows';
 import { cn } from '@/lib/cn';
+import { log } from '@/lib/logger';
+import { accentForId, initialsFromName } from '@/lib/utils';
 
 const PRIMARY = '#0B617E';
 const SECONDARY = '#C08A5E';
 const SECONDARY_RING = 'rgba(192, 138, 94, 0.22)';
-
-const ACCENT_TILES = [
-  '#0B617E', // teal
-  '#2A8AA5', // aqua
-  '#C08A5E', // sand
-  '#D89E3A', // amber
-  '#D26A4A', // coral
-  '#C95F76', // rose
-  '#8B5470', // plum
-  '#7A8740', // olive
-];
-
-function accentForId(id: string) {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) {
-    hash = ((hash << 5) - hash) + id.charCodeAt(i);
-    hash |= 0;
-  }
-  return ACCENT_TILES[Math.abs(hash) % ACCENT_TILES.length];
-}
 
 type GroupType = 'friends' | 'campus_org';
 type PanelType = 'my_groups' | 'discover';
@@ -606,13 +587,13 @@ export default function MyGroupsScreen() {
     const fatalError =
       memberRes.error ?? groupsRes.error ?? requestsRes.error ?? invitesRes.error;
     if (fatalError) {
-      if (__DEV__) console.error('[myGroups] fetch failed:', fatalError);
+      log.error('myGroups', 'fetch failed:', fatalError);
       Alert.alert('Could not load groups', 'Pull to refresh, or check your connection.');
       setLoading(false);
       return;
     }
     // countRes is not fatal — fall back to 0 counts if the RPC fails.
-    if (countRes.error && __DEV__) console.error('[myGroups] count RPC failed:', countRes.error);
+    if (countRes.error) log.error('myGroups', 'count RPC failed:', countRes.error);
 
     setIncomingInvites((invitesRes.data ?? []) as IncomingInvite[]);
 
@@ -941,9 +922,7 @@ export default function MyGroupsScreen() {
         onClose={() => setSelectedGroup(null)}
         onNavigateToEvents={(g) => {
           setSelectedGroup(null);
-          if (__DEV__) {
-            console.log('[MyGroups] Navigating to calendar with groupId:', g.id);
-          }
+          log.debug('myGroups', 'Navigating to calendar with groupId:', g.id);
           router.push({
             pathname: '/(tabs)/calendar',
             params: { groupId: String(g.id), groupName: g.name },

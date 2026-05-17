@@ -8,11 +8,13 @@ import {
   View,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
+import Constants from 'expo-constants';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { supabase } from '@/lib/supabase';
 import { switchTrackColors, switchThumbColor } from '@/lib/switchTheme';
 import { Hairline, PageShell } from '@/components/ui';
 import { shadows } from '@/constants/shadows';
+import { initialsFromName } from '@/lib/utils';
 
 const PRIMARY = '#0B617E';
 
@@ -30,14 +32,6 @@ const ACCENT = {
 
 const CLAY = '#B85A38';
 const CLAY_RING = 'rgba(184, 90, 56, 0.25)';
-
-function initialsFromName(name?: string | null): string {
-  if (!name) return 'U';
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return 'U';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-}
 
 type GroupStats = {
   friendGroups: number;
@@ -289,7 +283,7 @@ export default function SettingsScreen() {
         </TouchableOpacity>
 
         <Text className="text-center text-[11.5px] text-ink-dim font-medium mt-3">
-          Wavepoint · v2.6.0
+          {`Wavepoint · v${Constants.expoConfig?.version ?? '0.0.0'}`}
         </Text>
       </ScrollView>
     </PageShell>

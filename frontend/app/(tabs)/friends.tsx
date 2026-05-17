@@ -31,6 +31,8 @@ import {
 } from '@/components/ui';
 import { shadows } from '@/constants/shadows';
 import { cn } from '@/lib/cn';
+import { log } from '@/lib/logger';
+import { accentForId, initialsFromName } from '@/lib/utils';
 
 const PRIMARY = '#0B617E';
 const SECONDARY = '#C08A5E';
@@ -40,27 +42,6 @@ const SECONDARY_RING = 'rgba(192, 138, 94, 0.22)';
 const CLAY = '#B85A38';
 const OLIVE_DEEP = '#5C6A2E';
 const OLIVE_SOFT = 'rgba(122, 135, 64, 0.12)';
-
-const ACCENT_TILES = [
-  '#0B617E', '#2A8AA5', '#C08A5E', '#D89E3A',
-  '#D26A4A', '#C95F76', '#8B5470', '#7A8740',
-];
-function accentForId(id: string) {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) {
-    hash = ((hash << 5) - hash) + id.charCodeAt(i);
-    hash |= 0;
-  }
-  return ACCENT_TILES[Math.abs(hash) % ACCENT_TILES.length];
-}
-
-function initialsFromName(name?: string | null): string {
-  if (!name) return 'U';
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return 'U';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-}
 
 type Friend = {
   id: string;
@@ -248,7 +229,7 @@ export default function FriendsScreen() {
       setKnownIds(known);
       setAddedIds(new Set((pendingSent ?? []).map((r) => r.friend_id)));
     } catch (err) {
-      if (__DEV__) console.error(err);
+      log.error('Friends', err);
     } finally {
       if (!silent) setLoading(false);
     }
@@ -553,7 +534,7 @@ export default function FriendsScreen() {
       void fetchAll({ silent: true });
     } catch (err) {
       Alert.alert('Error', 'Could not save pin.');
-      if (__DEV__) console.error(err);
+      log.error('Friends', err);
     } finally {
       setPinSaving(false);
     }

@@ -25,6 +25,7 @@ import { supabase } from '@/lib/supabase';
 import { switchTrackColors, switchThumbColor } from '@/lib/switchTheme';
 import { Button, TextField, SectionLabel, Avatar } from '@/components/ui';
 import { shadows } from '@/constants/shadows';
+import { decodeBase64 } from '@/lib/utils';
 
 const PRIMARY_HEX = '#0B617E';
 
@@ -256,7 +257,7 @@ export default function EditGroupScreen() {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.8,
@@ -461,7 +462,7 @@ export default function EditGroupScreen() {
         const path = `${user.id}/${Date.now()}.${ext}`;
         const { error: uploadError } = await supabase.storage
           .from('group-images')
-          .upload(path, decode(imageBase64), { contentType: imageMime, upsert: false });
+          .upload(path, decodeBase64(imageBase64), { contentType: imageMime, upsert: false });
         if (!uploadError) {
           const { data: urlData } = supabase.storage.from('group-images').getPublicUrl(path);
           imageUrl = urlData.publicUrl;
@@ -1231,14 +1232,6 @@ function ToggleRow({
   );
 }
 
-function decode(base64: string): ArrayBuffer {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes.buffer;
-}
 
 const styles = StyleSheet.create({
   scrollContent: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 48 },
