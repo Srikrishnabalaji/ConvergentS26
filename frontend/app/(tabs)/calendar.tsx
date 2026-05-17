@@ -107,20 +107,28 @@ const getTodayString = () => {
 
 const parseTimeString = (timeStr: string) => {
   if (!timeStr || timeStr.toLowerCase() === 'now') return new Date();
-  try {
-    const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
-    if (!match) return new Date();
-    const [, hoursStr, minutesStr, period] = match;
-    let hours = parseInt(hoursStr, 10);
-    const minutes = parseInt(minutesStr, 10);
-    if (period.toUpperCase() === 'PM' && hours < 12) hours += 12;
-    if (period.toUpperCase() === 'AM' && hours === 12) hours = 0;
-    const d = new Date();
-    d.setHours(hours, minutes, 0, 0);
-    return d;
-  } catch {
-    return new Date();
-  }
+  const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
+  if (!match || match.length < 4) return new Date();
+  const hoursStr = match[1];
+  const minutesStr = match[2];
+  const period = match[3];
+  if (!hoursStr || !minutesStr || !period) return new Date();
+  let hours = parseInt(hoursStr, 10);
+  const minutes = parseInt(minutesStr, 10);
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return new Date();
+  if (period.toUpperCase() === 'PM' && hours < 12) hours += 12;
+  if (period.toUpperCase() === 'AM' && hours === 12) hours = 0;
+  const d = new Date();
+  d.setHours(hours, minutes, 0, 0);
+  return d;
+};
+
+/** Parse "YYYY-MM-DD" → Date. Returns today on malformed input. */
+const parseISODate = (dateStr: string): Date => {
+  const parts = dateStr.split('-').map(Number);
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return new Date();
+  const [year, month, day] = parts as [number, number, number];
+  return new Date(year, month - 1, day);
 };
 
 const extractBuilding = (location: string): string =>
@@ -153,8 +161,7 @@ function formatUpcomingDate(dateStr: string): string {
   ].join('-');
   if (dateStr === today) return 'Today';
   if (dateStr === tomorrow) return 'Tomorrow';
-  const [year, month, day] = dateStr.split('-').map(Number);
-  return new Date(year, month - 1, day).toLocaleDateString('en-US', {
+  return parseISODate(dateStr).toLocaleDateString('en-US', {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
@@ -162,8 +169,7 @@ function formatUpcomingDate(dateStr: string): string {
 }
 
 function formatSelectedDate(dateStr: string): string {
-  const [year, month, day] = dateStr.split('-').map(Number);
-  return new Date(year, month - 1, day).toLocaleDateString('en-US', {
+  return parseISODate(dateStr).toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'long',
     day: 'numeric',
@@ -234,7 +240,7 @@ export default function CalendarScreen() {
 
       // Track which groups the user is an admin of
       const adminIds = new Set<string>();
-      memberData.forEach((r: any) => {
+      memberData.forEach((r) => {
         if (r.role === 'admin') {
           const group = unwrapGroup(r.groups);
           if (group) {
@@ -532,19 +538,6 @@ export default function CalendarScreen() {
         ? `${newEvent.building.trim()} - ${newEvent.room.trim()}`
         : newEvent.building.trim()
       : '';
-
-    if (newEvent.notify && newEvent.notifyInAdvance != null) {
-      const [year, month, day] = selectedDate.split('-');
-      const eventTime = new Date(
-        parseInt(year),
-        parseInt(month) - 1,
-        parseInt(day),
-        timeValue.getHours(),
-        timeValue.getMinutes()
-      );
-      const triggerDate = new Date(eventTime.getTime() - newEvent.notifyInAdvance * 60000);
-      // Notifications disabled — skip scheduling
-    }
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {

@@ -23,7 +23,7 @@ import * as Clipboard from 'expo-clipboard';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { supabase } from '@/lib/supabase';
 import { switchTrackColors, switchThumbColor } from '@/lib/switchTheme';
-import { Button, TextField, SectionLabel, Avatar, initialsFromName } from '@/components/ui';
+import { Button, TextField, SectionLabel, Avatar } from '@/components/ui';
 import { shadows } from '@/constants/shadows';
 
 const PRIMARY_HEX = '#0B617E';

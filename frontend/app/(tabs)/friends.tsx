@@ -38,7 +38,6 @@ const SECONDARY_DEEP = '#9F6E45';
 const SECONDARY_SOFT = 'rgba(192, 138, 94, 0.10)';
 const SECONDARY_RING = 'rgba(192, 138, 94, 0.22)';
 const CLAY = '#B85A38';
-const OLIVE = '#7A8740';
 const OLIVE_DEEP = '#5C6A2E';
 const OLIVE_SOFT = 'rgba(122, 135, 64, 0.12)';
 
@@ -142,8 +141,6 @@ export default function FriendsScreen() {
   const [pinRoomSuggestions, setPinRoomSuggestions] = useState<GraphNode[]>([]);
   const pinBuildingDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pinShareSearch, setPinShareSearch] = useState('');
-
-  const knownIdsRef = useRef<Set<string>>(new Set());
 
   const fetchAll = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent === true;
@@ -249,7 +246,6 @@ export default function FriendsScreen() {
       );
 
       setKnownIds(known);
-      knownIdsRef.current = known;
       setAddedIds(new Set((pendingSent ?? []).map((r) => r.friend_id)));
     } catch (err) {
       if (__DEV__) console.error(err);
@@ -290,11 +286,9 @@ export default function FriendsScreen() {
 
       const raw = (data ?? []) as { id: string; full_name: string | null }[];
       setFindSearchRawCount(raw.length);
-      setFindFriends(
-        raw
-          .filter((u) => !knownIdsRef.current.has(u.id))
-          .map((u) => ({ id: u.id, name: u.full_name ?? 'Unknown' })),
-      );
+      // Store the raw results; filtering against knownIds happens at render
+      // time via `displayedFindFriends`, so there's no stale-set race.
+      setFindFriends(raw.map((u) => ({ id: u.id, name: u.full_name ?? 'Unknown' })));
       setFindLoading(false);
     }, 400);
 
@@ -303,10 +297,10 @@ export default function FriendsScreen() {
     };
   }, [search, activeTab]);
 
-  useEffect(() => {
-    if (activeTab !== 'find_friends') return;
-    setFindFriends((prev) => prev.filter((u) => !knownIds.has(u.id)));
-  }, [knownIds, activeTab]);
+  const displayedFindFriends = useMemo(
+    () => findFriends.filter((u) => !knownIds.has(u.id)),
+    [findFriends, knownIds],
+  );
 
   const q = search.trim().toLowerCase();
   const filteredMyFriends = useMemo(
@@ -326,26 +320,42 @@ export default function FriendsScreen() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
     const accepted = addedMe.find((f) => f.id === id);
+    // Optimistic: hide the incoming row, append to friends.
     setAddedMe((prev) => prev.filter((f) => f.id !== id));
     if (accepted) setMyFriends((prev) => [...prev, accepted]);
     const { error } = await supabase
       .from('friends')
       .update({ status: 'accepted' })
       .match({ user_id: id, friend_id: user.id });
-    if (error) Alert.alert('Error', 'Could not accept request.');
-    else void fetchAll({ silent: true });
+    if (error) {
+      // Roll back to keep UI consistent with the DB.
+      if (accepted) {
+        setAddedMe((prev) => (prev.some((f) => f.id === id) ? prev : [...prev, accepted]));
+        setMyFriends((prev) => prev.filter((f) => f.id !== id));
+      }
+      Alert.alert('Error', 'Could not accept request.');
+      return;
+    }
+    void fetchAll({ silent: true });
   }
 
   async function handleDismiss(id: string) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
+    const dismissed = addedMe.find((f) => f.id === id);
     setAddedMe((prev) => prev.filter((f) => f.id !== id));
     const { error } = await supabase
       .from('friends')
       .delete()
       .match({ user_id: id, friend_id: user.id });
-    if (error) Alert.alert('Error', 'Could not decline request.');
-    else void fetchAll({ silent: true });
+    if (error) {
+      if (dismissed) {
+        setAddedMe((prev) => (prev.some((f) => f.id === id) ? prev : [...prev, dismissed]));
+      }
+      Alert.alert('Error', 'Could not decline request.');
+      return;
+    }
+    void fetchAll({ silent: true });
   }
 
   async function handleAddFriend(id: string) {
@@ -381,7 +391,14 @@ export default function FriendsScreen() {
       .from('friends')
       .delete()
       .match({ user_id: user.id, friend_id: friend.id });
-    if (error) Alert.alert('Error', 'Could not cancel request.');
+    if (error) {
+      setPendingOutgoing((prev) =>
+        prev.some((f) => f.id === friend.id) ? prev : [...prev, friend],
+      );
+      setAddedIds((prev) => new Set([...prev, friend.id]));
+      Alert.alert('Error', 'Could not cancel request.');
+      return;
+    }
     void fetchAll({ silent: true });
   }
 
@@ -414,8 +431,17 @@ export default function FriendsScreen() {
       return;
     }
 
-    await supabase.from('location_shares').delete().match({ owner_id: user.id, viewer_id: friendId });
-    await supabase.from('location_shares').delete().match({ owner_id: friendId, viewer_id: user.id });
+    // Both directions must succeed or the ex-friend can still see / be seen.
+    const [shareA, shareB] = await Promise.all([
+      supabase.from('location_shares').delete().match({ owner_id: user.id, viewer_id: friendId }),
+      supabase.from('location_shares').delete().match({ owner_id: friendId, viewer_id: user.id }),
+    ]);
+    if (shareA.error || shareB.error) {
+      Alert.alert(
+        'Heads up',
+        'Friend removed, but we could not stop location sharing. Open the Pin sheet to clear it manually.',
+      );
+    }
 
     void fetchAll({ silent: true });
   }
@@ -1045,7 +1071,7 @@ export default function FriendsScreen() {
                   Type a name above to search for friends to add.
                 </Text>
               </View>
-            ) : findFriends.length === 0 ? (
+            ) : displayedFindFriends.length === 0 ? (
               findSearchRawCount > 0 ? (
                 <EmptyLine
                   text={`Everyone matching "${search.trim()}" is already a friend or has a pending request.`}
@@ -1055,10 +1081,10 @@ export default function FriendsScreen() {
               )
             ) : (
               <>
-                <SectionHeading count={findFriends.length}>
+                <SectionHeading count={displayedFindFriends.length}>
                   {`Results for "${search.trim()}"`}
                 </SectionHeading>
-                {findFriends.map((friend) => {
+                {displayedFindFriends.map((friend) => {
                   const isAdded = addedIds.has(friend.id);
                   return (
                     <FriendRow

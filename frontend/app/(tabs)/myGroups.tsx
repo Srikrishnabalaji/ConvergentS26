@@ -603,6 +603,17 @@ export default function MyGroupsScreen() {
       supabase.rpc('get_my_group_invites'),
     ]);
 
+    const fatalError =
+      memberRes.error ?? groupsRes.error ?? requestsRes.error ?? invitesRes.error;
+    if (fatalError) {
+      if (__DEV__) console.error('[myGroups] fetch failed:', fatalError);
+      Alert.alert('Could not load groups', 'Pull to refresh, or check your connection.');
+      setLoading(false);
+      return;
+    }
+    // countRes is not fatal — fall back to 0 counts if the RPC fails.
+    if (countRes.error && __DEV__) console.error('[myGroups] count RPC failed:', countRes.error);
+
     setIncomingInvites((invitesRes.data ?? []) as IncomingInvite[]);
 
     const memberRows = memberRes.data ?? [];
