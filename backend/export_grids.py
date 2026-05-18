@@ -43,13 +43,14 @@ def pack_grid(grid: np.ndarray) -> bytes:
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python export_grids.py <GDC.pdf> [--out DIR] [--scale N]")
+        print("Usage: python export_grids.py <PDF> [--out DIR] [--scale N] [--building NAME]")
         sys.exit(1)
 
     pdf_path   = sys.argv[1]
     out_dir    = DEFAULT_OUT
     scale      = DEFAULT_SCALE
-    graph_path = os.path.join(REPO_ROOT, 'frontend', 'assets', 'gdc_graph.json')
+    building   = 'gdc'  # default — used as prefix for output filenames + graph
+    graph_path = None
 
     i = 2
     while i < len(sys.argv):
@@ -59,8 +60,13 @@ def main():
             scale = float(sys.argv[i + 1]); i += 2
         elif sys.argv[i] == '--graph' and i + 1 < len(sys.argv):
             graph_path = sys.argv[i + 1]; i += 2
+        elif sys.argv[i] == '--building' and i + 1 < len(sys.argv):
+            building = sys.argv[i + 1].lower(); i += 2
         else:
             i += 1
+
+    if graph_path is None:
+        graph_path = os.path.join(REPO_ROOT, 'frontend', 'assets', f'{building}_graph.json')
 
     os.makedirs(out_dir, exist_ok=True)
 
@@ -264,14 +270,14 @@ def main():
                 "distanceData": dist_encoded,
             }
 
-            out_path = os.path.join(out_dir, f'gdc_{floor_id}.json')
+            out_path = os.path.join(out_dir, f'{building}_{floor_id}.json')
             with open(out_path, 'w') as f:
                 json.dump(out, f, separators=(',', ':'))
 
             size_kb      = os.path.getsize(out_path) / 1024
             passable_pct = 100.0 * int((grid > 0).sum()) / grid.size
             print(f"  {floor_id}: {w}×{h}, {passable_pct:.0f}% passable, "
-                  f"{size_kb:.0f} KB → gdc_{floor_id}.json")
+                  f"{size_kb:.0f} KB → {building}_{floor_id}.json")
 
     print("\nDone. Add these files to frontend/assets/grids/ and import them")
     print("in IndoorMapView.tsx via the FLOOR_GRIDS constant.")
