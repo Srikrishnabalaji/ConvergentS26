@@ -345,19 +345,20 @@ export default function FriendsScreen() {
   }
 
   async function handleAddFriend(id: string) {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
     setAddedIds((prev) => new Set([...prev, id]));
-    const { error } = await supabase
-      .from('friends')
-      .insert({ user_id: user.id, friend_id: id, status: 'pending' });
-    if (error) {
+    const { data, error } = await supabase.rpc('send_friend_request', { p_friend_id: id });
+    if (error || (data as { error?: string } | null)?.error) {
       setAddedIds((prev) => {
         const n = new Set(prev);
         n.delete(id);
         return n;
       });
-      Alert.alert('Error', 'Could not send friend request.');
+      const code = (data as { error?: string } | null)?.error;
+      const msg =
+        code === 'rate_limited'  ? 'You\'re sending requests too quickly. Try again later.' :
+        code === 'already_exists' ? 'Friend request already sent or you\'re already friends.' :
+        'Could not send friend request.';
+      Alert.alert('Error', msg);
       return;
     }
     setFindFriends((prev) => prev.filter((f) => f.id !== id));

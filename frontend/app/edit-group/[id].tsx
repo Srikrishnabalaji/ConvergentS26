@@ -769,6 +769,7 @@ export default function EditGroupScreen() {
                     value={passwordValue}
                     onChangeText={setPasswordValue}
                     autoCapitalize="none"
+                    secureTextEntry
                     containerClassName="mt-1"
                   />
                 )}

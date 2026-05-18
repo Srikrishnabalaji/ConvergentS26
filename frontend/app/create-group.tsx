@@ -237,6 +237,7 @@ export default function CreateGroupScreen() {
                 value={joinPassword}
                 onChangeText={setJoinPassword}
                 autoCapitalize="none"
+                secureTextEntry
                 containerClassName="mt-1"
               />
             )}

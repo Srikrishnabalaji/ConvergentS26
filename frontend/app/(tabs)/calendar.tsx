@@ -135,7 +135,7 @@ const validateBuilding = async (location: string): Promise<boolean> => {
     const results = await geocodeSearch(building, DEFAULT_USER_LOCATION);
     return results.length > 0;
   } catch (e) {
-    if (e instanceof GeocodingNetworkError) return true;
+    if (e instanceof GeocodingNetworkError) return false;
     return false;
   }
 };
