@@ -15,6 +15,7 @@ import { ScrollView as MapScrollView } from 'react-native-gesture-handler';
 import Svg, { Polyline, Circle } from 'react-native-svg';
 import { FloorPlanImage } from './FloorPlanImage';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { Pedometer, Magnetometer, Accelerometer } from 'expo-sensors';
 import {
   type BuildingGraph,
   type GraphNode,
@@ -138,6 +139,43 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
   const [routeSegments, setRouteSegments] = useState<RouteSegment[]>([]);
   const [activeSegmentIdx, setActiveSegmentIdx] = useState(0);
   const [routeError, setRouteError] = useState('');
+
+  // Pedometer tracking + simulation state
+  const [isTracking, setIsTracking] = useState(false);
+  const [trackingMode, setTrackingMode] = useState<'off' | 'live' | 'sim'>('off');
+  const [userPos, setUserPos] = useState<{ x: number; y: number; floorId: string } | null>(null);
+  const [debugSteps, setDebugSteps] = useState(0);
+  const [debugDistM, setDebugDistM] = useState(0);
+  const [debugDirState, setDebugDirState] = useState<'calibrating' | 'forward' | 'backward' | 'sideways' | 'idle'>('idle');
+  const pedometerSubRef = useRef<ReturnType<typeof Pedometer.watchStepCount> | null>(null);
+  const magnetometerSubRef = useRef<ReturnType<typeof Magnetometer.addListener> | null>(null);
+  const accelerometerSubRef = useRef<ReturnType<typeof Accelerometer.addListener> | null>(null);
+  const lastStepCountRef = useRef<number | null>(null);
+  const distAlongPathRef = useRef(0);
+  // Accelerometer-based step detection (real-time; iOS Pedometer is too laggy)
+  const accelStepCountRef = useRef(0);
+  const accelWasAboveRef = useRef(false);
+  const accelLastStepTimeRef = useRef(0);
+  const ACCEL_STEP_THRESHOLD = 0.18; // G's above 1.0 baseline
+  const ACCEL_MIN_STEP_INTERVAL_MS = 280; // ~214 steps/min max
+  // Magnetometer heading state
+  const headingRef = useRef<number | null>(null); // raw compass heading from magnetometer, degrees 0-360
+  const calibrationOffsetRef = useRef<number | null>(null); // offset between raw heading and floor-plan "path forward"
+  const calibrationStepsRef = useRef(0);
+  const calibrationSumRef = useRef(0); // running sum of (rawHeading - pathDir) during calibration
+  const CALIBRATION_STEPS = 8;
+  // Generous "forward" cone — magnetometer is noisy indoors so we bias toward
+  // advancing the dot. Anything not clearly opposite the path is treated as forward.
+  const FORWARD_CONE_DEG = 90;
+  // Tight "backward" cone — only near-opposite heading triggers a rewind, which
+  // prevents getting stuck after a noisy reading.
+  const BACKWARD_CONE_DEG = 40;
+  // Look-ahead window for path-direction calculation (meters). Smooths out
+  // jagged short segments so we compare against the overall corridor direction.
+  const PATH_LOOKAHEAD_M = 3;
+  const STEP_LENGTH_M = 0.75; // meters per step
+  const PAGE_W_M = 100; // GDC floor plan ~100m wide
+  const PAGE_H_M = 80;  // ~80m tall
 
   // Placement flow: when the destination came from outside (e.g. a calendar
   // event), we ask the user to drop a pin for their starting location before
@@ -311,6 +349,352 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
     setRouteError('');
     externalDestRef.current = null;
     setPlacementMode('idle');
+    // Stop tracking if active
+    pedometerSubRef.current?.remove();
+    pedometerSubRef.current = null;
+    magnetometerSubRef.current?.remove();
+    magnetometerSubRef.current = null;
+    accelerometerSubRef.current?.remove();
+    accelerometerSubRef.current = null;
+    accelStepCountRef.current = 0;
+    accelWasAboveRef.current = false;
+    accelLastStepTimeRef.current = 0;
+    headingRef.current = null;
+    calibrationOffsetRef.current = null;
+    calibrationStepsRef.current = 0;
+    calibrationSumRef.current = 0;
+    lastStepCountRef.current = null;
+    distAlongPathRef.current = 0;
+    setIsTracking(false);
+    setTrackingMode('off');
+    setUserPos(null);
+    setDebugDirState('idle');
+  }, []);
+
+  // Build a flat list of {x, y, floorId, cumDist} from all route segments
+  const flatPath = useMemo(() => {
+    if (routeSegments.length === 0) return [];
+    const pts: { x: number; y: number; floorId: string; cumDist: number }[] = [];
+    let cumDist = 0;
+    for (const seg of routeSegments) {
+      if (seg.waypoints.length === 0) continue;
+      for (let i = 0; i < seg.waypoints.length; i++) {
+        const [x, y] = seg.waypoints[i];
+        if (pts.length > 0) {
+          const prev = pts[pts.length - 1];
+          const dx = (x - prev.x) * PAGE_W_M;
+          const dy = (y - prev.y) * PAGE_H_M;
+          cumDist += Math.sqrt(dx * dx + dy * dy);
+        }
+        pts.push({ x, y, floorId: seg.floorId, cumDist });
+      }
+    }
+    return pts;
+  }, [routeSegments]);
+
+  const totalPathM = flatPath.length > 0 ? flatPath[flatPath.length - 1].cumDist : 0;
+
+  // Find the path direction at a given walked distance, averaged over the
+  // PATH_LOOKAHEAD_M window ahead. Returns degrees (0 = path going right,
+  // 90 = path going down). This is more stable than reading just the current
+  // segment, which can be very short.
+  const getPathDirectionAtDist = useCallback((distM: number): number | null => {
+    if (flatPath.length < 2) return null;
+    const startD = Math.max(0, Math.min(distM, totalPathM));
+    const endD = Math.min(totalPathM, startD + PATH_LOOKAHEAD_M);
+    // Find positions at startD and endD via the same binary-search method.
+    const lookup = (target: number) => {
+      let lo = 0, hi = flatPath.length - 1;
+      while (lo < hi - 1) {
+        const mid = (lo + hi) >> 1;
+        if (flatPath[mid].cumDist <= target) lo = mid; else hi = mid;
+      }
+      const a = flatPath[lo];
+      const b = flatPath[hi];
+      const segLen = b.cumDist - a.cumDist;
+      if (segLen < 0.001) return { x: a.x, y: a.y };
+      const t = (target - a.cumDist) / segLen;
+      return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+    };
+    const a = lookup(startD);
+    const b = lookup(endD);
+    const dx = (b.x - a.x) * PAGE_W_M;
+    const dy = (b.y - a.y) * PAGE_H_M;
+    if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return null;
+    let deg = (Math.atan2(dy, dx) * 180) / Math.PI;
+    if (deg < 0) deg += 360;
+    return deg;
+  }, [flatPath, totalPathM]);
+
+  // Shortest angular distance between two compass-style angles in degrees.
+  // Returns 0..180.
+  const angularDist = (a: number, b: number): number => {
+    const d = Math.abs(((a - b) % 360 + 540) % 360 - 180);
+    return d;
+  };
+
+  // Given distance walked (meters), find position on path
+  const getPosAtDist = useCallback((distM: number) => {
+    if (flatPath.length === 0) return null;
+    const clamped = Math.min(distM, totalPathM);
+    // Binary search for segment
+    let lo = 0, hi = flatPath.length - 1;
+    while (lo < hi - 1) {
+      const mid = (lo + hi) >> 1;
+      if (flatPath[mid].cumDist <= clamped) lo = mid; else hi = mid;
+    }
+    const a = flatPath[lo];
+    const b = flatPath[hi];
+    const segLen = b.cumDist - a.cumDist;
+    if (segLen < 0.001) return { x: b.x, y: b.y, floorId: b.floorId };
+    const t = (clamped - a.cumDist) / segLen;
+    return {
+      x: a.x + (b.x - a.x) * t,
+      y: a.y + (b.y - a.y) * t,
+      floorId: t < 0.5 ? a.floorId : b.floorId,
+    };
+  }, [flatPath, totalPathM]);
+
+  // --- Live pedometer tracking (Phase 1) ---
+  const handleStartLiveTracking = useCallback(async () => {
+    if (flatPath.length < 2) {
+      alert('No route to track yet.');
+      return;
+    }
+    try {
+      // Request motion permission first — missing this was the crash cause
+      const { status } = await Pedometer.requestPermissionsAsync();
+      if (status !== 'granted') {
+        alert('Motion permission denied. Go to Settings → WavePoint → Motion & Fitness to enable.');
+        return;
+      }
+      const avail = await Pedometer.isAvailableAsync();
+      if (!avail) {
+        alert('Pedometer not available on this device. Try the Simulate option instead.');
+        return;
+      }
+
+      const total = totalPathM;
+      const startPos = flatPath[0];
+      distAlongPathRef.current = 0;
+      lastStepCountRef.current = null;
+      headingRef.current = null;
+      calibrationOffsetRef.current = null;
+      calibrationStepsRef.current = 0;
+      calibrationSumRef.current = 0;
+      setUserPos({ x: startPos.x, y: startPos.y, floorId: startPos.floorId });
+      setActiveFloorId(startPos.floorId);
+      setDebugDirState('calibrating');
+      setTrackingMode('live');
+      setIsTracking(true);
+
+      // Magnetometer: derive compass heading from the horizontal magnetic field.
+      // Coordinate frame here is the device-frame; calibration absorbs the
+      // offset between this and the floor plan's "up".
+      Magnetometer.setUpdateInterval(100);
+      magnetometerSubRef.current = Magnetometer.addListener((data) => {
+        let h = (Math.atan2(data.y, data.x) * 180) / Math.PI;
+        if (h < 0) h += 360;
+        // Light smoothing to reduce jitter, but responsive enough to catch turns.
+        // We smooth in vector space (using sin/cos) so the average is correct
+        // across the 0°/360° wrap.
+        const prev = headingRef.current;
+        if (prev === null) {
+          headingRef.current = h;
+          return;
+        }
+        const alpha = 0.5;
+        const prevRad = (prev * Math.PI) / 180;
+        const hRad = (h * Math.PI) / 180;
+        const sx = Math.cos(prevRad) * (1 - alpha) + Math.cos(hRad) * alpha;
+        const sy = Math.sin(prevRad) * (1 - alpha) + Math.sin(hRad) * alpha;
+        let smoothed = (Math.atan2(sy, sx) * 180) / Math.PI;
+        if (smoothed < 0) smoothed += 360;
+        headingRef.current = smoothed;
+      });
+
+      // Shared step-handler — called by accelerometer (real-time) and pedometer
+      // (lagged, used only as a sanity counter for the debug display).
+      const handleSteps = (delta: number) => {
+        if (delta <= 0) return;
+        const pathDir = getPathDirectionAtDist(distAlongPathRef.current);
+        const rawHeading = headingRef.current;
+
+        if (calibrationOffsetRef.current === null) {
+          if (pathDir !== null && rawHeading !== null) {
+            let diff = ((rawHeading - pathDir) % 360 + 360) % 360;
+            calibrationSumRef.current += diff;
+          }
+          calibrationStepsRef.current += delta;
+          distAlongPathRef.current = Math.min(
+            total,
+            distAlongPathRef.current + delta * STEP_LENGTH_M,
+          );
+          if (calibrationStepsRef.current >= CALIBRATION_STEPS) {
+            const samples = Math.max(1, calibrationStepsRef.current);
+            calibrationOffsetRef.current = calibrationSumRef.current / samples;
+            setDebugDirState('forward');
+            console.log('[Phase2] Calibrated. Offset=', calibrationOffsetRef.current);
+          }
+        } else {
+          if (pathDir === null || rawHeading === null) {
+            distAlongPathRef.current = Math.min(
+              total,
+              distAlongPathRef.current + delta * STEP_LENGTH_M,
+            );
+            setDebugDirState('forward');
+          } else {
+            const userDirOnPath = ((rawHeading - calibrationOffsetRef.current) % 360 + 360) % 360;
+            const backwardDiff = angularDist(userDirOnPath, (pathDir + 180) % 360);
+            const forwardDiff = angularDist(userDirOnPath, pathDir);
+            if (backwardDiff <= BACKWARD_CONE_DEG) {
+              distAlongPathRef.current = Math.max(
+                0,
+                distAlongPathRef.current - delta * STEP_LENGTH_M,
+              );
+              setDebugDirState('backward');
+            } else if (forwardDiff <= FORWARD_CONE_DEG) {
+              distAlongPathRef.current = Math.min(
+                total,
+                distAlongPathRef.current + delta * STEP_LENGTH_M,
+              );
+              setDebugDirState('forward');
+            } else {
+              setDebugDirState('sideways');
+            }
+          }
+        }
+
+        setDebugDistM(distAlongPathRef.current);
+        const pos = getPosAtDist(distAlongPathRef.current);
+        if (pos) {
+          setUserPos(pos);
+          setActiveFloorId(pos.floorId);
+        }
+      };
+
+      // Accelerometer step detection — gives real-time updates (every ~50ms)
+      // unlike iOS Pedometer which batches by 1-2+ seconds. Rising-edge peak
+      // detection on |a| above gravity, debounced by minimum stride interval.
+      accelStepCountRef.current = 0;
+      accelWasAboveRef.current = false;
+      accelLastStepTimeRef.current = 0;
+      Accelerometer.setUpdateInterval(50);
+      accelerometerSubRef.current = Accelerometer.addListener((data) => {
+        const magnitude = Math.sqrt(data.x * data.x + data.y * data.y + data.z * data.z);
+        const aboveThreshold = magnitude > 1.0 + ACCEL_STEP_THRESHOLD;
+        const now = Date.now();
+        if (
+          aboveThreshold &&
+          !accelWasAboveRef.current &&
+          now - accelLastStepTimeRef.current > ACCEL_MIN_STEP_INTERVAL_MS
+        ) {
+          accelLastStepTimeRef.current = now;
+          accelStepCountRef.current += 1;
+          setDebugSteps(accelStepCountRef.current);
+          handleSteps(1);
+        }
+        accelWasAboveRef.current = aboveThreshold;
+      });
+
+      // Pedometer kept only as a reference — we no longer drive position from it.
+      pedometerSubRef.current = Pedometer.watchStepCount((result) => {
+        const prev = lastStepCountRef.current;
+        if (prev === null) lastStepCountRef.current = 0;
+        const baseline = lastStepCountRef.current ?? 0;
+        const delta = result.steps - baseline;
+        if (delta <= 0) return;
+        lastStepCountRef.current = result.steps;
+        // No position update — accelerometer drives that now.
+      });
+    } catch (e: any) {
+      console.warn('[Tracking] Error:', e);
+      alert('Could not start tracking: ' + (e?.message ?? String(e)));
+      setIsTracking(false);
+      setTrackingMode('off');
+    }
+  }, [flatPath, totalPathM, getPosAtDist, getPathDirectionAtDist]);
+
+  // --- Simulation mode (auto-advance for demo) ---
+  const simIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const simStepsRef = useRef(0);
+
+  const handleStartSimulation = useCallback(() => {
+    if (flatPath.length < 2) {
+      alert('No route to track yet.');
+      return;
+    }
+    const total = totalPathM;
+    const startPos = flatPath[0];
+    simStepsRef.current = 0;
+    setUserPos({ x: startPos.x, y: startPos.y, floorId: startPos.floorId });
+    setActiveFloorId(startPos.floorId);
+    setTrackingMode('sim');
+    setIsTracking(true);
+
+    simIntervalRef.current = setInterval(() => {
+      simStepsRef.current += 5;
+      const distM = simStepsRef.current * STEP_LENGTH_M;
+      if (distM >= total) {
+        const endPos = getPosAtDist(total);
+        if (endPos) {
+          setUserPos(endPos);
+          setActiveFloorId(endPos.floorId);
+        }
+        if (simIntervalRef.current) clearInterval(simIntervalRef.current);
+        simIntervalRef.current = null;
+        return;
+      }
+      const pos = getPosAtDist(distM);
+      if (pos) {
+        setUserPos(pos);
+        setActiveFloorId(pos.floorId);
+      }
+    }, 1500);
+  }, [flatPath, totalPathM, getPosAtDist]);
+
+  // --- Recalibrate (Phase 2): tell the system "I'm walking forward right now"
+  // and re-learn the offset between magnetometer and path direction. Useful
+  // when the initial calibration was off (user wasn't actually facing forward
+  // during the first 8 steps).
+  const handleRecalibrate = useCallback(() => {
+    calibrationOffsetRef.current = null;
+    calibrationStepsRef.current = 0;
+    calibrationSumRef.current = 0;
+    setDebugDirState('calibrating');
+  }, []);
+
+  // --- Stop any tracking ---
+  const handleStopTracking = useCallback(() => {
+    // Clean up pedometer
+    pedometerSubRef.current?.remove();
+    pedometerSubRef.current = null;
+    // Clean up magnetometer
+    magnetometerSubRef.current?.remove();
+    magnetometerSubRef.current = null;
+    // Clean up accelerometer
+    accelerometerSubRef.current?.remove();
+    accelerometerSubRef.current = null;
+    accelStepCountRef.current = 0;
+    accelWasAboveRef.current = false;
+    accelLastStepTimeRef.current = 0;
+    headingRef.current = null;
+    calibrationOffsetRef.current = null;
+    calibrationStepsRef.current = 0;
+    calibrationSumRef.current = 0;
+    lastStepCountRef.current = null;
+    distAlongPathRef.current = 0;
+    // Clean up simulation
+    if (simIntervalRef.current) clearInterval(simIntervalRef.current);
+    simIntervalRef.current = null;
+    simStepsRef.current = 0;
+    // Reset state
+    setIsTracking(false);
+    setTrackingMode('off');
+    setUserPos(null);
+    setDebugSteps(0);
+    setDebugDistM(0);
+    setDebugDirState('idle');
   }, []);
 
   // ------ Active segment for current floor ------
@@ -498,6 +882,13 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
                 <Circle cx={toImageX(destNode.x, imageWidth)} cy={toImageY(destNode.y, imageHeight)} r={4.5} fill="#EA4335" stroke="#fff" strokeWidth={1.5} />
               </>
             )}
+            {userPos && userPos.floorId === activeFloorId && (
+              <>
+                <Circle cx={toImageX(userPos.x, imageWidth)} cy={toImageY(userPos.y, imageHeight)} r={14} fill="#4285F4" opacity={0.15} />
+                <Circle cx={toImageX(userPos.x, imageWidth)} cy={toImageY(userPos.y, imageHeight)} r={8} fill="#4285F4" opacity={0.3} />
+                <Circle cx={toImageX(userPos.x, imageWidth)} cy={toImageY(userPos.y, imageHeight)} r={5} fill="#4285F4" stroke="#fff" strokeWidth={2} />
+              </>
+            )}
               </Svg>
             </Pressable>
           </MapScrollView>
@@ -563,6 +954,52 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
               />
             </TouchableOpacity>
           </View>
+          {trackingMode === 'off' ? (
+            <View style={styles.trackingRow}>
+              <TouchableOpacity
+                style={[styles.trackingBtn, { flex: 1 }]}
+                onPress={handleStartLiveTracking}
+              >
+                <MaterialIcons name="directions-walk" size={18} color="#fff" />
+                <Text style={styles.trackingBtnText}>Start Tracking</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.trackingBtn, { flex: 1, backgroundColor: '#7c3aed' }]}
+                onPress={handleStartSimulation}
+              >
+                <MaterialIcons name="play-arrow" size={18} color="#fff" />
+                <Text style={styles.trackingBtnText}>Simulate</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              <View style={styles.trackingRow}>
+                <TouchableOpacity
+                  style={[styles.trackingBtn, styles.trackingBtnActive, { flex: 1 }]}
+                  onPress={handleStopTracking}
+                >
+                  <MaterialIcons name="stop" size={18} color="#fff" />
+                  <Text style={styles.trackingBtnText}>
+                    Stop {trackingMode === 'live' ? 'Tracking' : 'Simulation'}
+                  </Text>
+                </TouchableOpacity>
+                {trackingMode === 'live' && (
+                  <TouchableOpacity
+                    style={[styles.trackingBtn, { flex: 1, backgroundColor: '#0891b2' }]}
+                    onPress={handleRecalibrate}
+                  >
+                    <MaterialIcons name="explore" size={18} color="#fff" />
+                    <Text style={styles.trackingBtnText}>Recalibrate</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              {trackingMode === 'live' && (
+                <Text style={{ marginTop: 8, fontSize: 12, color: TEXT_MUTED, textAlign: 'center' }}>
+                  Steps: {debugSteps} · {debugDistM.toFixed(1)}m / {totalPathM.toFixed(1)}m · {debugDirState}
+                </Text>
+              )}
+            </>
+          )}
         </View>
       )}
 
@@ -900,6 +1337,28 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#334155',
     textAlign: 'center',
+  },
+  trackingRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+  },
+  trackingBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: PRIMARY,
+  },
+  trackingBtnActive: {
+    backgroundColor: '#b91c1c',
+  },
+  trackingBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
   },
 
   bottomPanel: {
