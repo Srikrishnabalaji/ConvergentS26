@@ -18,7 +18,7 @@ type Props<T extends string> = {
 
 export function SegmentedTabs<T extends string>({ value, onChange, options, className }: Props<T>) {
   return (
-    <View className={cn('flex-row bg-[#e8edf0] rounded-[10px] p-[3px]', className)}>
+    <View className={cn('flex-row bg-canvas-soft rounded-[12px] p-[3px]', className)}>
       {options.map((opt) => {
         const active = opt.value === value;
         return (

@@ -30,11 +30,16 @@ import {
   type GraphNode,
 } from '@/lib/services/indoor-navigation';
 import { parseLocationString, UT_BUILDINGS } from '@/lib/data/utBuildings';
-import { Chip, IconButton, PageShell, SectionLabel } from '@/components/ui';
+import { PageShell } from '@/components/ui';
 import { shadows } from '@/constants/shadows';
 import { cn } from '@/lib/cn';
+import { log } from '@/lib/logger';
+import { accentForId } from '@/lib/utils';
 
 const PRIMARY = '#0B617E';
+const SECONDARY = '#C08A5E';
+const SECONDARY_DEEP = '#9F6E45';
+
 
 type MarkedDatesMap = NonNullable<CalendarProps['markedDates']>;
 
@@ -92,20 +97,28 @@ const getTodayString = () => {
 
 const parseTimeString = (timeStr: string) => {
   if (!timeStr || timeStr.toLowerCase() === 'now') return new Date();
-  try {
-    const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
-    if (!match) return new Date();
-    const [, hoursStr, minutesStr, period] = match;
-    let hours = parseInt(hoursStr, 10);
-    const minutes = parseInt(minutesStr, 10);
-    if (period.toUpperCase() === 'PM' && hours < 12) hours += 12;
-    if (period.toUpperCase() === 'AM' && hours === 12) hours = 0;
-    const d = new Date();
-    d.setHours(hours, minutes, 0, 0);
-    return d;
-  } catch {
-    return new Date();
-  }
+  const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
+  if (!match || match.length < 4) return new Date();
+  const hoursStr = match[1];
+  const minutesStr = match[2];
+  const period = match[3];
+  if (!hoursStr || !minutesStr || !period) return new Date();
+  let hours = parseInt(hoursStr, 10);
+  const minutes = parseInt(minutesStr, 10);
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return new Date();
+  if (period.toUpperCase() === 'PM' && hours < 12) hours += 12;
+  if (period.toUpperCase() === 'AM' && hours === 12) hours = 0;
+  const d = new Date();
+  d.setHours(hours, minutes, 0, 0);
+  return d;
+};
+
+/** Parse "YYYY-MM-DD" → Date. Returns today on malformed input. */
+const parseISODate = (dateStr: string): Date => {
+  const parts = dateStr.split('-').map(Number);
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return new Date();
+  const [year, month, day] = parts as [number, number, number];
+  return new Date(year, month - 1, day);
 };
 
 const extractBuilding = (location: string): string =>
@@ -122,7 +135,7 @@ const validateBuilding = async (location: string): Promise<boolean> => {
     const results = await geocodeSearch(building, DEFAULT_USER_LOCATION);
     return results.length > 0;
   } catch (e) {
-    if (e instanceof GeocodingNetworkError) return true;
+    if (e instanceof GeocodingNetworkError) return false;
     return false;
   }
 };
@@ -138,8 +151,7 @@ function formatUpcomingDate(dateStr: string): string {
   ].join('-');
   if (dateStr === today) return 'Today';
   if (dateStr === tomorrow) return 'Tomorrow';
-  const [year, month, day] = dateStr.split('-').map(Number);
-  return new Date(year, month - 1, day).toLocaleDateString('en-US', {
+  return parseISODate(dateStr).toLocaleDateString('en-US', {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
@@ -147,8 +159,7 @@ function formatUpcomingDate(dateStr: string): string {
 }
 
 function formatSelectedDate(dateStr: string): string {
-  const [year, month, day] = dateStr.split('-').map(Number);
-  return new Date(year, month - 1, day).toLocaleDateString('en-US', {
+  return parseISODate(dateStr).toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'long',
     day: 'numeric',
@@ -219,7 +230,7 @@ export default function CalendarScreen() {
 
       // Track which groups the user is an admin of
       const adminIds = new Set<string>();
-      memberData.forEach((r: any) => {
+      memberData.forEach((r) => {
         if (r.role === 'admin') {
           const group = unwrapGroup(r.groups);
           if (group) {
@@ -232,11 +243,11 @@ export default function CalendarScreen() {
 
     const { data: eventData, error } = await supabase
       .from('events')
-      .select('*')
+      .select('id, title, location, time, notify, notify_in_advance, event_date, group_id')
       .eq('user_id', user.id);
 
     if (error) {
-      if (__DEV__) console.error('Error fetching events:', error);
+      log.error('Calendar', 'Error fetching events:', error);
       return;
     }
 
@@ -272,9 +283,7 @@ export default function CalendarScreen() {
       // Set group filter if navigating from group detail
       if (paramGroupIdSingle) {
         const groupIdStr = String(paramGroupIdSingle);
-        if (__DEV__) {
-          console.log('[Calendar] Received groupId param:', groupIdStr);
-        }
+        log.debug('Calendar', 'Received groupId param:', groupIdStr);
         setSelectedGroupFilterId(groupIdStr);
       }
     }, [paramGroupIdSingle])
@@ -518,24 +527,12 @@ export default function CalendarScreen() {
         : newEvent.building.trim()
       : '';
 
-    if (newEvent.notify && newEvent.notifyInAdvance != null) {
-      const [year, month, day] = selectedDate.split('-');
-      const eventTime = new Date(
-        parseInt(year),
-        parseInt(month) - 1,
-        parseInt(day),
-        timeValue.getHours(),
-        timeValue.getMinutes()
-      );
-      const triggerDate = new Date(eventTime.getTime() - newEvent.notifyInAdvance * 60000);
-      // Notifications disabled — skip scheduling
-    }
-
-    const eventId = editingEventId ?? Date.now().toString();
     const { data: { user } } = await supabase.auth.getUser();
-    const { error } = await supabase.from('events').upsert({
-      id: eventId,
-      user_id: user?.id,
+    if (!user) {
+      Alert.alert('Error', 'You must be signed in to save events.');
+      return;
+    }
+    const payload = {
       event_date: selectedDate,
       title: newEvent.title,
       location: combinedLocation,
@@ -543,16 +540,39 @@ export default function CalendarScreen() {
       notify: newEvent.notify,
       notify_in_advance: newEvent.notifyInAdvance,
       group_id: newEvent.groupId,
-    });
-
-    if (error) {
-      Alert.alert('Error', 'Could not save event. Please try again.');
-      if (__DEV__) console.error('Supabase error:', error);
-      return;
+    };
+    // Never let the client choose the row id. On insert the DB default
+    // (gen_random_uuid::text) assigns it; on update we match by id + user_id
+    // so the row's user_id can't be rewritten.
+    let savedId: string;
+    if (editingEventId) {
+      const { error } = await supabase
+        .from('events')
+        .update(payload)
+        .eq('id', editingEventId)
+        .eq('user_id', user.id);
+      if (error) {
+        Alert.alert('Error', 'Could not save event. Please try again.');
+        log.error('Calendar', 'Supabase error:', error);
+        return;
+      }
+      savedId = editingEventId;
+    } else {
+      const { data: inserted, error } = await supabase
+        .from('events')
+        .insert({ ...payload, user_id: user.id })
+        .select('id')
+        .single();
+      if (error || !inserted) {
+        Alert.alert('Error', 'Could not save event. Please try again.');
+        log.error('Calendar', 'Supabase error:', error);
+        return;
+      }
+      savedId = inserted.id;
     }
 
     const localEvent = {
-      id: eventId,
+      id: savedId,
       title: newEvent.title,
       location: combinedLocation,
       time: newEvent.time,
@@ -587,7 +607,16 @@ export default function CalendarScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          const { error } = await supabase.from('events').delete().eq('id', editingEventId);
+          const { data: { user } } = await supabase.auth.getUser();
+          if (!user) {
+            Alert.alert('Error', 'You must be signed in to delete events.');
+            return;
+          }
+          const { error } = await supabase
+            .from('events')
+            .delete()
+            .eq('id', editingEventId)
+            .eq('user_id', user.id);
           if (error) {
             Alert.alert('Error', 'Could not delete event.');
             return;
@@ -603,15 +632,19 @@ export default function CalendarScreen() {
     ]);
   };
 
+  const totalUpcoming = upcomingEvents.length;
+  const reminderCount = useMemo(() => {
+    let n = 0;
+    Object.values(eventsVisibleByFilter).forEach((list) => {
+      list?.forEach((e) => {
+        if (e.notify) n += 1;
+      });
+    });
+    return n;
+  }, [eventsVisibleByFilter]);
+
   return (
-    <PageShell
-      title="Calendar"
-      right={
-        <IconButton tone="surface" onPress={handleOpenAddModal} accessibilityLabel="Add event">
-          <MaterialIcons name="add" size={22} color={PRIMARY} />
-        </IconButton>
-      }
-    >
+    <PageShell hideBanner safeAreaClassName="bg-canvas" contentClassName="bg-canvas">
       <EventFormModal
         visible={showAddModal}
         onClose={() => setShowAddModal(false)}
@@ -640,31 +673,60 @@ export default function CalendarScreen() {
 
       <ScrollView
         className="flex-1"
-        contentContainerClassName="px-5 pt-4 pb-12"
+        contentContainerClassName="px-4 pt-6 pb-32"
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         nestedScrollEnabled
       >
+        {/* Flat header */}
+        <View className="px-1 mb-4 flex-row items-start justify-between">
+          <View className="flex-1 pr-3">
+            <Text className="text-[36px] font-bold text-ink-strong tracking-[-1.2px] leading-[36px] mb-2">
+              Calendar
+            </Text>
+            <Text className="text-[13.5px] font-medium text-ink-subtle" numberOfLines={1}>
+              {totalUpcoming} upcoming
+              {reminderCount > 0 ? (
+                <>
+                  {' · '}
+                  <Text style={{ color: SECONDARY, fontWeight: '600' }}>
+                    {reminderCount} with reminders
+                  </Text>
+                </>
+              ) : null}
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={handleOpenAddModal}
+            activeOpacity={0.85}
+            accessibilityLabel="New event"
+            style={[shadows.primaryGlow, { backgroundColor: PRIMARY }]}
+            className="flex-row items-center rounded-[12px] px-3.5 py-2.5 gap-1.5 mt-1"
+          >
+            <MaterialIcons name="add" size={16} color="#fff" />
+            <Text className="text-white text-[13px] font-semibold">New event</Text>
+          </TouchableOpacity>
+        </View>
+
         {groups.length > 0 && (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            contentContainerClassName="flex-row items-center py-0.5"
-            className="mb-4"
+            contentContainerStyle={{ paddingRight: 8 }}
+            className="-mx-1 mb-4"
           >
-            <Chip
+            <CalChip
               label="All"
               active={!selectedGroupFilterId}
               onPress={() => setSelectedGroupFilterId(null)}
-              className="mr-2"
             />
             {groups.map((g) => (
-              <Chip
+              <CalChip
                 key={g.id}
                 label={g.name}
+                accent={accentForId(g.id)}
                 active={selectedGroupFilterId === String(g.id)}
                 onPress={() => setSelectedGroupFilterId(String(g.id))}
-                className="mr-2"
               />
             ))}
           </ScrollView>
@@ -672,38 +734,45 @@ export default function CalendarScreen() {
 
         <View
           style={shadows.card}
-          className="bg-white rounded-2xl border border-line pb-2 mb-5 overflow-hidden"
+          className="bg-white rounded-[20px] pb-2 mb-5 overflow-hidden"
         >
           <Calendar
             current={TODAY}
             onDayPress={(day: DateData) => setSelectedDate(day.dateString)}
             markedDates={markedDates}
             theme={{
+              calendarBackground: '#ffffff',
               todayTextColor: PRIMARY,
               arrowColor: PRIMARY,
               selectedDayBackgroundColor: PRIMARY,
               selectedDayTextColor: '#ffffff',
-              dotColor: PRIMARY,
-              monthTextColor: '#334155',
+              dotColor: SECONDARY,
+              selectedDotColor: '#ffffff',
+              monthTextColor: '#16140F',
+              dayTextColor: '#3A352D',
+              textSectionTitleColor: '#9A9389',
               textDayFontWeight: '500',
               textMonthFontWeight: '700',
               textDayHeaderFontWeight: '600',
+              textMonthFontSize: 16,
+              textDayHeaderFontSize: 11,
             }}
           />
         </View>
 
         {upcomingEvents.length > 0 && (
           <View className="mb-5">
-            <SectionLabel>UPCOMING</SectionLabel>
+            <CalSectionHeading title="Upcoming" count={upcomingEvents.length} />
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerClassName="flex-row gap-2.5 pr-1"
+              contentContainerStyle={{ paddingRight: 8, gap: 8 }}
             >
               {upcomingEvents.map(({ date, event }) => {
                 const groupName = event.groupId
                   ? groups.find((g) => String(g.id) === String(event.groupId))?.name
                   : null;
+                const groupAccent = event.groupId ? accentForId(String(event.groupId)) : null;
                 const isToday = date === TODAY;
                 const selected = selectedDate === date;
                 return (
@@ -711,40 +780,52 @@ export default function CalendarScreen() {
                     key={`${date}-${event.id}`}
                     onPress={() => setSelectedDate(date)}
                     activeOpacity={0.75}
-                    style={shadows.card}
-                    className={cn(
-                      'w-[150px] bg-white rounded-card border p-3',
-                      selected ? 'border-primary border-[1.5px]' : 'border-line'
-                    )}
+                    style={[
+                      shadows.card,
+                      { borderColor: selected ? PRIMARY : 'transparent', borderWidth: 1.5 },
+                    ]}
+                    className="w-[168px] bg-white rounded-[18px] p-3"
                   >
-                    <View
-                      className={cn(
-                        'self-start rounded-md px-[7px] py-[3px] mb-2',
-                        isToday ? 'bg-primary/10' : 'bg-surface-raised'
-                      )}
-                    >
-                      <Text
-                        className={cn(
-                          'text-[11px] font-semibold',
-                          isToday ? 'text-primary' : 'text-ink-subtle'
-                        )}
+                    <View className="flex-row items-center gap-2 mb-2">
+                      <View
+                        style={{ backgroundColor: groupAccent ?? SECONDARY }}
+                        className="w-7 h-7 rounded-lg items-center justify-center"
                       >
-                        {formatUpcomingDate(date)}
-                      </Text>
+                        <MaterialIcons name="event" size={14} color="#fff" />
+                      </View>
+                      <View className="flex-1 min-w-0">
+                        <Text
+                          style={{ color: isToday ? PRIMARY : '#9A9389' }}
+                          className="text-[11px] font-bold uppercase tracking-[1.2px]"
+                          numberOfLines={1}
+                        >
+                          {formatUpcomingDate(date)}
+                        </Text>
+                        <Text className="text-[12.5px] font-semibold text-ink-strong" numberOfLines={1}>
+                          {event.time}
+                        </Text>
+                      </View>
                     </View>
-                    <Text className="text-xs font-bold text-primary mb-[3px]">{event.time}</Text>
-                    <Text className="text-sm font-semibold text-ink leading-[19px]" numberOfLines={2}>
+                    <Text
+                      className="text-[14px] font-semibold text-ink-strong leading-[19px] mb-1"
+                      numberOfLines={2}
+                    >
                       {event.title}
                     </Text>
                     {event.location ? (
-                      <Text className="text-[11px] text-ink-dim mt-[3px]" numberOfLines={1}>
+                      <Text className="text-[11.5px] text-ink-subtle font-medium" numberOfLines={1}>
                         {event.location}
                       </Text>
                     ) : null}
                     {groupName ? (
-                      <View className="flex-row items-center mt-1.5 bg-primary/[0.08] rounded-md px-1.5 py-0.5 self-start">
-                        <MaterialIcons name="groups" size={10} color={PRIMARY} style={{ marginRight: 3 }} />
-                        <Text className="text-[10px] text-primary font-semibold">{groupName}</Text>
+                      <View
+                        style={{ backgroundColor: groupAccent ?? PRIMARY }}
+                        className="flex-row items-center gap-1 self-start rounded-md px-2 py-[2px] mt-2"
+                      >
+                        <MaterialIcons name="groups" size={9} color="#fff" />
+                        <Text className="text-[10px] text-white font-semibold" numberOfLines={1}>
+                          {groupName}
+                        </Text>
                       </View>
                     ) : null}
                   </TouchableOpacity>
@@ -754,28 +835,29 @@ export default function CalendarScreen() {
           </View>
         )}
 
-        <View className="flex-row items-center mb-1">
-          <SectionLabel className="mb-0 mt-0">Events</SectionLabel>
-          {sortedEvents.length > 0 && (
-            <View className="ml-2 bg-primary/[0.12] px-2 py-0.5 rounded-lg">
-              <Text className="text-xs font-bold text-primary">{sortedEvents.length}</Text>
-            </View>
-          )}
+        <View className="mt-1 mb-2">
+          <CalSectionHeading title="Events" count={sortedEvents.length || undefined} />
+          <Text className="text-[13.5px] text-ink-subtle font-medium px-1 -mt-1">
+            {formatSelectedDate(selectedDate)}
+          </Text>
         </View>
-        <Text className="text-sm text-ink-dim mb-3 font-medium">{formatSelectedDate(selectedDate)}</Text>
 
         {sortedEvents.length === 0 ? (
           <View
-            className="bg-white rounded-2xl border border-line border-dashed items-center py-8 px-5 mt-1"
+            style={{ borderColor: '#E9E5DC', borderStyle: 'dashed', borderWidth: 1 }}
+            className="bg-white rounded-[20px] items-center py-8 px-5"
           >
-            <View className="w-16 h-16 rounded-full bg-surface-subtle items-center justify-center mb-3">
-              <MaterialIcons name="event-available" size={30} color="#cbd5e1" />
+            <View
+              style={{ backgroundColor: 'rgba(11, 97, 126, 0.08)' }}
+              className="w-14 h-14 rounded-[16px] items-center justify-center mb-3"
+            >
+              <MaterialIcons name="event" size={22} color={PRIMARY} />
             </View>
-            <Text className="text-base font-semibold text-ink-body mb-1.5">No events</Text>
-            <Text className="text-sm text-ink-dim text-center leading-5 max-w-[260px]">
+            <Text className="text-[15px] font-semibold text-ink-strong mb-1">Nothing scheduled</Text>
+            <Text className="text-[13px] text-ink-subtle text-center leading-[19px] max-w-[260px]">
               {selectedGroupFilterId
-                ? 'No events for this group on this day. Tap + to add one.'
-                : 'Nothing scheduled for this day. Tap + to add an event.'}
+                ? 'No events for this group today.'
+                : 'Tap "New event" to add something.'}
             </Text>
           </View>
         ) : (
@@ -808,45 +890,136 @@ function EventCard({
   const groupName = item.groupId
     ? groups.find((g) => String(g.id) === String(item.groupId))?.name
     : null;
+  const accent = item.groupId ? accentForId(String(item.groupId)) : SECONDARY;
+  const [timeNum, timeAmPm] = item.time.includes(' ')
+    ? item.time.split(' ')
+    : [item.time, ''];
 
   return (
     <View
       style={shadows.card}
-      className="flex-row items-center bg-white rounded-card border border-line mb-2.5 py-3 px-3"
+      className="flex-row items-stretch bg-white rounded-[18px] mb-2 p-3 overflow-hidden relative"
     >
+      <View style={{ backgroundColor: accent }} className="w-[3px] rounded-sm mr-3" />
       <TouchableOpacity
-        className="flex-1 flex-row items-center min-w-0 mr-2"
+        className="flex-1 flex-row min-w-0 mr-2"
         onPress={onOpen}
         activeOpacity={0.72}
       >
-        <View className="min-w-[64px] mr-3">
-          <Text className="font-bold text-[13px] text-primary">{item.time}</Text>
+        <View className="min-w-[60px] mr-3">
+          <Text className="text-[14.5px] font-bold text-ink-strong tracking-[-0.2px] leading-[16px]">
+            {timeNum}
+          </Text>
+          {timeAmPm ? (
+            <Text className="text-[10.5px] font-semibold text-ink-dim tracking-[0.6px] mt-0.5">
+              {timeAmPm}
+            </Text>
+          ) : null}
         </View>
         <View className="flex-1 min-w-0">
-          <Text className="text-[15px] font-semibold text-ink mb-0.5" numberOfLines={2}>
+          <Text className="text-[15px] font-semibold text-ink-strong tracking-[-0.2px] mb-0.5" numberOfLines={2}>
             {item.title}
           </Text>
           {item.location ? (
-            <Text className="text-[13px] text-ink-dim" numberOfLines={1}>
-              {item.location}
-            </Text>
-          ) : null}
-          {groupName ? (
-            <View className="flex-row items-center mt-1">
-              <MaterialIcons name="groups" size={11} color={PRIMARY} style={{ marginRight: 3 }} />
-              <Text className="text-[11px] text-primary font-semibold">{groupName}</Text>
+            <View className="flex-row items-center gap-1">
+              <MaterialIcons name="place" size={11} color="#6B6660" />
+              <Text className="text-[12.5px] text-ink-subtle font-medium flex-1" numberOfLines={1}>
+                {item.location}
+              </Text>
             </View>
           ) : null}
+          <View className="flex-row items-center gap-2 mt-1.5 flex-wrap">
+            {groupName ? (
+              <View
+                style={{ backgroundColor: accent }}
+                className="flex-row items-center gap-1 rounded-lg px-2 py-[2px]"
+              >
+                <MaterialIcons name="groups" size={10} color="#fff" />
+                <Text className="text-[11px] text-white font-semibold" numberOfLines={1}>
+                  {groupName}
+                </Text>
+              </View>
+            ) : null}
+            {item.notify ? (
+              <View className="flex-row items-center gap-1">
+                <MaterialIcons name="notifications-active" size={10} color={SECONDARY_DEEP} />
+                <Text style={{ color: SECONDARY_DEEP }} className="text-[11px] font-semibold">
+                  Notify
+                </Text>
+              </View>
+            ) : null}
+          </View>
         </View>
       </TouchableOpacity>
       <TouchableOpacity
         onPress={onEdit}
         accessibilityLabel="Edit event"
-        className="flex-row items-center py-[5px] px-[9px] rounded-lg bg-white border border-line-neutral shrink-0"
+        style={{ backgroundColor: '#F0EDE5' }}
+        className="w-8 h-8 rounded-[10px] items-center justify-center self-center"
       >
-        <MaterialIcons name="edit" size={15} color={PRIMARY} style={{ marginRight: 3 }} />
-        <Text className="text-primary text-xs font-semibold">Edit</Text>
+        <MaterialIcons name="edit" size={14} color="#3A352D" />
       </TouchableOpacity>
+    </View>
+  );
+}
+
+function CalChip({
+  label,
+  active,
+  accent,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  accent?: string;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.8}
+      style={{
+        backgroundColor: active ? PRIMARY : '#fff',
+        borderColor: active ? PRIMARY : '#E9E5DC',
+      }}
+      className="flex-row items-center gap-1.5 rounded-full px-3 py-[7px] mr-1.5 border"
+    >
+      {accent ? (
+        <View
+          style={{ backgroundColor: active ? '#fff' : accent }}
+          className="w-2 h-2 rounded-full"
+        />
+      ) : null}
+      <Text
+        style={{ color: active ? '#fff' : '#3A352D' }}
+        className="text-[13px] font-semibold"
+        numberOfLines={1}
+      >
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
+function CalSectionHeading({ title, count }: { title: string; count?: number }) {
+  return (
+    <View className="flex-row items-center gap-2 px-1 mb-2.5">
+      <Text
+        style={{ color: PRIMARY }}
+        className="text-[12px] font-semibold uppercase tracking-[1.2px]"
+      >
+        {title}
+      </Text>
+      {typeof count === 'number' && count > 0 ? (
+        <View
+          style={{ backgroundColor: 'rgba(11, 97, 126, 0.10)' }}
+          className="px-[7px] py-[2px] rounded-lg"
+        >
+          <Text style={{ color: PRIMARY }} className="text-[11px] font-bold">
+            {count}
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }

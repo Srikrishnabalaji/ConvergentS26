@@ -22,7 +22,7 @@ Usage:
     python parse_floorplan.py GDC.pdf --debug --ocr-engine both
 """
 
-import argparse, json, math, os, re, random, string, sys, pickle, hashlib
+import argparse, json, math, os, re, random, string, sys, hashlib
 import fitz  # PyMuPDF
 import cv2
 import numpy as np
@@ -1704,15 +1704,17 @@ def parse_pdf(pdf_path, building_name, ocr_engine='easyocr', render_scale=3,
     # Separate caches: OCR results (slow, stable) vs grids (fast to regenerate)
     cache_dir = _cache_dir(pdf_path)
     h = hashlib.md5(os.path.abspath(pdf_path).encode()).hexdigest()[:12]
-    ocr_cache_file = os.path.join(cache_dir, f"{h}_ocr.pkl")
+    ocr_cache_file = os.path.join(cache_dir, f"{h}_ocr.json")
 
     ocr_cached = None
     if os.path.exists(ocr_cache_file):
         try:
-            with open(ocr_cache_file, 'rb') as f:
-                ocr_cached = pickle.load(f)
+            with open(ocr_cache_file, 'r', encoding='utf-8') as f:
+                raw_cache = json.load(f)
+            ocr_cached = {int(k): v for k, v in raw_cache.items()}
             print("  Using cached OCR results (grids regenerated fresh)", flush=True)
-        except Exception:
+        except Exception as e:
+            print(f"  Warning: could not load OCR cache: {e}", file=sys.stderr, flush=True)
             ocr_cached = None
 
     use_tesseract = ocr_engine in ('tesseract', 'both')
@@ -1821,8 +1823,8 @@ def parse_pdf(pdf_path, building_name, ocr_engine='easyocr', render_scale=3,
     # Save OCR cache if we computed fresh OCR data
     if ocr_cache_data:
         try:
-            with open(ocr_cache_file, 'wb') as f:
-                pickle.dump(ocr_cache_data, f)
+            with open(ocr_cache_file, 'w', encoding='utf-8') as f:
+                json.dump(ocr_cache_data, f, separators=(',', ':'))
             print(f"  Cached OCR results to {ocr_cache_file}", flush=True)
         except Exception as e:
             print(f"  Warning: could not save OCR cache: {e}", flush=True)

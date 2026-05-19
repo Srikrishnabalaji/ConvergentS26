@@ -1,6 +1,11 @@
 import React, { useMemo } from 'react';
 import { Image, Text, View } from 'react-native';
 import { cn } from '@/lib/cn';
+import { initialsFromName } from '@/lib/utils/initials';
+
+// Re-export so existing `import { initialsFromName } from '@/components/ui'`
+// call sites keep working.
+export { initialsFromName };
 
 type Size = 'sm' | 'md' | 'lg' | 'xl';
 
@@ -11,14 +16,6 @@ const sizeMap: Record<Size, { box: string; text: string }> = {
   xl: { box: 'w-16 h-16 rounded-[18px]', text: 'text-[22px]' },
 };
 
-export function initialsFromName(name?: string | null): string {
-  if (!name) return 'U';
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return 'U';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-}
-
 type AvatarProps = {
   name?: string | null;
   uri?: string | null;
@@ -27,12 +24,23 @@ type AvatarProps = {
   tone?: 'primary' | 'neutral';
 };
 
+function safeRemoteImageUri(uri?: string | null): string | null {
+  if (!uri) return null;
+  try {
+    const url = new URL(uri);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 export function Avatar({ name, uri, size = 'md', className, tone = 'primary' }: AvatarProps) {
   const initials = useMemo(() => initialsFromName(name), [name]);
+  const imageUri = useMemo(() => safeRemoteImageUri(uri), [uri]);
   const s = sizeMap[size];
 
-  if (uri) {
-    return <Image source={{ uri }} className={cn(s.box, className)} />;
+  if (imageUri) {
+    return <Image source={{ uri: imageUri }} className={cn(s.box, className)} />;
   }
 
   return (

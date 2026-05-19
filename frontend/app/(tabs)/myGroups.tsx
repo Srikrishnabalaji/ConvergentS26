@@ -20,17 +20,29 @@ import { supabase } from '@/lib/supabase';
 import {
   BottomSheet,
   Chip,
-  IconButton,
   PageShell,
   SearchInput,
   SegmentedTabs,
-  initialsFromName,
   type SegmentedOption,
 } from '@/components/ui';
 import { shadows } from '@/constants/shadows';
 import { cn } from '@/lib/cn';
+import { log } from '@/lib/logger';
+import { accentForId, initialsFromName } from '@/lib/utils';
 
 const PRIMARY = '#0B617E';
+const SECONDARY = '#C08A5E';
+const SECONDARY_RING = 'rgba(192, 138, 94, 0.22)';
+
+function safeRemoteImageUri(uri?: string | null): string | null {
+  if (!uri) return null;
+  try {
+    const url = new URL(uri);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
 
 type GroupType = 'friends' | 'campus_org';
 type PanelType = 'my_groups' | 'discover';
@@ -106,13 +118,18 @@ function GroupCard({
   const showPendingState = isPending;
   const hasActions = (canEdit && onEdit) || onLeave || showJoinBtn || showPendingState;
 
+  const tileColor = accentForId(group.id);
+  const groupImageUri = safeRemoteImageUri(group.image_url);
   const mainContent = (
     <>
-      {group.image_url ? (
-        <Image source={{ uri: group.image_url }} className="w-[50px] h-[50px] rounded-[15px] mr-3.5 bg-surface-raised" />
+      {groupImageUri ? (
+        <Image source={{ uri: groupImageUri }} className="w-[50px] h-[50px] rounded-[15px] mr-3.5 bg-surface-raised" />
       ) : (
-        <View className="w-[50px] h-[50px] rounded-[15px] mr-3.5 bg-primary/[0.07] items-center justify-center">
-          <MaterialIcons name="groups" size={22} color="#94a3b8" />
+        <View
+          style={{ backgroundColor: tileColor }}
+          className="w-[50px] h-[50px] rounded-[15px] mr-3.5 items-center justify-center"
+        >
+          <MaterialIcons name="groups" size={22} color="#fff" />
         </View>
       )}
       <View className="flex-1 min-w-0">
@@ -253,18 +270,30 @@ function InviteCard({
     ? `Invited by ${invite.inviter_name}`
     : 'You have been invited';
 
+  const tileColor = accentForId(invite.group_id);
+  const inviteImageUri = safeRemoteImageUri(invite.group_image_url);
   return (
-    <View style={shadows.brand} className="bg-white rounded-[18px] mb-3 border border-primary/20">
+    <View
+      style={[shadows.brand, { borderColor: SECONDARY_RING }]}
+      className="bg-white rounded-[18px] mb-3 border overflow-hidden relative"
+    >
+      <View
+        style={{ backgroundColor: SECONDARY }}
+        className="absolute top-0 left-0 bottom-0 w-[3px]"
+      />
       <View className="px-4 py-3.5">
         <View className="flex-row items-center mb-3">
-          {invite.group_image_url ? (
+          {inviteImageUri ? (
             <Image
-              source={{ uri: invite.group_image_url }}
+              source={{ uri: inviteImageUri }}
               className="w-[50px] h-[50px] rounded-[15px] mr-3.5 bg-surface-raised"
             />
           ) : (
-            <View className="w-[50px] h-[50px] rounded-[15px] mr-3.5 bg-primary/[0.07] items-center justify-center">
-              <MaterialIcons name="groups" size={22} color="#94a3b8" />
+            <View
+              style={{ backgroundColor: tileColor }}
+              className="w-[50px] h-[50px] rounded-[15px] mr-3.5 items-center justify-center"
+            >
+              <MaterialIcons name="groups" size={22} color="#fff" />
             </View>
           )}
           <View className="flex-1 min-w-0">
@@ -567,6 +596,17 @@ export default function MyGroupsScreen() {
       supabase.rpc('get_my_group_invites'),
     ]);
 
+    const fatalError =
+      memberRes.error ?? groupsRes.error ?? requestsRes.error ?? invitesRes.error;
+    if (fatalError) {
+      log.error('myGroups', 'fetch failed:', fatalError);
+      Alert.alert('Could not load groups', 'Pull to refresh, or check your connection.');
+      setLoading(false);
+      return;
+    }
+    // countRes is not fatal — fall back to 0 counts if the RPC fails.
+    if (countRes.error) log.error('myGroups', 'count RPC failed:', countRes.error);
+
     setIncomingInvites((invitesRes.data ?? []) as IncomingInvite[]);
 
     const memberRows = memberRes.data ?? [];
@@ -629,7 +669,7 @@ export default function MyGroupsScreen() {
     });
     setJoiningId(null);
     if (error || data?.error) {
-      Alert.alert('Error', error?.message ?? data?.error ?? 'Could not join group.');
+      Alert.alert('Error', 'Could not join this group.');
     } else {
       fetchGroups();
     }
@@ -647,7 +687,7 @@ export default function MyGroupsScreen() {
       if (data?.error === 'incorrect_password') {
         Alert.alert('Wrong password', 'The password you entered is incorrect. Try again.');
       } else {
-        Alert.alert('Error', error?.message ?? data?.error ?? 'Could not join group.');
+        Alert.alert('Error', 'Could not join this group.');
       }
       return;
     }
@@ -666,7 +706,7 @@ export default function MyGroupsScreen() {
     });
     setRequestingId(null);
     if (error) {
-      Alert.alert('Error', error.message);
+      Alert.alert('Error', 'Could not request to join this group.');
     } else {
       fetchGroups();
     }
@@ -683,7 +723,7 @@ export default function MyGroupsScreen() {
       .eq('user_id', user.id);
     setCancellingRequestId(null);
     if (error) {
-      Alert.alert('Error', error.message);
+      Alert.alert('Error', 'Could not cancel your request.');
     } else {
       fetchGroups();
     }
@@ -695,15 +735,17 @@ export default function MyGroupsScreen() {
     setJoiningByCode(true);
     const { data, error } = await supabase.rpc('join_group_by_code', { p_code: code });
     setJoiningByCode(false);
-    if (error || data?.error) {
+    if (error || data?.error || !data?.success) {
       if (data?.error === 'invalid_code') {
         Alert.alert('Invalid code', 'No private group found with that code. Double-check and try again.');
       } else if (data?.error === 'already_member') {
         Alert.alert('Already a member', `You're already in ${data?.group_name ?? 'that group'}.`);
         setShowCodeModal(false);
         setCodeInput('');
+      } else if (data?.error === 'rate_limited') {
+        Alert.alert('Too many attempts', 'You’ve tried too many codes. Wait a minute and try again.');
       } else {
-        Alert.alert('Error', error?.message ?? data?.error ?? 'Something went wrong.');
+        Alert.alert('Error', 'Could not join with that code.');
       }
       return;
     }
@@ -721,7 +763,7 @@ export default function MyGroupsScreen() {
     });
     setRespondingInviteId(null);
     if (error || data?.error) {
-      Alert.alert('Error', error?.message ?? data?.error ?? 'Could not respond to invite.');
+      Alert.alert('Error', 'Could not respond to this invite.');
       return;
     }
     setIncomingInvites((prev) => prev.filter((i) => i.invite_id !== inviteId));
@@ -760,7 +802,7 @@ export default function MyGroupsScreen() {
       .eq('user_id', user.id);
     setLeavingId(null);
     if (error) {
-      Alert.alert('Error', error.message);
+      Alert.alert('Error', 'Could not leave this group.');
     } else {
       setSelectedGroup(null);
       fetchGroups();
@@ -778,24 +820,26 @@ export default function MyGroupsScreen() {
     let groups = searchedMyGroups.filter((g) => g.type === 'friends');
     if (myGroupsRoleFilter.size > 0) {
       groups = groups.filter((g) => {
-        const role = adminGroupIds.has(g.id) ? 'admin' : editorGroupIds.has(g.id) ? 'editor' : 'member';
+        // Filter chips are admin/member only — editors sort under "member".
+        const role: 'admin' | 'member' = adminGroupIds.has(g.id) ? 'admin' : 'member';
         return myGroupsRoleFilter.has(role);
       });
     }
     return groups;
-  }, [searchedMyGroups, myGroupsTypeFilter, myGroupsRoleFilter, adminGroupIds, editorGroupIds]);
+  }, [searchedMyGroups, myGroupsTypeFilter, myGroupsRoleFilter, adminGroupIds]);
 
   const myCampusGroups = useMemo(() => {
     if (myGroupsTypeFilter.size > 0 && !myGroupsTypeFilter.has('campus')) return [];
     let groups = searchedMyGroups.filter((g) => g.type === 'campus_org');
     if (myGroupsRoleFilter.size > 0) {
       groups = groups.filter((g) => {
-        const role = adminGroupIds.has(g.id) ? 'admin' : editorGroupIds.has(g.id) ? 'editor' : 'member';
+        // Filter chips are admin/member only — editors sort under "member".
+        const role: 'admin' | 'member' = adminGroupIds.has(g.id) ? 'admin' : 'member';
         return myGroupsRoleFilter.has(role);
       });
     }
     return groups;
-  }, [searchedMyGroups, myGroupsTypeFilter, myGroupsRoleFilter, adminGroupIds, editorGroupIds]);
+  }, [searchedMyGroups, myGroupsTypeFilter, myGroupsRoleFilter, adminGroupIds]);
 
   const searchedDiscover = useMemo(() => {
     const q = discoverSearch.trim().toLowerCase();
@@ -837,18 +881,14 @@ export default function MyGroupsScreen() {
     { value: 'discover', label: 'Discover' },
   ];
 
+  const totalJoined = myGroups.length;
+  const invitesCount = incomingInvites.length;
+
   return (
     <PageShell
-      title="Groups"
-      right={
-        <IconButton
-          tone="surface"
-          onPress={() => router.push('/create-group' as never)}
-          accessibilityLabel="Create group"
-        >
-          <MaterialIcons name="add" size={22} color={PRIMARY} />
-        </IconButton>
-      }
+      hideBanner
+      safeAreaClassName="bg-canvas"
+      contentClassName="bg-canvas"
     >
       <InputModal
         visible={showCodeModal}
@@ -894,9 +934,7 @@ export default function MyGroupsScreen() {
         onClose={() => setSelectedGroup(null)}
         onNavigateToEvents={(g) => {
           setSelectedGroup(null);
-          if (__DEV__) {
-            console.log('[MyGroups] Navigating to calendar with groupId:', g.id);
-          }
+          log.debug('myGroups', 'Navigating to calendar with groupId:', g.id);
           router.push({
             pathname: '/(tabs)/calendar',
             params: { groupId: String(g.id), groupName: g.name },
@@ -968,7 +1006,33 @@ export default function MyGroupsScreen() {
         )}
       </BottomSheet>
 
-      <View className="px-5 pt-4 pb-1">
+      <View className="px-5 pt-6 pb-3">
+        <View className="flex-row items-start justify-between mb-5">
+          <View className="flex-1 pr-3">
+            <Text className="text-[36px] font-bold text-ink-strong tracking-[-1.2px] leading-[36px] mb-2">
+              Groups
+            </Text>
+            <Text className="text-[13.5px] font-medium text-ink-subtle" numberOfLines={1}>
+              {totalJoined} joined ·{' '}
+              {invitesCount > 0 ? (
+                <Text style={{ color: SECONDARY, fontWeight: '600' }}>
+                  {invitesCount} invite{invitesCount === 1 ? '' : 's'} waiting
+                </Text>
+              ) : (
+                'all caught up'
+              )}
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => router.push('/create-group' as never)}
+            activeOpacity={0.85}
+            accessibilityLabel="Create group"
+            style={[shadows.primaryGlow, { backgroundColor: PRIMARY }]}
+            className="w-[42px] h-[42px] rounded-[12px] items-center justify-center mt-1"
+          >
+            <MaterialIcons name="add" size={22} color="#fff" />
+          </TouchableOpacity>
+        </View>
         <SegmentedTabs<PanelType>
           value={activePanel}
           onChange={setActivePanel}
@@ -979,7 +1043,7 @@ export default function MyGroupsScreen() {
       <ScrollView
         ref={scrollRef}
         className="flex-1"
-        contentContainerClassName="px-5 pt-2 pb-12"
+        contentContainerClassName="px-4 pt-2 pb-32"
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchGroups} tintColor={PRIMARY} />}
@@ -992,7 +1056,7 @@ export default function MyGroupsScreen() {
               </View>
             ) : (
               <>
-                <View className="flex-row items-center mt-4 mb-1 gap-2.5">
+                <View className="flex-row items-center mt-3 mb-2 gap-2">
                   <View className="flex-1">
                     <SearchInput
                       placeholder="Search groups…"
@@ -1002,18 +1066,25 @@ export default function MyGroupsScreen() {
                       returnKeyType="search"
                     />
                   </View>
-                </View>
-
-                <View className="flex-row justify-end pb-0">
                   <TouchableOpacity
                     onPress={() => setShowMyGroupsFilter(true)}
                     activeOpacity={0.75}
-                    className="flex-row items-center gap-1.5 py-1.5 px-2.5 rounded-xl bg-surface-raised"
+                    accessibilityLabel="Filter groups"
+                    style={{
+                      borderColor: myGroupsActiveFilterCount > 0 ? 'rgba(11, 97, 126, 0.20)' : '#E9E5DC',
+                      backgroundColor: myGroupsActiveFilterCount > 0 ? 'rgba(11, 97, 126, 0.08)' : '#fff',
+                    }}
+                    className="w-[44px] h-[44px] rounded-[12px] border items-center justify-center relative"
                   >
-                    <MaterialIcons name="tune" size={16} color={myGroupsActiveFilterCount > 0 ? PRIMARY : '#64748b'} />
-                    <Text className={cn('text-xs font-semibold', myGroupsActiveFilterCount > 0 ? 'text-primary' : 'text-ink-subtle')}>
-                      {myGroupsActiveFilterCount > 0 ? `Filters (${myGroupsActiveFilterCount})` : 'Filter'}
-                    </Text>
+                    <MaterialIcons name="tune" size={18} color={myGroupsActiveFilterCount > 0 ? PRIMARY : '#3A352D'} />
+                    {myGroupsActiveFilterCount > 0 && (
+                      <View
+                        style={{ backgroundColor: PRIMARY }}
+                        className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-lg items-center justify-center"
+                      >
+                        <Text className="text-[10px] font-bold text-white">{myGroupsActiveFilterCount}</Text>
+                      </View>
+                    )}
                   </TouchableOpacity>
                 </View>
 
@@ -1128,7 +1199,7 @@ export default function MyGroupsScreen() {
 
         {activePanel === 'discover' && (
           <>
-            <View className="flex-row items-center mt-4 mb-1 gap-2.5">
+            <View className="flex-row items-center mt-3 mb-2 gap-2">
               <View className="flex-1">
                 <SearchInput
                   placeholder="Search groups…"
@@ -1145,22 +1216,33 @@ export default function MyGroupsScreen() {
                 }}
                 activeOpacity={0.8}
                 accessibilityLabel="Join with code"
-                className="w-[46px] h-[46px] rounded-xl bg-primary/10 items-center justify-center"
+                style={{
+                  backgroundColor: 'rgba(11, 97, 126, 0.08)',
+                  borderColor: 'rgba(11, 97, 126, 0.20)',
+                }}
+                className="w-[44px] h-[44px] rounded-[12px] border items-center justify-center"
               >
-                <MaterialIcons name="key" size={20} color={PRIMARY} />
+                <MaterialIcons name="vpn-key" size={18} color={PRIMARY} />
               </TouchableOpacity>
-            </View>
-
-            <View className="flex-row justify-end">
               <TouchableOpacity
                 onPress={() => setShowDiscoverFilter(true)}
                 activeOpacity={0.75}
-                className="flex-row items-center gap-1.5 py-1.5 px-2.5 rounded-xl bg-surface-raised"
+                accessibilityLabel="Filter results"
+                style={{
+                  borderColor: discoverActiveFilterCount > 0 ? 'rgba(11, 97, 126, 0.20)' : '#E9E5DC',
+                  backgroundColor: discoverActiveFilterCount > 0 ? 'rgba(11, 97, 126, 0.08)' : '#fff',
+                }}
+                className="w-[44px] h-[44px] rounded-[12px] border items-center justify-center relative"
               >
-                <MaterialIcons name="tune" size={16} color={discoverActiveFilterCount > 0 ? PRIMARY : '#64748b'} />
-                <Text className={cn('text-xs font-semibold', discoverActiveFilterCount > 0 ? 'text-primary' : 'text-ink-subtle')}>
-                  {discoverActiveFilterCount > 0 ? `Filters (${discoverActiveFilterCount})` : 'Filter'}
-                </Text>
+                <MaterialIcons name="tune" size={18} color={discoverActiveFilterCount > 0 ? PRIMARY : '#3A352D'} />
+                {discoverActiveFilterCount > 0 && (
+                  <View
+                    style={{ backgroundColor: PRIMARY }}
+                    className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-lg items-center justify-center"
+                  >
+                    <Text className="text-[10px] font-bold text-white">{discoverActiveFilterCount}</Text>
+                  </View>
+                )}
               </TouchableOpacity>
             </View>
 
@@ -1301,6 +1383,7 @@ function GroupDetailModal({
   onClose: () => void;
   onNavigateToEvents: (g: Group) => void;
 }) {
+  const selectedGroupImageUri = safeRemoteImageUri(group?.image_url);
   return (
     <Modal visible={!!group} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable className="flex-1 bg-[rgba(15,23,42,0.5)] justify-end" onPress={onClose}>
@@ -1316,14 +1399,17 @@ function GroupDetailModal({
             >
               <View className="self-center w-10 h-[5px] rounded-[3px] bg-[#d4d8de] mt-3 mb-2" />
               <View className="items-center px-6 pb-5 pt-2">
-                {group.image_url ? (
+                {selectedGroupImageUri ? (
                   <Image
-                    source={{ uri: group.image_url }}
+                    source={{ uri: selectedGroupImageUri }}
                     className="w-[100px] h-[100px] rounded-3xl mb-4 bg-surface-raised"
                   />
                 ) : (
-                  <View className="w-[100px] h-[100px] rounded-3xl bg-primary/[0.08] mb-4 items-center justify-center">
-                    <MaterialIcons name="groups" size={40} color="#94a3b8" />
+                  <View
+                    style={{ backgroundColor: accentForId(group.id) }}
+                    className="w-[100px] h-[100px] rounded-3xl mb-4 items-center justify-center"
+                  >
+                    <MaterialIcons name="groups" size={44} color="#fff" />
                   </View>
                 )}
                 <Text className="text-[24px] font-bold text-ink text-center mb-3 tracking-[-0.3px]">
@@ -1395,9 +1481,9 @@ function GroupDetailModal({
                           index === detailMembers.length - 1 && 'border-b-0'
                         )}
                       >
-                        {m.profiles?.avatar_url ? (
+                        {safeRemoteImageUri(m.profiles?.avatar_url) ? (
                           <Image
-                            source={{ uri: m.profiles.avatar_url }}
+                            source={{ uri: safeRemoteImageUri(m.profiles?.avatar_url)! }}
                             className="w-10 h-10 rounded-[14px] mr-3 bg-line-neutral"
                           />
                         ) : (
@@ -1462,18 +1548,18 @@ function SectionHeader({
   const inner = (
     <>
       <View className="flex-row items-center flex-1">
-        <Text className="text-[13px] font-bold text-ink-dim tracking-[0.8px] uppercase">{title}</Text>
+        <Text className="text-[12px] font-semibold text-primary tracking-[1.2px] uppercase">{title}</Text>
         {count > 0 && (
-          <View className="ml-2 bg-primary/10 px-[9px] py-[3px] rounded-[10px]">
-            <Text className="text-xs font-bold text-primary">{count}</Text>
+          <View className="ml-2 bg-primary/10 px-[7px] py-[2px] rounded-lg">
+            <Text className="text-[11px] font-bold text-primary">{count}</Text>
           </View>
         )}
       </View>
       {onToggle && (
         <MaterialIcons
           name={collapsed ? 'keyboard-arrow-down' : 'keyboard-arrow-up'}
-          size={20}
-          color="#b0bec5"
+          size={18}
+          color="#94a3b8"
         />
       )}
     </>
@@ -1505,11 +1591,14 @@ function EmptyCard({
   subtitle: string;
 }) {
   return (
-    <View style={shadows.card} className="bg-white rounded-[20px] py-7 px-5 items-center mb-2">
-      <View className="w-16 h-16 rounded-[20px] bg-primary/[0.06] items-center justify-center mb-3">
-        <MaterialIcons name={icon} size={30} color="#85b0bf" />
+    <View style={shadows.card} className="bg-white rounded-[18px] py-6 px-5 items-center mb-2">
+      <View
+        style={{ backgroundColor: 'rgba(192, 138, 94, 0.10)' }}
+        className="w-14 h-14 rounded-[18px] items-center justify-center mb-3"
+      >
+        <MaterialIcons name={icon} size={26} color={SECONDARY} />
       </View>
-      <Text className="text-base font-semibold text-ink-body mb-1.5">{title}</Text>
+      <Text className="text-[14.5px] font-semibold text-ink-body mb-1">{title}</Text>
       <Text className="text-[13px] text-ink-dim text-center leading-[19px] max-w-[240px]">
         {subtitle}
       </Text>

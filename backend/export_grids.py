@@ -68,6 +68,9 @@ def main():
     if graph_path is None:
         graph_path = os.path.join(REPO_ROOT, 'frontend', 'assets', f'{building}_graph.json')
 
+    if scale <= 0 or scale > 5:
+        raise SystemExit("--scale must be between 0 and 5")
+
     os.makedirs(out_dir, exist_ok=True)
 
     # Load graph nodes per floor — used to seed which connected component

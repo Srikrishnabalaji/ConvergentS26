@@ -1,17 +1,13 @@
--- WavePoint Complete Schema
--- Run this in Supabase SQL Editor on a NEW / EMPTY database only.
--- For an existing database that already has base tables, run groups-redesign.sql
--- to apply join codes, private groups, and all RPCs.
---
--- To backfill profiles for existing auth users after running this:
---   insert into public.profiles (id, full_name)
---   select id, coalesce(raw_user_meta_data->>'full_name', split_part(email, '@', 1))
---   from auth.users
---   on conflict (id) do nothing;
+-- 0001_baseline.sql
+-- Snapshot of the production schema as of 2026-05-16. Preserves known bugs
+-- verbatim; later migrations fix them. Idempotent (IF NOT EXISTS / OR
+-- REPLACE / DROP POLICY IF EXISTS).
+-- DO NOT EDIT TO FIX BUGS. Add a new migration instead.
+
+begin;
 
 -- =============================================================================
 -- HELPER FUNCTIONS
--- Must be created first — RLS policies below reference them.
 -- =============================================================================
 
 create or replace function public.is_member_of_group(gid uuid)
@@ -31,11 +27,10 @@ returns boolean as $$
 $$ language sql security definer stable;
 
 -- =============================================================================
--- TABLES
+-- TABLES (committed schema)
 -- =============================================================================
 
--- Profiles: extends auth.users with display info
-create table public.profiles (
+create table if not exists public.profiles (
   id           uuid primary key references auth.users(id) on delete cascade,
   full_name    text,
   avatar_url   text,
@@ -44,8 +39,13 @@ create table public.profiles (
   updated_at   timestamptz default now()
 );
 
--- Groups
-create table public.groups (
+-- Prod-only columns on profiles (not in committed schema.sql):
+alter table public.profiles add column if not exists location_building text;
+alter table public.profiles add column if not exists location_room     text;
+alter table public.profiles add column if not exists reputation_score  integer default 50;
+alter table public.profiles add column if not exists flagged           boolean default false;
+
+create table if not exists public.groups (
   id                uuid    primary key default gen_random_uuid(),
   name              text    not null,
   description       text,
@@ -59,11 +59,11 @@ create table public.groups (
   updated_at        timestamptz default now()
 );
 
-create unique index groups_join_code_unique on public.groups (join_code)
+create unique index if not exists groups_join_code_unique
+  on public.groups (join_code)
   where join_code is not null;
 
--- Group members
-create table public.group_members (
+create table if not exists public.group_members (
   id        uuid primary key default gen_random_uuid(),
   group_id  uuid not null references public.groups(id) on delete cascade,
   user_id   uuid not null references auth.users(id) on delete cascade,
@@ -72,8 +72,7 @@ create table public.group_members (
   unique(group_id, user_id)
 );
 
--- Group invites: pending invitations
-create table public.group_invites (
+create table if not exists public.group_invites (
   id              uuid primary key default gen_random_uuid(),
   group_id        uuid not null references public.groups(id) on delete cascade,
   invited_user_id uuid not null references auth.users(id) on delete cascade,
@@ -83,8 +82,7 @@ create table public.group_invites (
   unique(group_id, invited_user_id)
 );
 
--- Group join requests: campus org approval queue
-create table public.group_join_requests (
+create table if not exists public.group_join_requests (
   id         uuid primary key default gen_random_uuid(),
   group_id   uuid not null references public.groups(id) on delete cascade,
   user_id    uuid not null references auth.users(id) on delete cascade,
@@ -93,18 +91,16 @@ create table public.group_join_requests (
   unique(group_id, user_id)
 );
 
--- Indexes
-create index group_members_group_id_idx        on public.group_members(group_id);
-create index group_members_user_id_idx         on public.group_members(user_id);
-create index group_invites_invited_user_id_idx on public.group_invites(invited_user_id);
-create index group_join_requests_group_id_idx  on public.group_join_requests(group_id);
-create index group_join_requests_user_id_idx   on public.group_join_requests(user_id);
+create index if not exists group_members_group_id_idx        on public.group_members(group_id);
+create index if not exists group_members_user_id_idx         on public.group_members(user_id);
+create index if not exists group_invites_invited_user_id_idx on public.group_invites(invited_user_id);
+create index if not exists group_join_requests_group_id_idx  on public.group_join_requests(group_id);
+create index if not exists group_join_requests_user_id_idx   on public.group_join_requests(user_id);
 
 -- =============================================================================
--- TRIGGERS
+-- TRIGGERS (committed schema)
 -- =============================================================================
 
--- Auto-create profile on signup
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
@@ -117,11 +113,11 @@ begin
 end;
 $$ language plpgsql security definer;
 
+drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
 
--- Auto-generate join_code for private groups; clear it when made public
 create or replace function public.manage_group_join_code()
 returns trigger as $$
 declare
@@ -142,11 +138,11 @@ begin
 end;
 $$ language plpgsql;
 
+drop trigger if exists set_private_group_join_code on public.groups;
 create trigger set_private_group_join_code
   before insert or update of is_private on public.groups
   for each row execute function public.manage_group_join_code();
 
--- Keep has_join_password in sync with join_password
 create or replace function public.sync_has_join_password()
 returns trigger as $$
 begin
@@ -155,12 +151,13 @@ begin
 end;
 $$ language plpgsql;
 
+drop trigger if exists sync_group_has_join_password on public.groups;
 create trigger sync_group_has_join_password
   before insert or update of join_password on public.groups
   for each row execute function public.sync_has_join_password();
 
 -- =============================================================================
--- ROW LEVEL SECURITY
+-- ROW LEVEL SECURITY — committed schema (preserves known bugs as-is)
 -- =============================================================================
 
 alter table public.profiles            enable row level security;
@@ -169,7 +166,11 @@ alter table public.group_members       enable row level security;
 alter table public.group_invites       enable row level security;
 alter table public.group_join_requests enable row level security;
 
--- ── Profiles ─────────────────────────────────────────────────────────────────
+-- ── profiles ─────────────────────────────────────────────────────────────────
+
+drop policy if exists "Users can view own profile"                              on public.profiles;
+drop policy if exists "Users can update own profile"                            on public.profiles;
+drop policy if exists "Members can view profiles of users in shared groups"    on public.profiles;
 
 create policy "Users can view own profile"
   on public.profiles for select
@@ -191,7 +192,15 @@ create policy "Members can view profiles of users in shared groups"
     )
   );
 
--- ── Groups ───────────────────────────────────────────────────────────────────
+-- ── groups ───────────────────────────────────────────────────────────────────
+
+drop policy if exists "Members can view groups they belong to"                  on public.groups;
+drop policy if exists "Users can view groups they're invited to"                on public.groups;
+drop policy if exists "Authenticated users can browse public groups"            on public.groups;
+drop policy if exists "Authenticated users can browse all groups"               on public.groups;
+drop policy if exists "Authenticated users can create groups"                   on public.groups;
+drop policy if exists "Admins or editors can update their groups"               on public.groups;
+drop policy if exists "Admins can delete their groups"                          on public.groups;
 
 create policy "Members can view groups they belong to"
   on public.groups for select
@@ -231,7 +240,13 @@ create policy "Admins can delete their groups"
   on public.groups for delete
   using (public.is_admin_of_group(id));
 
--- ── Group members (non-recursive — uses security definer helpers) ─────────────
+-- ── group_members (self-insert policy OR's with admin-insert — fixed in 0003)
+
+drop policy if exists "Members can view group members"                          on public.group_members;
+drop policy if exists "Admins can add members"                                  on public.group_members;
+drop policy if exists "Users can join groups (first member becomes admin)"      on public.group_members;
+drop policy if exists "Admins can update group member roles"                    on public.group_members;
+drop policy if exists "Users can leave groups; admins can remove members"      on public.group_members;
 
 create policy "Members can view group members"
   on public.group_members for select
@@ -254,7 +269,11 @@ create policy "Users can leave groups; admins can remove members"
   on public.group_members for delete
   using (auth.uid() = user_id or public.is_admin_of_group(group_id));
 
--- ── Group invites ─────────────────────────────────────────────────────────────
+-- ── group_invites ────────────────────────────────────────────────────────────
+
+drop policy if exists "Users can view invites sent to them"                     on public.group_invites;
+drop policy if exists "Group admins can create invites"                         on public.group_invites;
+drop policy if exists "Invitees can update their invite status"                 on public.group_invites;
 
 create policy "Users can view invites sent to them"
   on public.group_invites for select
@@ -268,7 +287,11 @@ create policy "Invitees can update their invite status"
   on public.group_invites for update
   using (invited_user_id = auth.uid());
 
--- ── Group join requests ───────────────────────────────────────────────────────
+-- ── group_join_requests ──────────────────────────────────────────────────────
+
+drop policy if exists "Users can view own join requests or group admins can view" on public.group_join_requests;
+drop policy if exists "Users can create join requests for themselves"             on public.group_join_requests;
+drop policy if exists "Users can cancel own pending join requests"                on public.group_join_requests;
 
 create policy "Users can view own join requests or group admins can view"
   on public.group_join_requests for select
@@ -282,12 +305,14 @@ create policy "Users can cancel own pending join requests"
   on public.group_join_requests for delete
   using (auth.uid() = user_id and status = 'pending');
 
+-- INTENTIONALLY no UPDATE policy on group_join_requests. Status changes only
+-- via the SECURITY DEFINER RPC `handle_join_request`. Adding a permissive
+-- UPDATE policy here would let requesters self-approve.
+
 -- =============================================================================
--- RPCs
+-- RPCs (committed schema, verbatim)
 -- =============================================================================
 
--- Atomically create a group and add the creator as admin.
--- (Needed so RETURNING on private groups doesn't fail the SELECT RLS check.)
 create or replace function public.create_group(
   p_name          text,
   p_description   text    default null,
@@ -315,7 +340,6 @@ $$;
 
 grant execute on function public.create_group(text, text, text, boolean, text, text) to authenticated;
 
--- Join a private group by code
 create or replace function public.join_group_by_code(p_code text)
 returns json
 language plpgsql security definer
@@ -350,7 +374,6 @@ $$;
 
 grant execute on function public.join_group_by_code(text) to authenticated;
 
--- Join a public friend group (verifies password if set)
 create or replace function public.join_friend_group(p_group_id uuid, p_password text default null)
 returns json
 language plpgsql security definer
@@ -395,7 +418,6 @@ $$;
 
 grant execute on function public.join_friend_group(uuid, text) to authenticated;
 
--- Approve or decline a campus org join request (admin only)
 create or replace function public.handle_join_request(p_request_id uuid, p_action text)
 returns json
 language plpgsql security definer
@@ -435,7 +457,6 @@ $$;
 
 grant execute on function public.handle_join_request(uuid, text) to authenticated;
 
--- Regenerate join code for a private group (admin only)
 create or replace function public.regenerate_group_join_code(p_group_id uuid)
 returns json
 language plpgsql security definer
@@ -468,7 +489,6 @@ $$;
 
 grant execute on function public.regenerate_group_join_code(uuid) to authenticated;
 
--- Get the current user's join requests
 create or replace function public.get_my_join_requests()
 returns table(group_id uuid, status text)
 language sql security definer stable
@@ -480,7 +500,6 @@ $$;
 
 grant execute on function public.get_my_join_requests() to authenticated;
 
--- Get pending join requests for a group (admin only)
 create or replace function public.get_group_join_requests(p_group_id uuid)
 returns table(id uuid, user_id uuid, full_name text, created_at timestamptz)
 language plpgsql security definer stable
@@ -501,7 +520,6 @@ $$;
 
 grant execute on function public.get_group_join_requests(uuid) to authenticated;
 
--- Admin: search profiles to invite (excludes existing members & pending invites)
 create or replace function public.search_users_for_invite(p_group_id uuid, p_query text)
 returns table(user_id uuid, full_name text, avatar_url text)
 language plpgsql security definer stable
@@ -540,7 +558,6 @@ $$;
 
 grant execute on function public.search_users_for_invite(uuid, text) to authenticated;
 
--- Admin: invite a user to a group
 create or replace function public.invite_user_to_group(p_group_id uuid, p_user_id uuid)
 returns json
 language plpgsql security definer
@@ -588,7 +605,6 @@ $$;
 
 grant execute on function public.invite_user_to_group(uuid, uuid) to authenticated;
 
--- Admin: list pending invites sent for a group
 create or replace function public.get_group_invites(p_group_id uuid)
 returns table(
   invite_id  uuid,
@@ -615,7 +631,6 @@ $$;
 
 grant execute on function public.get_group_invites(uuid) to authenticated;
 
--- Admin: revoke a pending invite
 create or replace function public.revoke_group_invite(p_invite_id uuid)
 returns json
 language plpgsql security definer
@@ -642,7 +657,6 @@ $$;
 
 grant execute on function public.revoke_group_invite(uuid) to authenticated;
 
--- Invitee: list pending invites received (with group + inviter info)
 create or replace function public.get_my_group_invites()
 returns table(
   invite_id         uuid,
@@ -680,7 +694,6 @@ $$;
 
 grant execute on function public.get_my_group_invites() to authenticated;
 
--- Invitee: accept or decline an invite
 create or replace function public.respond_to_group_invite(p_invite_id uuid, p_action text)
 returns json
 language plpgsql security definer
@@ -719,7 +732,6 @@ $$;
 
 grant execute on function public.respond_to_group_invite(uuid, text) to authenticated;
 
--- Member counts for all groups (bypasses RLS so browse UI shows correct counts)
 create or replace function public.get_group_member_counts()
 returns table(group_id uuid, member_count bigint)
 language sql security definer stable
@@ -732,12 +744,15 @@ $$;
 grant execute on function public.get_group_member_counts() to authenticated;
 
 -- =============================================================================
--- STORAGE
+-- STORAGE (committed schema — known bug preserved; tightened in 0009)
 -- =============================================================================
 
 insert into storage.buckets (id, name, public)
 values ('group-images', 'group-images', true)
 on conflict (id) do nothing;
+
+drop policy if exists "Authenticated users can upload group images" on storage.objects;
+drop policy if exists "Anyone can view group images"                 on storage.objects;
 
 create policy "Authenticated users can upload group images"
   on storage.objects for insert
@@ -749,3 +764,218 @@ create policy "Authenticated users can upload group images"
 create policy "Anyone can view group images"
   on storage.objects for select
   using (bucket_id = 'group-images');
+
+-- =============================================================================
+-- Prod-only tables and policy drift (from live dump 2026-05-16)
+-- Preserves prod state verbatim, including: duplicate FKs on friends, text
+-- event ids, location_shares with no created_at, missing WITH CHECK on
+-- several UPDATE policies, and the world-readable profile policy.
+-- =============================================================================
+
+-- ── floors ──────────────────────────────────────────────────────────────────
+create table if not exists public.floors (
+  id              uuid primary key default gen_random_uuid(),
+  building_id     uuid,
+  floor_number    integer not null,
+  floor_plan_url  text,
+  created_at      timestamp default now()
+);
+-- floors.building_id -> public.buildings(id) -- TODO: confirm in next dump pass
+-- No RLS policies observed on floors as of 2026-05-16.
+
+-- ── friends ─────────────────────────────────────────────────────────────────
+create table if not exists public.friends (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid,
+  friend_id   uuid,
+  status      text default 'pending',
+  created_at  timestamp default now()
+);
+
+-- Prod has 4 FKs on friends (two redundant pairs: to auth.users and to profiles).
+do $$ begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'friends_user_id_fkey'
+  ) then
+    alter table public.friends
+      add constraint friends_user_id_fkey
+      foreign key (user_id) references auth.users(id) on delete cascade;
+  end if;
+  if not exists (
+    select 1 from pg_constraint where conname = 'friends_friend_id_fkey'
+  ) then
+    alter table public.friends
+      add constraint friends_friend_id_fkey
+      foreign key (friend_id) references auth.users(id);
+  end if;
+  if not exists (
+    select 1 from pg_constraint where conname = 'friends_user_id_fkey1'
+  ) then
+    alter table public.friends
+      add constraint friends_user_id_fkey1
+      foreign key (user_id) references public.profiles(id);
+  end if;
+  if not exists (
+    select 1 from pg_constraint where conname = 'friends_friend_id_fkey1'
+  ) then
+    alter table public.friends
+      add constraint friends_friend_id_fkey1
+      foreign key (friend_id) references public.profiles(id);
+  end if;
+end $$;
+
+alter table public.friends enable row level security;
+
+drop policy if exists "Users can view their own friendships"  on public.friends;
+drop policy if exists "Users can send friend requests"        on public.friends;
+drop policy if exists "Users can accept friend requests"      on public.friends;
+drop policy if exists "Users can remove friendships"          on public.friends;
+
+create policy "Users can view their own friendships"
+  on public.friends for select
+  using ((auth.uid() = user_id) or (auth.uid() = friend_id));
+
+create policy "Users can send friend requests"
+  on public.friends for insert
+  with check (auth.uid() = user_id);
+
+-- No WITH CHECK in prod (fixed in 0011).
+create policy "Users can accept friend requests"
+  on public.friends for update
+  using (auth.uid() = friend_id);
+
+create policy "Users can remove friendships"
+  on public.friends for delete
+  using ((auth.uid() = user_id) or (auth.uid() = friend_id));
+
+-- ── location_shares ─────────────────────────────────────────────────────────
+create table if not exists public.location_shares (
+  id        uuid primary key default gen_random_uuid(),
+  owner_id  uuid references auth.users(id) on delete cascade,
+  viewer_id uuid references auth.users(id) on delete cascade,
+  unique (owner_id, viewer_id)
+);
+
+alter table public.location_shares enable row level security;
+
+drop policy if exists "owner or viewer" on public.location_shares;
+
+-- FOR ALL with null WITH CHECK — exploitable (fixed in 0010).
+create policy "owner or viewer"
+  on public.location_shares for all
+  using ((auth.uid() = owner_id) or (auth.uid() = viewer_id));
+
+-- ── events ──────────────────────────────────────────────────────────────────
+create table if not exists public.events (
+  id                 text primary key,
+  user_id            uuid not null references auth.users(id) on delete cascade,
+  group_id           uuid,
+  event_date         date not null,
+  title              text not null,
+  location           text,
+  time               text not null,
+  notify             boolean default false,
+  notify_in_advance  integer,
+  created_at         timestamptz not null default now()
+);
+
+alter table public.events enable row level security;
+
+drop policy if exists "Users can view their own events"   on public.events;
+drop policy if exists "Users can add their own events"    on public.events;
+drop policy if exists "Users can update their own events" on public.events;
+drop policy if exists "Users can delete their own events" on public.events;
+
+create policy "Users can view their own events"
+  on public.events for select using (auth.uid() = user_id);
+
+create policy "Users can add their own events"
+  on public.events for insert with check (auth.uid() = user_id);
+
+-- No WITH CHECK in prod (fixed in 0008).
+create policy "Users can update their own events"
+  on public.events for update using (auth.uid() = user_id);
+
+create policy "Users can delete their own events"
+  on public.events for delete using (auth.uid() = user_id);
+
+-- ── campus_alerts ───────────────────────────────────────────────────────────
+create table if not exists public.campus_alerts (
+  id           uuid primary key default gen_random_uuid(),
+  type         text not null check (type in (
+                 'building_closure','crowd','elevator_down',
+                 'construction','hazard','other')),
+  floor_id     uuid references public.floors(id),
+  x            double precision not null,
+  y            double precision not null,
+  description  text,
+  submitted_by uuid references public.profiles(id) on delete set null,
+  status       text default 'active' check (status in ('active','expired','removed')),
+  created_at   timestamptz default now(),
+  expires_at   timestamptz not null
+);
+
+alter table public.campus_alerts enable row level security;
+
+drop policy if exists "Anyone authenticated can view active alerts" on public.campus_alerts;
+drop policy if exists "Authenticated users can submit alerts"       on public.campus_alerts;
+drop policy if exists "Submitter can remove their own alert"        on public.campus_alerts;
+
+create policy "Anyone authenticated can view active alerts"
+  on public.campus_alerts for select
+  using ((status = 'active') and (expires_at > now()));
+
+create policy "Authenticated users can submit alerts"
+  on public.campus_alerts for insert
+  with check (submitted_by = auth.uid());
+
+-- No WITH CHECK in prod (cosmetic; deferred).
+create policy "Submitter can remove their own alert"
+  on public.campus_alerts for update
+  using (submitted_by = auth.uid());
+
+-- ── alert_votes ─────────────────────────────────────────────────────────────
+create table if not exists public.alert_votes (
+  id         uuid primary key default gen_random_uuid(),
+  alert_id   uuid references public.campus_alerts(id) on delete cascade,
+  user_id    uuid references public.profiles(id) on delete cascade,
+  vote       text check (vote in ('confirm','deny')),
+  created_at timestamptz default now(),
+  unique (alert_id, user_id)
+);
+
+alter table public.alert_votes enable row level security;
+
+drop policy if exists "Anyone authenticated can view votes"  on public.alert_votes;
+drop policy if exists "Users can only insert their own vote" on public.alert_votes;
+drop policy if exists "Users can update their own vote"      on public.alert_votes;
+
+create policy "Anyone authenticated can view votes"
+  on public.alert_votes for select to authenticated using (true);
+
+create policy "Users can only insert their own vote"
+  on public.alert_votes for insert to authenticated
+  with check (user_id = auth.uid());
+
+-- No WITH CHECK in prod (cosmetic; deferred).
+create policy "Users can update their own vote"
+  on public.alert_votes for update to authenticated
+  using (user_id = auth.uid());
+
+-- ── profiles: world-readable SELECT policy (fixed in 0012) ──────────────────
+drop policy if exists "Allow authenticated users to read all profiles" on public.profiles;
+create policy "Allow authenticated users to read all profiles"
+  on public.profiles for select
+  using (auth.role() = 'authenticated');
+
+-- ── Out-of-audit-scope tables (existence + RLS posture only) ────────────────
+-- Full column DDL not replicated (fresh-DB rebuilds import these via a
+-- separate seed). Listed here so the baseline accounts for the whole schema.
+--   buildings       PK(id); RLS off (fixed in 0002)
+--   floors          PK(id), FK building_id; RLS off (fixed in 0002)
+--   nodes           PK(id), FK floor_id; RLS off (fixed in 0002)
+--   edges           PK(id), FKs from_node_id/to_node_id -> nodes; RLS off (fixed in 0002)
+--   community_pins  PK(id), FKs floor_id, user_id; RLS on, 0 policies (locked, backlog)
+--   user_locations  PK(id), UNIQUE(user_id), FKs floor_id, user_id; RLS on, 0 policies (locked, backlog)
+
+commit;

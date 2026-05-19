@@ -24,14 +24,24 @@ import {
 import {
   Avatar,
   BottomSheet,
-  Button,
-  IconButton,
   PageShell,
   SearchInput,
   SegmentedTabs,
   type SegmentedOption,
 } from '@/components/ui';
+import { shadows } from '@/constants/shadows';
 import { cn } from '@/lib/cn';
+import { log } from '@/lib/logger';
+import { accentForId, initialsFromName } from '@/lib/utils';
+
+const PRIMARY = '#0B617E';
+const SECONDARY = '#C08A5E';
+const SECONDARY_DEEP = '#9F6E45';
+const SECONDARY_SOFT = 'rgba(192, 138, 94, 0.10)';
+const SECONDARY_RING = 'rgba(192, 138, 94, 0.22)';
+const CLAY = '#B85A38';
+const OLIVE_DEEP = '#5C6A2E';
+const OLIVE_SOFT = 'rgba(122, 135, 64, 0.12)';
 
 type Friend = {
   id: string;
@@ -112,8 +122,7 @@ export default function FriendsScreen() {
   const [pinRoomSuggestions, setPinRoomSuggestions] = useState<GraphNode[]>([]);
   const pinBuildingDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pinShareSearch, setPinShareSearch] = useState('');
-
-  const knownIdsRef = useRef<Set<string>>(new Set());
+  const findSearchSeqRef = useRef(0);
 
   const fetchAll = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent === true;
@@ -219,10 +228,9 @@ export default function FriendsScreen() {
       );
 
       setKnownIds(known);
-      knownIdsRef.current = known;
       setAddedIds(new Set((pendingSent ?? []).map((r) => r.friend_id)));
     } catch (err) {
-      if (__DEV__) console.error(err);
+      log.error('Friends', err);
     } finally {
       if (!silent) setLoading(false);
     }
@@ -246,28 +254,27 @@ export default function FriendsScreen() {
 
     setFindLoading(true);
     if (findDebounceRef.current) clearTimeout(findDebounceRef.current);
+    const seq = findSearchSeqRef.current + 1;
+    findSearchSeqRef.current = seq;
 
     findDebounceRef.current = setTimeout(async () => {
       const { data: { user } } = await supabase.auth.getUser();
+      if (findSearchSeqRef.current !== seq) return;
       if (!user) {
         setFindLoading(false);
         return;
       }
 
-      const { data } = await supabase
-        .from('profiles')
-        .select('id, full_name')
-        .neq('id', user.id)
-        .ilike('full_name', `%${trimmed}%`)
-        .limit(30);
+      // Routed through a SECURITY DEFINER RPC instead of a direct profiles
+      // select so the frontend doesn't depend on broad profile SELECT policies.
+      const { data } = await supabase.rpc('search_profiles', { p_query: trimmed });
+      if (findSearchSeqRef.current !== seq) return;
 
-      const raw = data ?? [];
+      const raw = (data ?? []) as { id: string; full_name: string | null }[];
       setFindSearchRawCount(raw.length);
-      setFindFriends(
-        raw
-          .filter((u) => !knownIdsRef.current.has(u.id))
-          .map((u) => ({ id: u.id, name: u.full_name ?? 'Unknown' })),
-      );
+      // Store the raw results; filtering against knownIds happens at render
+      // time via `displayedFindFriends`, so there's no stale-set race.
+      setFindFriends(raw.map((u) => ({ id: u.id, name: u.full_name ?? 'Unknown' })));
       setFindLoading(false);
     }, 400);
 
@@ -276,10 +283,10 @@ export default function FriendsScreen() {
     };
   }, [search, activeTab]);
 
-  useEffect(() => {
-    if (activeTab !== 'find_friends') return;
-    setFindFriends((prev) => prev.filter((u) => !knownIds.has(u.id)));
-  }, [knownIds, activeTab]);
+  const displayedFindFriends = useMemo(
+    () => findFriends.filter((u) => !knownIds.has(u.id)),
+    [findFriends, knownIds],
+  );
 
   const q = search.trim().toLowerCase();
   const filteredMyFriends = useMemo(
@@ -299,42 +306,59 @@ export default function FriendsScreen() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
     const accepted = addedMe.find((f) => f.id === id);
+    // Optimistic: hide the incoming row, append to friends.
     setAddedMe((prev) => prev.filter((f) => f.id !== id));
     if (accepted) setMyFriends((prev) => [...prev, accepted]);
     const { error } = await supabase
       .from('friends')
       .update({ status: 'accepted' })
       .match({ user_id: id, friend_id: user.id });
-    if (error) Alert.alert('Error', 'Could not accept request.');
-    else void fetchAll({ silent: true });
+    if (error) {
+      // Roll back to keep UI consistent with the DB.
+      if (accepted) {
+        setAddedMe((prev) => (prev.some((f) => f.id === id) ? prev : [...prev, accepted]));
+        setMyFriends((prev) => prev.filter((f) => f.id !== id));
+      }
+      Alert.alert('Error', 'Could not accept request.');
+      return;
+    }
+    void fetchAll({ silent: true });
   }
 
   async function handleDismiss(id: string) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
+    const dismissed = addedMe.find((f) => f.id === id);
     setAddedMe((prev) => prev.filter((f) => f.id !== id));
     const { error } = await supabase
       .from('friends')
       .delete()
       .match({ user_id: id, friend_id: user.id });
-    if (error) Alert.alert('Error', 'Could not decline request.');
-    else void fetchAll({ silent: true });
+    if (error) {
+      if (dismissed) {
+        setAddedMe((prev) => (prev.some((f) => f.id === id) ? prev : [...prev, dismissed]));
+      }
+      Alert.alert('Error', 'Could not decline request.');
+      return;
+    }
+    void fetchAll({ silent: true });
   }
 
   async function handleAddFriend(id: string) {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
     setAddedIds((prev) => new Set([...prev, id]));
-    const { error } = await supabase
-      .from('friends')
-      .insert({ user_id: user.id, friend_id: id, status: 'pending' });
-    if (error) {
+    const { data, error } = await supabase.rpc('send_friend_request', { p_friend_id: id });
+    if (error || (data as { error?: string } | null)?.error) {
       setAddedIds((prev) => {
         const n = new Set(prev);
         n.delete(id);
         return n;
       });
-      Alert.alert('Error', 'Could not send friend request.');
+      const code = (data as { error?: string } | null)?.error;
+      const msg =
+        code === 'rate_limited'  ? 'You\'re sending requests too quickly. Try again later.' :
+        code === 'already_exists' ? 'Friend request already sent or you\'re already friends.' :
+        'Could not send friend request.';
+      Alert.alert('Error', msg);
       return;
     }
     setFindFriends((prev) => prev.filter((f) => f.id !== id));
@@ -354,7 +378,14 @@ export default function FriendsScreen() {
       .from('friends')
       .delete()
       .match({ user_id: user.id, friend_id: friend.id });
-    if (error) Alert.alert('Error', 'Could not cancel request.');
+    if (error) {
+      setPendingOutgoing((prev) =>
+        prev.some((f) => f.id === friend.id) ? prev : [...prev, friend],
+      );
+      setAddedIds((prev) => new Set([...prev, friend.id]));
+      Alert.alert('Error', 'Could not cancel request.');
+      return;
+    }
     void fetchAll({ silent: true });
   }
 
@@ -387,8 +418,17 @@ export default function FriendsScreen() {
       return;
     }
 
-    await supabase.from('location_shares').delete().match({ owner_id: user.id, viewer_id: friendId });
-    await supabase.from('location_shares').delete().match({ owner_id: friendId, viewer_id: user.id });
+    // Both directions must succeed or the ex-friend can still see / be seen.
+    const [shareA, shareB] = await Promise.all([
+      supabase.from('location_shares').delete().match({ owner_id: user.id, viewer_id: friendId }),
+      supabase.from('location_shares').delete().match({ owner_id: friendId, viewer_id: user.id }),
+    ]);
+    if (shareA.error || shareB.error) {
+      Alert.alert(
+        'Heads up',
+        'Friend removed, but we could not stop location sharing. Open the Pin sheet to clear it manually.',
+      );
+    }
 
     void fetchAll({ silent: true });
   }
@@ -474,22 +514,12 @@ export default function FriendsScreen() {
     setPinSaving(true);
 
     try {
-      const { error: profileErr } = await supabase
-        .from('profiles')
-        .update({ location_building: pinBuilding.trim(), location_room: pinRoom.trim() })
-        .eq('id', user.id);
-      if (profileErr) throw profileErr;
-
-      await supabase.from('location_shares').delete().eq('owner_id', user.id);
-
-      if (pinSelectedIds.size > 0) {
-        const rows = Array.from(pinSelectedIds).map((viewer_id) => ({
-          owner_id: user.id,
-          viewer_id,
-        }));
-        const { error: shareErr } = await supabase.from('location_shares').insert(rows);
-        if (shareErr) throw shareErr;
-      }
+      const { data, error } = await supabase.rpc('save_location_pin', {
+        p_building: pinBuilding.trim(),
+        p_room: pinRoom.trim() || null,
+        p_viewer_ids: Array.from(pinSelectedIds),
+      });
+      if (error || data?.error) throw error ?? new Error(String(data?.error));
 
       setSharedWithIds(new Set(pinSelectedIds));
       setPinBuilding('');
@@ -500,7 +530,7 @@ export default function FriendsScreen() {
       void fetchAll({ silent: true });
     } catch (err) {
       Alert.alert('Error', 'Could not save pin.');
-      if (__DEV__) console.error(err);
+      log.error('Friends', err);
     } finally {
       setPinSaving(false);
     }
@@ -509,11 +539,11 @@ export default function FriendsScreen() {
   async function clearPin() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    await supabase
-      .from('profiles')
-      .update({ location_building: null, location_room: null })
-      .eq('id', user.id);
-    await supabase.from('location_shares').delete().eq('owner_id', user.id);
+    const { data, error } = await supabase.rpc('clear_location_pin');
+    if (error || data?.error) {
+      Alert.alert('Error', 'Could not clear your pin.');
+      return;
+    }
     setSharedWithIds(new Set());
     setPinSelectedIds(new Set());
     setPinBuilding('');
@@ -538,14 +568,7 @@ export default function FriendsScreen() {
   ];
 
   return (
-    <PageShell
-      title="Friends"
-      right={
-        <IconButton onPress={openPinModal} accessibilityLabel="Drop pin">
-          <MaterialIcons name="add-location" size={22} color="#fff" />
-        </IconButton>
-      }
-    >
+    <PageShell hideBanner safeAreaClassName="bg-canvas" contentClassName="bg-canvas">
       <BottomSheet visible={pinModalVisible} onClose={() => setPinModalVisible(false)}>
         <View className="flex-row items-center mb-5">
           <Text className="text-xl font-bold text-primary">Drop Your Pin</Text>
@@ -732,17 +755,36 @@ export default function FriendsScreen() {
       </BottomSheet>
 
       <ScrollView
-        contentContainerClassName="px-4 pt-4 pb-10"
+        contentContainerClassName="px-4 pt-6 pb-32"
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <View className="flex-row items-center bg-primary-tint border border-primary-tint rounded-xl p-3 mb-3.5">
-          <MaterialIcons name="mail-outline" size={20} color="#0B617E" />
-          <Text className="ml-2 flex-1 text-[15px] font-semibold text-success-text">
-            Invite your friends!
-          </Text>
-          <TouchableOpacity className="bg-primary rounded-lg px-3 py-1.5">
-            <Text className="text-white font-semibold text-[13px]">Invite</Text>
+        {/* Flat header */}
+        <View className="px-1 mb-5 flex-row items-start justify-between">
+          <View className="flex-1 pr-3">
+            <Text className="text-[36px] font-bold text-ink-strong tracking-[-1.2px] leading-[36px] mb-2">
+              Friends
+            </Text>
+            <Text className="text-[13.5px] font-medium text-ink-subtle" numberOfLines={1}>
+              {myFriends.length} friends ·{' '}
+              {addedMe.length > 0 ? (
+                <Text style={{ color: SECONDARY, fontWeight: '600' }}>
+                  {addedMe.length} new request{addedMe.length === 1 ? '' : 's'}
+                </Text>
+              ) : (
+                'no new requests'
+              )}
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={openPinModal}
+            activeOpacity={0.85}
+            accessibilityLabel="Drop pin"
+            style={[shadows.primaryGlow, { backgroundColor: PRIMARY }]}
+            className="flex-row items-center rounded-[12px] px-3.5 py-2.5 gap-1.5 mt-1"
+          >
+            <MaterialIcons name="add-location-alt" size={16} color="#fff" />
+            <Text className="text-white text-[13px] font-semibold">Drop pin</Text>
           </TouchableOpacity>
         </View>
 
@@ -758,81 +800,166 @@ export default function FriendsScreen() {
           onChangeText={setSearch}
           onClear={() => setSearch('')}
           placeholder={SEARCH_PLACEHOLDERS[activeTab]}
-          containerClassName="mb-4"
+          containerClassName="mb-2"
         />
+
+        {/* Sand invite banner — only on My Friends tab */}
+        {activeTab === 'my_friends' && (
+          <View
+            style={{ backgroundColor: SECONDARY_SOFT, borderColor: SECONDARY_RING }}
+            className="flex-row items-center gap-3 rounded-2xl p-3 mt-3 mb-1 border"
+          >
+            <View
+              style={{ backgroundColor: SECONDARY }}
+              className="w-[38px] h-[38px] rounded-[10px] items-center justify-center"
+            >
+              <MaterialIcons name="mail-outline" size={18} color="#fff" />
+            </View>
+            <View className="flex-1 min-w-0">
+              <Text className="text-[14px] font-semibold text-ink-strong" numberOfLines={1}>
+                Bring your people over
+              </Text>
+              <Text className="text-[12px] font-medium text-ink-subtle" numberOfLines={1}>
+                Send an invite link
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={{ borderColor: SECONDARY_RING }}
+              className="bg-white border rounded-[10px] px-3 py-1.5"
+              activeOpacity={0.8}
+            >
+              <Text style={{ color: SECONDARY_DEEP }} className="text-[12.5px] font-semibold">
+                Invite
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {loading && <ActivityIndicator color="#0B617E" className="mt-6" />}
 
         {!loading && activeTab === 'my_friends' && (
           <>
-            <SectionHeading>MY FRIENDS</SectionHeading>
-            {filteredMyFriends.map((friend) => {
-              const canSee = canSeeIds.has(friend.id) && !!friend.location_building;
-              const iSharedWithThem = sharedWithIds.has(friend.id);
-
-              return (
-                <FriendRow
-                  key={friend.id}
-                  name={friend.name}
-                  avatarTone="primary"
-                  details={
-                    <>
-                      {canSee ? (
-                        <TouchableOpacity
-                          onPress={() => routeToFriend(friend)}
-                          activeOpacity={0.7}
-                          className="flex-row items-center bg-success-bg py-[3px] px-1.5 rounded-md mt-1 self-start"
-                        >
-                          <MaterialIcons name="location-pin" size={14} color="#059669" />
-                          <Text className="text-xs text-success ml-0.5 font-medium">
-                            {friend.location_building}
-                            {friend.location_room ? ` - ${friend.location_room}` : ''}
-                          </Text>
-                          <MaterialIcons name="chevron-right" size={13} color="#059669" />
-                        </TouchableOpacity>
-                      ) : (
-                        <Text className="text-[13px] text-ink-faint mt-0.5">
-                          No location shared
-                        </Text>
-                      )}
-                      {iSharedWithThem && (
-                        <View className="flex-row items-center mt-1 gap-[3px]">
-                          <MaterialIcons name="my-location" size={11} color="#0B617E" />
-                          <Text className="text-[11px] text-primary font-medium">
-                            {"You're sharing your pin"}
-                          </Text>
-                        </View>
-                      )}
-                    </>
-                  }
-                  right={
-                    <TouchableOpacity
-                      onPress={() => confirmRemoveFriend(friend)}
-                      accessibilityLabel={`Remove ${friend.name} from friends`}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      className="w-10 h-10 rounded-lg bg-danger-bg border border-danger-border items-center justify-center ml-2"
-                    >
-                      <MaterialIcons name="person-remove" size={20} color="#ef4444" />
-                    </TouchableOpacity>
-                  }
-                />
+            {(() => {
+              const onCampus = filteredMyFriends.filter(
+                (f) => canSeeIds.has(f.id) && !!f.location_building
               );
-            })}
-            {filteredMyFriends.length === 0 && (
-              <EmptyLine
-                text={
-                  search.trim()
-                    ? `No friends matching "${search.trim()}".`
-                    : 'No friends yet. Open the Find Friends tab to search for people by name.'
-                }
-              />
-            )}
+              const others = filteredMyFriends.filter(
+                (f) => !(canSeeIds.has(f.id) && !!f.location_building)
+              );
+              return (
+                <>
+                  <SectionHeading count={onCampus.length}>On campus now</SectionHeading>
+                  {onCampus.length === 0 ? (
+                    <EmptyLine text="No friends have shared their pin yet." />
+                  ) : (
+                    onCampus.map((friend) => {
+                      const iSharedWithThem = sharedWithIds.has(friend.id);
+                      return (
+                        <FriendRow
+                          key={friend.id}
+                          id={friend.id}
+                          name={friend.name}
+                          details={
+                            <>
+                              <TouchableOpacity
+                                onPress={() => routeToFriend(friend)}
+                                activeOpacity={0.7}
+                                style={{ backgroundColor: OLIVE_SOFT }}
+                                className="flex-row items-center self-start gap-1 px-2 py-[3px] rounded-lg mt-1"
+                              >
+                                <MaterialIcons name="place" size={11} color={OLIVE_DEEP} />
+                                <Text style={{ color: OLIVE_DEEP }} className="text-[11.5px] font-semibold">
+                                  {friend.location_building}
+                                  {friend.location_room ? ` · ${friend.location_room}` : ''}
+                                </Text>
+                                <MaterialIcons name="chevron-right" size={11} color={OLIVE_DEEP} />
+                              </TouchableOpacity>
+                              {iSharedWithThem && (
+                                <View className="flex-row items-center gap-1 mt-1">
+                                  <MaterialIcons name="my-location" size={10} color={PRIMARY} />
+                                  <Text style={{ color: PRIMARY }} className="text-[11px] font-semibold">
+                                    {"You're sharing your pin"}
+                                  </Text>
+                                </View>
+                              )}
+                            </>
+                          }
+                          right={
+                            <TouchableOpacity
+                              onPress={() => confirmRemoveFriend(friend)}
+                              accessibilityLabel={`Remove ${friend.name} from friends`}
+                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                              style={{
+                                backgroundColor: 'rgba(220, 90, 60, 0.08)',
+                                borderColor: 'rgba(220, 90, 60, 0.18)',
+                              }}
+                              className="w-9 h-9 rounded-[10px] border items-center justify-center ml-1"
+                            >
+                              <MaterialIcons name="delete-outline" size={16} color={CLAY} />
+                            </TouchableOpacity>
+                          }
+                        />
+                      );
+                    })
+                  )}
+
+                  <SectionHeading count={others.length}>Other friends</SectionHeading>
+                  {others.length === 0 ? (
+                    <EmptyLine
+                      text={
+                        search.trim()
+                          ? `No friends matching "${search.trim()}".`
+                          : 'No friends yet. Open Find Friends to search for people.'
+                      }
+                    />
+                  ) : (
+                    others.map((friend) => {
+                      const iSharedWithThem = sharedWithIds.has(friend.id);
+                      return (
+                        <FriendRow
+                          key={friend.id}
+                          id={friend.id}
+                          name={friend.name}
+                          subtitle="No location shared"
+                          details={
+                            iSharedWithThem ? (
+                              <View className="flex-row items-center gap-1 mt-1">
+                                <MaterialIcons name="my-location" size={10} color={PRIMARY} />
+                                <Text style={{ color: PRIMARY }} className="text-[11px] font-semibold">
+                                  {"You're sharing your pin"}
+                                </Text>
+                              </View>
+                            ) : null
+                          }
+                          right={
+                            <TouchableOpacity
+                              onPress={() => confirmRemoveFriend(friend)}
+                              accessibilityLabel={`Remove ${friend.name} from friends`}
+                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                              style={{
+                                backgroundColor: 'rgba(220, 90, 60, 0.08)',
+                                borderColor: 'rgba(220, 90, 60, 0.18)',
+                              }}
+                              className="w-9 h-9 rounded-[10px] border items-center justify-center ml-1"
+                            >
+                              <MaterialIcons name="delete-outline" size={16} color={CLAY} />
+                            </TouchableOpacity>
+                          }
+                        />
+                      );
+                    })
+                  )}
+                </>
+              );
+            })()}
           </>
         )}
 
         {!loading && activeTab === 'added_me' && (
           <>
-            <SectionHeading>INCOMING</SectionHeading>
+            <SectionHeading count={filteredAddedMe.length} sub="People who want to be friends">
+              Incoming
+            </SectionHeading>
             {filteredAddedMe.length === 0 ? (
               <EmptyLine
                 text={
@@ -845,22 +972,24 @@ export default function FriendsScreen() {
               filteredAddedMe.map((friend) => (
                 <FriendRow
                   key={friend.id}
+                  id={friend.id}
                   name={friend.name}
                   subtitle="Wants to be your friend"
-                  avatarTone="primary"
                   right={
-                    <View className="flex-row items-center">
-                      <TouchableOpacity
-                        onPress={() => handleAccept(friend.id)}
-                        className="bg-primary rounded-lg w-[68px] h-[34px] items-center justify-center mr-1.5"
-                      >
-                        <Text className="text-white font-semibold text-[13px]">Accept</Text>
-                      </TouchableOpacity>
+                    <View className="flex-row items-center gap-1.5">
                       <TouchableOpacity
                         onPress={() => handleDismiss(friend.id)}
-                        className="bg-danger-bg border border-danger-border rounded-lg w-[34px] h-[34px] items-center justify-center"
+                        className="bg-canvas-soft rounded-[10px] w-9 h-9 items-center justify-center"
                       >
-                        <MaterialIcons name="close" size={18} color="#ef4444" />
+                        <MaterialIcons name="close" size={15} color="#6B6660" />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => handleAccept(friend.id)}
+                        style={{ backgroundColor: PRIMARY }}
+                        className="flex-row items-center rounded-[10px] px-3 h-9 gap-1"
+                      >
+                        <MaterialIcons name="check" size={13} color="#fff" />
+                        <Text className="text-white font-semibold text-[13px]">Accept</Text>
                       </TouchableOpacity>
                     </View>
                   }
@@ -868,7 +997,9 @@ export default function FriendsScreen() {
               ))
             )}
 
-            <SectionHeading className="mt-4">OUTGOING</SectionHeading>
+            <SectionHeading count={filteredPendingOutgoing.length} sub="Waiting for them to accept">
+              Outgoing
+            </SectionHeading>
             {filteredPendingOutgoing.length === 0 ? (
               <EmptyLine
                 text={
@@ -881,15 +1012,15 @@ export default function FriendsScreen() {
               filteredPendingOutgoing.map((friend) => (
                 <FriendRow
                   key={friend.id}
+                  id={friend.id}
                   name={friend.name}
                   subtitle="Request pending"
-                  avatarTone="neutral"
                   right={
                     <TouchableOpacity
                       onPress={() => handleCancelOutgoingRequest(friend)}
-                      className="border border-danger-border bg-danger-bgSoft rounded-lg px-3 py-2 ml-2"
+                      className="bg-canvas-soft rounded-[10px] px-3 py-2"
                     >
-                      <Text className="text-danger-strong font-semibold text-[13px]">Cancel</Text>
+                      <Text className="text-ink-subtle font-semibold text-[12.5px]">Cancel</Text>
                     </TouchableOpacity>
                   }
                 />
@@ -900,52 +1031,71 @@ export default function FriendsScreen() {
 
         {!loading && activeTab === 'find_friends' && (
           <>
-            <SectionHeading>FIND FRIENDS</SectionHeading>
             {findLoading ? (
-              <ActivityIndicator color="#0B617E" className="mt-4" />
+              <ActivityIndicator color={PRIMARY} className="mt-6" />
             ) : !search.trim() ? (
-              <EmptyLine text="Type a name in the search bar to find people." />
-            ) : findFriends.length === 0 ? (
-              findSearchRawCount > 0 ? (
-                <Text className="text-sm text-ink-faint italic mb-3.5">
-                  {`Everyone matching "${search.trim()}" is already a friend or has a pending request. Check `}
-                  <Text className="font-bold text-ink-subtle">My Friends</Text>
-                  {' to see people you know.'}
+              <View className="bg-white rounded-[18px] py-8 px-5 mt-4 items-center" style={shadows.card}>
+                <View
+                  style={{ backgroundColor: 'rgba(11, 97, 126, 0.08)' }}
+                  className="w-14 h-14 rounded-[16px] items-center justify-center mb-3"
+                >
+                  <MaterialIcons name="search" size={22} color={PRIMARY} />
+                </View>
+                <Text className="text-[15px] font-semibold text-ink-strong mb-1">
+                  Find people you know
                 </Text>
+                <Text className="text-[13px] text-ink-subtle text-center leading-[19px] max-w-[240px]">
+                  Type a name above to search for friends to add.
+                </Text>
+              </View>
+            ) : displayedFindFriends.length === 0 ? (
+              findSearchRawCount > 0 ? (
+                <EmptyLine
+                  text={`Everyone matching "${search.trim()}" is already a friend or has a pending request.`}
+                />
               ) : (
                 <EmptyLine text={`No users found for "${search.trim()}".`} />
               )
             ) : (
-              findFriends.map((friend) => {
-                const isAdded = addedIds.has(friend.id);
-                return (
-                  <FriendRow
-                    key={friend.id}
-                    name={friend.name}
-                    subtitle="App user"
-                    avatarTone="neutral"
-                    right={
-                      <TouchableOpacity
-                        onPress={() => handleAddFriend(friend.id)}
-                        disabled={isAdded}
-                        className={cn(
-                          'border border-line-muted rounded-lg w-[76px] h-9 items-center justify-center',
-                          isAdded ? 'bg-surface-raised' : 'bg-white'
-                        )}
-                      >
-                        <Text
-                          className={cn(
-                            'font-semibold text-[13px]',
-                            isAdded ? 'text-ink-faint' : 'text-primary'
-                          )}
-                        >
-                          {isAdded ? 'Requested' : 'Add'}
-                        </Text>
-                      </TouchableOpacity>
-                    }
+              <>
+                <SectionHeading count={displayedFindFriends.length}>
+                  {`Results for "${search.trim()}"`}
+                </SectionHeading>
+                {displayedFindFriends.map((friend) => {
+                  const isAdded = addedIds.has(friend.id);
+                  return (
+                    <FriendRow
+                      key={friend.id}
+                      id={friend.id}
+                      name={friend.name}
+                      subtitle="Wavepoint user"
+                      right={
+                        isAdded ? (
+                          <View className="bg-canvas-soft rounded-[10px] px-3 py-2">
+                            <Text className="text-ink-subtle font-semibold text-[12.5px]">
+                              Requested
+                            </Text>
+                          </View>
+                        ) : (
+                          <TouchableOpacity
+                            onPress={() => handleAddFriend(friend.id)}
+                            style={{
+                              backgroundColor: 'rgba(11, 97, 126, 0.08)',
+                              borderColor: 'rgba(11, 97, 126, 0.20)',
+                            }}
+                            className="flex-row items-center gap-1 border rounded-[10px] px-3 py-2"
+                          >
+                            <MaterialIcons name="person-add-alt" size={13} color={PRIMARY} />
+                            <Text style={{ color: PRIMARY }} className="font-semibold text-[12.5px]">
+                              Add
+                            </Text>
+                          </TouchableOpacity>
+                        )
+                      }
                   />
                 );
-              })
+              })}
+              </>
             )}
           </>
         )}
@@ -955,29 +1105,44 @@ export default function FriendsScreen() {
 }
 
 function FriendRow({
+  id,
   name,
   subtitle,
   details,
   right,
   avatarTone = 'primary',
 }: {
+  id?: string;
   name: string;
   subtitle?: string;
   details?: React.ReactNode;
   right?: React.ReactNode;
   avatarTone?: 'primary' | 'neutral';
 }) {
+  const tileColor = id ? accentForId(id) : (avatarTone === 'neutral' ? '#9A9389' : PRIMARY);
   return (
-    <View className="border border-line-divider rounded-xl px-3 py-2.5 mb-2.5 flex-row items-center justify-between bg-white">
-      <View className="flex-row items-center flex-1">
-        <View className="mr-2.5">
-          <Avatar name={name} tone={avatarTone} size="md" className="rounded-full" />
-        </View>
-        <View className="flex-1 pr-1">
-          <Text className="text-[15px] font-semibold text-ink-strong">{name}</Text>
-          {subtitle ? <Text className="text-[13px] text-ink-faint mt-0.5">{subtitle}</Text> : null}
-          {details}
-        </View>
+    <View
+      style={shadows.card}
+      className="rounded-[18px] px-3.5 py-3 mb-2 flex-row items-center bg-white"
+    >
+      <View
+        style={{ backgroundColor: tileColor }}
+        className="w-[46px] h-[46px] rounded-[14px] items-center justify-center mr-3"
+      >
+        <Text className="text-white text-[15px] font-bold tracking-[-0.5px]">
+          {initialsFromName(name)}
+        </Text>
+      </View>
+      <View className="flex-1 min-w-0 pr-2">
+        <Text className="text-[15.5px] font-semibold text-ink-strong tracking-[-0.2px]" numberOfLines={1}>
+          {name}
+        </Text>
+        {subtitle ? (
+          <Text className="text-[12.5px] text-ink-subtle font-medium mt-0.5" numberOfLines={1}>
+            {subtitle}
+          </Text>
+        ) : null}
+        {details}
       </View>
       {right}
     </View>
@@ -986,23 +1151,46 @@ function FriendRow({
 
 function SectionHeading({
   children,
+  count,
+  sub,
   className,
 }: {
   children: React.ReactNode;
+  count?: number;
+  sub?: string;
   className?: string;
 }) {
   return (
-    <Text
-      className={cn(
-        'text-xs font-bold tracking-[0.8px] text-ink-body mb-2 mt-0.5',
-        className
-      )}
-    >
-      {children}
-    </Text>
+    <View className={cn('mt-5 mb-2.5', className)}>
+      <View className="flex-row items-center gap-2">
+        <Text
+          style={{ color: PRIMARY }}
+          className="text-[12px] font-semibold uppercase tracking-[1.2px]"
+        >
+          {children}
+        </Text>
+        {typeof count === 'number' ? (
+          <View
+            style={{ backgroundColor: 'rgba(11, 97, 126, 0.10)' }}
+            className="px-[7px] py-[2px] rounded-lg"
+          >
+            <Text style={{ color: PRIMARY }} className="text-[11px] font-bold">
+              {count}
+            </Text>
+          </View>
+        ) : null}
+      </View>
+      {sub ? (
+        <Text className="text-[12.5px] font-medium text-ink-dim mt-1">{sub}</Text>
+      ) : null}
+    </View>
   );
 }
 
 function EmptyLine({ text }: { text: string }) {
-  return <Text className="text-ink-faint text-sm mb-3.5 italic">{text}</Text>;
+  return (
+    <View className="bg-white rounded-2xl py-5 px-4 items-center">
+      <Text className="text-ink-subtle text-[13.5px] text-center font-medium">{text}</Text>
+    </View>
+  );
 }

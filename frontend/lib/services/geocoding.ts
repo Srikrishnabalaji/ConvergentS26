@@ -32,6 +32,7 @@ export class GeocodingNetworkError extends Error {
 }
 
 let _lastNominatimRequest = 0;
+const NOMINATIM_TIMEOUT_MS = 10_000;
 
 async function rateLimitedFetch(url: string, signal?: AbortSignal): Promise<Response> {
   const elapsed = Date.now() - _lastNominatimRequest;
@@ -39,7 +40,19 @@ async function rateLimitedFetch(url: string, signal?: AbortSignal): Promise<Resp
     await new Promise((r) => setTimeout(r, 1100 - elapsed));
   }
   _lastNominatimRequest = Date.now();
-  return fetch(url, { headers: HEADERS, signal });
+
+  // Bound the request so a hung Nominatim doesn't leave the user's search
+  // spinner spinning. The caller's signal (if any) still wins for cancellation.
+  const timeoutController = new AbortController();
+  const timeout = setTimeout(() => timeoutController.abort(), NOMINATIM_TIMEOUT_MS);
+  const onCallerAbort = () => timeoutController.abort();
+  signal?.addEventListener('abort', onCallerAbort);
+  try {
+    return await fetch(url, { headers: HEADERS, signal: timeoutController.signal });
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener('abort', onCallerAbort);
+  }
 }
 
 /**

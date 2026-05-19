@@ -20,6 +20,7 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit() {
+    if (loading) return;
     if (!email || !password || (isSignUp && !name)) {
       Alert.alert('Error', 'Please fill in all fields.');
       return;
@@ -35,7 +36,12 @@ export default function LoginScreen() {
     setLoading(false);
 
     if (error) {
-      Alert.alert(isSignUp ? 'Sign Up Error' : 'Sign In Error', error.message);
+      Alert.alert(
+        isSignUp ? 'Sign Up Error' : 'Sign In Error',
+        isSignUp
+          ? 'Could not create your account. Check your email and password, then try again.'
+          : 'Invalid email or password.',
+      );
       return;
     }
     if (data.session) {
@@ -95,6 +101,7 @@ export default function LoginScreen() {
             label={isSignUp ? 'Sign Up' : 'Sign In'}
             onPress={handleSubmit}
             loading={loading}
+            disabled={loading}
             size="lg"
             block
             className="mt-2"

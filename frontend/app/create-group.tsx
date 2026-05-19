@@ -15,6 +15,7 @@ import * as ImagePicker from 'expo-image-picker';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { supabase } from '@/lib/supabase';
 import { switchTrackColors, switchThumbColor } from '@/lib/switchTheme';
+import { decodeBase64 } from '@/lib/utils';
 import { Button, TextField, SectionLabel } from '@/components/ui';
 
 const PRIMARY_HEX = '#0B617E';
@@ -29,6 +30,7 @@ export default function CreateGroupScreen() {
   const [joinPassword, setJoinPassword] = useState('');
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [imageMime, setImageMime] = useState<string>('image/jpeg');
   const [loading, setLoading] = useState(false);
 
   const showPasswordOption = !isPrivate && !isCampusOrg;
@@ -49,16 +51,27 @@ export default function CreateGroupScreen() {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.8,
       base64: true,
     });
-    if (!result.canceled) {
-      setImageUri(result.assets[0].uri);
-      setImageBase64(result.assets[0].base64 ?? null);
+    if (result.canceled) return;
+    const asset = result.assets[0];
+    // Fail-fast size + MIME check. The storage policy (0009) re-checks both.
+    if (typeof asset.fileSize === 'number' && asset.fileSize > 5 * 1024 * 1024) {
+      Alert.alert('Image too large', 'Please choose an image under 5 MB.');
+      return;
     }
+    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+    if (asset.mimeType && !allowed.includes(asset.mimeType)) {
+      Alert.alert('Unsupported format', 'Use a JPEG, PNG, or WebP image.');
+      return;
+    }
+    setImageUri(asset.uri);
+    setImageBase64(asset.base64 ?? null);
+    setImageMime(asset.mimeType ?? 'image/jpeg');
   }
 
   async function handleCreate() {
@@ -81,15 +94,20 @@ export default function CreateGroupScreen() {
 
     try {
       if (imageUri && imageBase64) {
-        const ext = 'jpg';
+        const ext =
+          imageMime === 'image/png'  ? 'png'  :
+          imageMime === 'image/webp' ? 'webp' :
+                                       'jpg';
         const path = `${user.id}/${Date.now()}.${ext}`;
         const { error: uploadError } = await supabase.storage
           .from('group-images')
-          .upload(path, decode(imageBase64), { contentType: `image/${ext}`, upsert: false });
-        if (!uploadError) {
-          const { data: urlData } = supabase.storage.from('group-images').getPublicUrl(path);
-          imageUrl = urlData.publicUrl;
+          .upload(path, decodeBase64(imageBase64), { contentType: imageMime, upsert: false });
+        if (uploadError) {
+          Alert.alert('Image upload failed', 'Please try a different image or create the group without one.');
+          return;
         }
+        const { data: urlData } = supabase.storage.from('group-images').getPublicUrl(path);
+        imageUrl = urlData.publicUrl;
       }
 
       const type = isCampusOrg ? 'campus_org' : 'friends';
@@ -106,7 +124,12 @@ export default function CreateGroupScreen() {
       });
 
       if (groupError || rpcData?.error) {
-        Alert.alert('Failed to create group', groupError?.message ?? rpcData?.error ?? 'Something went wrong.');
+        const msg =
+          rpcData?.error === 'invalid_name' ? 'Group names must be between 1 and 120 characters.' :
+          rpcData?.error === 'description_too_long' ? 'Descriptions must be 1,000 characters or less.' :
+          rpcData?.error === 'invalid_type' ? 'Choose a valid group type.' :
+          'Please check your group details and try again.';
+        Alert.alert('Failed to create group', groupError ? 'Please try again in a moment.' : msg);
         setLoading(false);
         return;
       }
@@ -119,8 +142,8 @@ export default function CreateGroupScreen() {
       }
 
       router.back();
-    } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Something went wrong.');
+    } catch {
+      Alert.alert('Error', 'Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -214,6 +237,7 @@ export default function CreateGroupScreen() {
                 value={joinPassword}
                 onChangeText={setJoinPassword}
                 autoCapitalize="none"
+                secureTextEntry
                 containerClassName="mt-1"
               />
             )}
@@ -260,15 +284,6 @@ function ToggleRow({
       />
     </View>
   );
-}
-
-function decode(base64: string): ArrayBuffer {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes.buffer;
 }
 
 const styles = StyleSheet.create({

@@ -9,6 +9,7 @@ type PageShellProps = ViewProps & {
   right?: React.ReactNode;
   bannerClassName?: string;
   contentClassName?: string;
+  safeAreaClassName?: string;
   edges?: readonly Edge[];
   hideBanner?: boolean;
 };
@@ -19,12 +20,13 @@ export function PageShell({
   children,
   bannerClassName,
   contentClassName,
+  safeAreaClassName,
   edges = ['top'],
   hideBanner = false,
   ...rest
 }: PageShellProps) {
   return (
-    <SafeAreaView className="flex-1 bg-primary" edges={edges}>
+    <SafeAreaView className={cn('flex-1', safeAreaClassName ?? 'bg-primary')} edges={edges}>
       {!hideBanner && (
         <View
           style={[shadows.banner, { zIndex: 1 }]}
@@ -34,7 +36,7 @@ export function PageShell({
           {right ? <View className="pb-1">{right}</View> : null}
         </View>
       )}
-      <View className={cn('flex-1 bg-surface-muted', contentClassName)} {...rest}>
+      <View className={cn('flex-1', contentClassName ?? 'bg-surface-muted')} {...rest}>
         {children}
       </View>
     </SafeAreaView>
