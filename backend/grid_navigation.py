@@ -8,6 +8,8 @@ import heapq
 # ── GRID GENERATION ──────────────────────────────────────────────────────
 def generate_grid(image_path, nodes_file, grid_spacing=30):
     img = cv2.imread(image_path)
+    if img is None:
+        raise FileNotFoundError(f"Could not read image: {image_path}")
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     height, width = gray.shape
     print(f"Image size: {width}x{height}")

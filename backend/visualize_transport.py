@@ -9,6 +9,7 @@ Usage:
 """
 
 import json
+import os
 from PIL import Image, ImageDraw, ImageFont
 
 GRAPH_PATH = "frontend/assets/gdc_graph.json"
@@ -33,6 +34,7 @@ def to_image_xy(nx, ny, img_w, img_h):
 
 
 def main():
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
     with open(GRAPH_PATH) as f:
         data = json.load(f)
 
@@ -47,6 +49,8 @@ def main():
         img_path = f"{FLOORPLAN_DIR}/gdc_floor_{floor_num}.png"
         out_path = f"{OUTPUT_DIR}/transport_floor_{floor_num}.png"
 
+        if not os.path.exists(img_path):
+            raise FileNotFoundError(f"Missing floorplan image: {img_path}")
         img = Image.open(img_path).convert("RGB")
         draw = ImageDraw.Draw(img)
         w, h = img.size

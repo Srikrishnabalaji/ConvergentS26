@@ -36,7 +36,12 @@ export default function LoginScreen() {
     setLoading(false);
 
     if (error) {
-      Alert.alert(isSignUp ? 'Sign Up Error' : 'Sign In Error', error.message);
+      Alert.alert(
+        isSignUp ? 'Sign Up Error' : 'Sign In Error',
+        isSignUp
+          ? 'Could not create your account. Check your email and password, then try again.'
+          : 'Invalid email or password.',
+      );
       return;
     }
     if (data.session) {

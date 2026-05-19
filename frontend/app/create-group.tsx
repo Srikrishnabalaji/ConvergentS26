@@ -15,6 +15,7 @@ import * as ImagePicker from 'expo-image-picker';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { supabase } from '@/lib/supabase';
 import { switchTrackColors, switchThumbColor } from '@/lib/switchTheme';
+import { decodeBase64 } from '@/lib/utils';
 import { Button, TextField, SectionLabel } from '@/components/ui';
 
 const PRIMARY_HEX = '#0B617E';
@@ -50,7 +51,7 @@ export default function CreateGroupScreen() {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.8,
@@ -82,6 +83,10 @@ export default function CreateGroupScreen() {
       Alert.alert('Error', 'Please enter a join password, or disable the password option.');
       return;
     }
+    if (joinPassword.trim().length > 200) {
+      Alert.alert('Error', 'Join passwords must be 200 characters or less.');
+      return;
+    }
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       Alert.alert('Error', 'You must be signed in to create a group.');
@@ -100,11 +105,13 @@ export default function CreateGroupScreen() {
         const path = `${user.id}/${Date.now()}.${ext}`;
         const { error: uploadError } = await supabase.storage
           .from('group-images')
-          .upload(path, decode(imageBase64), { contentType: imageMime, upsert: false });
-        if (!uploadError) {
-          const { data: urlData } = supabase.storage.from('group-images').getPublicUrl(path);
-          imageUrl = urlData.publicUrl;
+          .upload(path, decodeBase64(imageBase64), { contentType: imageMime, upsert: false });
+        if (uploadError) {
+          Alert.alert('Image upload failed', 'Please try a different image or create the group without one.');
+          return;
         }
+        const { data: urlData } = supabase.storage.from('group-images').getPublicUrl(path);
+        imageUrl = urlData.publicUrl;
       }
 
       const type = isCampusOrg ? 'campus_org' : 'friends';
@@ -121,7 +128,13 @@ export default function CreateGroupScreen() {
       });
 
       if (groupError || rpcData?.error) {
-        Alert.alert('Failed to create group', groupError?.message ?? rpcData?.error ?? 'Something went wrong.');
+        const msg =
+          rpcData?.error === 'invalid_name' ? 'Group names must be between 1 and 120 characters.' :
+          rpcData?.error === 'description_too_long' ? 'Descriptions must be 1,000 characters or less.' :
+          rpcData?.error === 'password_too_long' ? 'Join passwords must be 200 characters or less.' :
+          rpcData?.error === 'invalid_type' ? 'Choose a valid group type.' :
+          'Please check your group details and try again.';
+        Alert.alert('Failed to create group', groupError ? 'Please try again in a moment.' : msg);
         setLoading(false);
         return;
       }
@@ -134,8 +147,8 @@ export default function CreateGroupScreen() {
       }
 
       router.back();
-    } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Something went wrong.');
+    } catch {
+      Alert.alert('Error', 'Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -229,6 +242,7 @@ export default function CreateGroupScreen() {
                 value={joinPassword}
                 onChangeText={setJoinPassword}
                 autoCapitalize="none"
+                secureTextEntry
                 containerClassName="mt-1"
               />
             )}
@@ -275,15 +289,6 @@ function ToggleRow({
       />
     </View>
   );
-}
-
-function decode(base64: string): ArrayBuffer {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes.buffer;
 }
 
 const styles = StyleSheet.create({

@@ -218,6 +218,7 @@ def main():
 
     data["nodes"] = nodes
     data["edges"] = edges
+    data.setdefault("meta", {})
     data["meta"]["nodeCount"] = len(nodes)
     data["meta"]["edgeCount"] = len(edges)
 

@@ -31,6 +31,8 @@ import {
 } from '@/components/ui';
 import { shadows } from '@/constants/shadows';
 import { cn } from '@/lib/cn';
+import { log } from '@/lib/logger';
+import { accentForId, initialsFromName } from '@/lib/utils';
 
 const PRIMARY = '#0B617E';
 const SECONDARY = '#C08A5E';
@@ -40,27 +42,6 @@ const SECONDARY_RING = 'rgba(192, 138, 94, 0.22)';
 const CLAY = '#B85A38';
 const OLIVE_DEEP = '#5C6A2E';
 const OLIVE_SOFT = 'rgba(122, 135, 64, 0.12)';
-
-const ACCENT_TILES = [
-  '#0B617E', '#2A8AA5', '#C08A5E', '#D89E3A',
-  '#D26A4A', '#C95F76', '#8B5470', '#7A8740',
-];
-function accentForId(id: string) {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) {
-    hash = ((hash << 5) - hash) + id.charCodeAt(i);
-    hash |= 0;
-  }
-  return ACCENT_TILES[Math.abs(hash) % ACCENT_TILES.length];
-}
-
-function initialsFromName(name?: string | null): string {
-  if (!name) return 'U';
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return 'U';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-}
 
 type Friend = {
   id: string;
@@ -141,6 +122,7 @@ export default function FriendsScreen() {
   const [pinRoomSuggestions, setPinRoomSuggestions] = useState<GraphNode[]>([]);
   const pinBuildingDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pinShareSearch, setPinShareSearch] = useState('');
+  const findSearchSeqRef = useRef(0);
 
   const fetchAll = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent === true;
@@ -248,7 +230,7 @@ export default function FriendsScreen() {
       setKnownIds(known);
       setAddedIds(new Set((pendingSent ?? []).map((r) => r.friend_id)));
     } catch (err) {
-      if (__DEV__) console.error(err);
+      log.error('Friends', err);
     } finally {
       if (!silent) setLoading(false);
     }
@@ -272,9 +254,12 @@ export default function FriendsScreen() {
 
     setFindLoading(true);
     if (findDebounceRef.current) clearTimeout(findDebounceRef.current);
+    const seq = findSearchSeqRef.current + 1;
+    findSearchSeqRef.current = seq;
 
     findDebounceRef.current = setTimeout(async () => {
       const { data: { user } } = await supabase.auth.getUser();
+      if (findSearchSeqRef.current !== seq) return;
       if (!user) {
         setFindLoading(false);
         return;
@@ -283,6 +268,7 @@ export default function FriendsScreen() {
       // Routed through a SECURITY DEFINER RPC instead of a direct profiles
       // select so the frontend doesn't depend on broad profile SELECT policies.
       const { data } = await supabase.rpc('search_profiles', { p_query: trimmed });
+      if (findSearchSeqRef.current !== seq) return;
 
       const raw = (data ?? []) as { id: string; full_name: string | null }[];
       setFindSearchRawCount(raw.length);
@@ -359,19 +345,20 @@ export default function FriendsScreen() {
   }
 
   async function handleAddFriend(id: string) {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
     setAddedIds((prev) => new Set([...prev, id]));
-    const { error } = await supabase
-      .from('friends')
-      .insert({ user_id: user.id, friend_id: id, status: 'pending' });
-    if (error) {
+    const { data, error } = await supabase.rpc('send_friend_request', { p_friend_id: id });
+    if (error || (data as { error?: string } | null)?.error) {
       setAddedIds((prev) => {
         const n = new Set(prev);
         n.delete(id);
         return n;
       });
-      Alert.alert('Error', 'Could not send friend request.');
+      const code = (data as { error?: string } | null)?.error;
+      const msg =
+        code === 'rate_limited'  ? 'You\'re sending requests too quickly. Try again later.' :
+        code === 'already_exists' ? 'Friend request already sent or you\'re already friends.' :
+        'Could not send friend request.';
+      Alert.alert('Error', msg);
       return;
     }
     setFindFriends((prev) => prev.filter((f) => f.id !== id));
@@ -429,6 +416,9 @@ export default function FriendsScreen() {
     if (errA && errB) {
       Alert.alert('Error', 'Could not remove friend.');
       return;
+    }
+    if (errA || errB) {
+      log.warn('Friends', 'Partial friend removal failure', { errA, errB });
     }
 
     // Both directions must succeed or the ex-friend can still see / be seen.
@@ -527,22 +517,12 @@ export default function FriendsScreen() {
     setPinSaving(true);
 
     try {
-      const { error: profileErr } = await supabase
-        .from('profiles')
-        .update({ location_building: pinBuilding.trim(), location_room: pinRoom.trim() })
-        .eq('id', user.id);
-      if (profileErr) throw profileErr;
-
-      await supabase.from('location_shares').delete().eq('owner_id', user.id);
-
-      if (pinSelectedIds.size > 0) {
-        const rows = Array.from(pinSelectedIds).map((viewer_id) => ({
-          owner_id: user.id,
-          viewer_id,
-        }));
-        const { error: shareErr } = await supabase.from('location_shares').insert(rows);
-        if (shareErr) throw shareErr;
-      }
+      const { data, error } = await supabase.rpc('save_location_pin', {
+        p_building: pinBuilding.trim(),
+        p_room: pinRoom.trim() || null,
+        p_viewer_ids: Array.from(pinSelectedIds),
+      });
+      if (error || data?.error) throw error ?? new Error(String(data?.error));
 
       setSharedWithIds(new Set(pinSelectedIds));
       setPinBuilding('');
@@ -553,7 +533,7 @@ export default function FriendsScreen() {
       void fetchAll({ silent: true });
     } catch (err) {
       Alert.alert('Error', 'Could not save pin.');
-      if (__DEV__) console.error(err);
+      log.error('Friends', err);
     } finally {
       setPinSaving(false);
     }
@@ -562,11 +542,11 @@ export default function FriendsScreen() {
   async function clearPin() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    await supabase
-      .from('profiles')
-      .update({ location_building: null, location_room: null })
-      .eq('id', user.id);
-    await supabase.from('location_shares').delete().eq('owner_id', user.id);
+    const { data, error } = await supabase.rpc('clear_location_pin');
+    if (error || data?.error) {
+      Alert.alert('Error', 'Could not clear your pin.');
+      return;
+    }
     setSharedWithIds(new Set());
     setPinSelectedIds(new Set());
     setPinBuilding('');

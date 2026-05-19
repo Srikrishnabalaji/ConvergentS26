@@ -2,6 +2,8 @@
  * Indoor navigation — loads the building graph JSON and runs A* pathfinding.
  */
 
+import { log } from '@/lib/logger';
+
 // ---------------------------------------------------------------------------
 // Types matching the output of parse_floorplan.py
 // ---------------------------------------------------------------------------
@@ -94,10 +96,8 @@ export function astar(
   const inOpen = new Set<string>([startId]);
   const closed = new Set<string>();
 
-  if (__DEV__) {
-    console.log(`[A*] Search from "${startNode.label}" (${startId}) to "${endNode.label}" (${endId})`);
-    console.log(`[A*] Start neighbors: ${adj.get(startId)?.length ?? 0} edges`);
-  }
+  log.debug('A*', `Search from "${startNode.label}" (${startId}) to "${endNode.label}" (${endId})`);
+  log.debug('A*', `Start neighbors: ${adj.get(startId)?.length ?? 0} edges`);
 
   const popMin = (): string | undefined => {
     let minIdx = 0;
@@ -149,11 +149,10 @@ export function astar(
     }
   }
 
-  if (__DEV__) {
-    console.log(
-      `[A*] FAILED: No path found. Explored ${closed.size} nodes, ${openSet.length} remaining in queue`,
-    );
-  }
+  log.debug(
+    'A*',
+    `FAILED: No path found. Explored ${closed.size} nodes, ${openSet.length} remaining in queue`,
+  );
   return null;
 }
 

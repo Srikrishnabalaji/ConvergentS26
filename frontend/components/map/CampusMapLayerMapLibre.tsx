@@ -92,13 +92,20 @@ function patchStyle(style: Record<string, unknown>): object {
 }
 
 async function fetchMapStyle(): Promise<string | object> {
+  // Bound the request so a hung tile server doesn't leave the map waiting
+  // indefinitely on first load. On timeout or any other failure, fall back
+  // to the URL string and let MapLibre fetch it directly.
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
-    const res = await fetch(OPENFREEMAP_LIBERTY_URL);
+    const res = await fetch(OPENFREEMAP_LIBERTY_URL, { signal: controller.signal });
     if (!res.ok) return OPENFREEMAP_LIBERTY_URL;
     const json = await res.json();
     return patchStyle(json);
   } catch {
     return OPENFREEMAP_LIBERTY_URL;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

@@ -62,6 +62,9 @@ def main():
         else:
             i += 1
 
+    if scale <= 0 or scale > 5:
+        raise SystemExit("--scale must be between 0 and 5")
+
     os.makedirs(out_dir, exist_ok=True)
 
     # Load graph nodes per floor — used to seed which connected component

@@ -56,6 +56,7 @@ import {
   polylineDistanceKm,
 } from '@/lib/services/routing';
 import { useLocalSearchParams } from 'expo-router';
+import { log } from '@/lib/logger';
 
 type MapViewState = 'default' | 'searching' | 'navigation' | 'walking' | 'building' | 'indoor';
 type IndoorExitTarget = 'navigation' | 'walking' | 'building';
@@ -199,8 +200,14 @@ export default function MapScreen() {
     (async () => {
       try {
         const stored = await AsyncStorage.getItem(RECENTS_STORAGE_KEY);
-        if (stored) setRecentSearches(JSON.parse(stored));
-      } catch {}
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          setRecentSearches(Array.isArray(parsed) ? parsed : []);
+        }
+      } catch (e) {
+        log.warn('Map', 'Could not load recent searches:', e);
+        await AsyncStorage.removeItem(RECENTS_STORAGE_KEY).catch(() => {});
+      }
     })();
   }, []);
 
@@ -208,7 +215,9 @@ export default function MapScreen() {
     setRecentSearches(recents);
     try {
       await AsyncStorage.setItem(RECENTS_STORAGE_KEY, JSON.stringify(recents));
-    } catch {}
+    } catch (e) {
+      log.warn('Map', 'Could not save recent searches:', e);
+    }
   }, []);
 
   useEffect(() => {
@@ -343,7 +352,9 @@ export default function MapScreen() {
       setRecentSearches((prev) => {
         const filtered = prev.filter((s) => s.id !== item.id);
         const updated = [item, ...filtered].slice(0, MAX_RECENTS);
-        AsyncStorage.setItem(RECENTS_STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
+        AsyncStorage.setItem(RECENTS_STORAGE_KEY, JSON.stringify(updated)).catch((e) => {
+          log.warn('Map', 'Could not save recent search:', e);
+        });
         return updated;
       });
 
