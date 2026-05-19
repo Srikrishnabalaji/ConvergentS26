@@ -590,7 +590,7 @@ export default function MyGroupsScreen() {
 
     const [memberRes, groupsRes, countRes, requestsRes, invitesRes] = await Promise.all([
       supabase.from('group_members').select('group_id, role').eq('user_id', user.id),
-      supabase.from('groups').select('id, name, description, image_url, type, is_private, has_join_password'),
+      supabase.from('groups').select('id, name, description, image_url, type, is_private, has_join_password').limit(500),
       supabase.rpc('get_group_member_counts'),
       supabase.rpc('get_my_join_requests'),
       supabase.rpc('get_my_group_invites'),
@@ -771,17 +771,11 @@ export default function MyGroupsScreen() {
   }
 
   async function handleLeave(groupId: string) {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    if (adminGroupIds.has(groupId)) {
-      const { data: adminMembers } = await supabase
-        .from('group_members')
-        .select('user_id')
-        .eq('group_id', groupId)
-        .eq('role', 'admin');
-
-      if ((adminMembers?.length ?? 0) <= 1) {
+    setLeavingId(groupId);
+    const { data, error } = await supabase.rpc('leave_group', { p_group_id: groupId });
+    setLeavingId(null);
+    if (error || data?.error) {
+      if (data?.error === 'last_admin') {
         Alert.alert(
           'Assign an admin first',
           'You are the only admin. Please assign another member as admin before leaving.',
@@ -790,23 +784,13 @@ export default function MyGroupsScreen() {
             { text: 'Manage Group', onPress: () => router.push(`/edit-group/${groupId}` as never) },
           ],
         );
-        return;
+      } else {
+        Alert.alert('Error', 'Could not leave this group.');
       }
+      return;
     }
-
-    setLeavingId(groupId);
-    const { error } = await supabase
-      .from('group_members')
-      .delete()
-      .eq('group_id', groupId)
-      .eq('user_id', user.id);
-    setLeavingId(null);
-    if (error) {
-      Alert.alert('Error', 'Could not leave this group.');
-    } else {
-      setSelectedGroup(null);
-      fetchGroups();
-    }
+    setSelectedGroup(null);
+    fetchGroups();
   }
 
   const searchedMyGroups = useMemo(() => {
@@ -894,7 +878,7 @@ export default function MyGroupsScreen() {
         visible={showCodeModal}
         title="Join with Code"
         subtitle="Enter the private group's unique code to join."
-        placeholder="e.g. A3BF19CD"
+        placeholder="e.g. A3BF19"
         value={codeInput}
         onChangeText={setCodeInput}
         onConfirm={handleJoinByCode}
@@ -1006,8 +990,8 @@ export default function MyGroupsScreen() {
         )}
       </BottomSheet>
 
-      <View className="px-5 pt-6 pb-3">
-        <View className="flex-row items-start justify-between mb-5">
+      <View className="px-4 pt-6 pb-0">
+        <View className="flex-row items-start justify-between mb-5 px-1">
           <View className="flex-1 pr-3">
             <Text className="text-[36px] font-bold text-ink-strong tracking-[-1.2px] leading-[36px] mb-2">
               Groups
@@ -1016,7 +1000,7 @@ export default function MyGroupsScreen() {
               {totalJoined} joined ·{' '}
               {invitesCount > 0 ? (
                 <Text style={{ color: SECONDARY, fontWeight: '600' }}>
-                  {invitesCount} invite{invitesCount === 1 ? '' : 's'} waiting
+                  {invitesCount} invite{invitesCount === 1 ? '' : 's'} pending
                 </Text>
               ) : (
                 'all caught up'
@@ -1037,13 +1021,14 @@ export default function MyGroupsScreen() {
           value={activePanel}
           onChange={setActivePanel}
           options={panelOptions}
+          className="mb-3"
         />
       </View>
 
       <ScrollView
         ref={scrollRef}
         className="flex-1"
-        contentContainerClassName="px-4 pt-2 pb-32"
+        contentContainerClassName="px-4 pt-0 pb-32"
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchGroups} tintColor={PRIMARY} />}
@@ -1056,7 +1041,7 @@ export default function MyGroupsScreen() {
               </View>
             ) : (
               <>
-                <View className="flex-row items-center mt-3 mb-2 gap-2">
+                <View className="flex-row items-center mb-2 gap-2">
                   <View className="flex-1">
                     <SearchInput
                       placeholder="Search groups…"
@@ -1199,7 +1184,7 @@ export default function MyGroupsScreen() {
 
         {activePanel === 'discover' && (
           <>
-            <View className="flex-row items-center mt-3 mb-2 gap-2">
+            <View className="flex-row items-center mb-2 gap-2">
               <View className="flex-1">
                 <SearchInput
                   placeholder="Search groups…"

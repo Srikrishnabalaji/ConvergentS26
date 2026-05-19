@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import {
+  ActionSheetIOS,
   Alert,
   Keyboard,
   KeyboardAvoidingView,
@@ -10,6 +11,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
@@ -30,6 +32,7 @@ import {
   type GraphNode,
 } from '@/lib/services/indoor-navigation';
 import { parseLocationString, UT_BUILDINGS } from '@/lib/data/utBuildings';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PageShell } from '@/components/ui';
 import { shadows } from '@/constants/shadows';
 import { cn } from '@/lib/cn';
@@ -55,8 +58,11 @@ function unwrapGroup(g: unknown): GroupRow | null {
   return null;
 }
 
+type RecurrenceType = 'daily' | 'weekly' | 'monthly';
+
 type EventRow = {
   id: string;
+  user_id: string;
   title: string;
   location: string | null;
   time: string;
@@ -64,16 +70,24 @@ type EventRow = {
   notify_in_advance: number | null;
   event_date: string;
   group_id: string | null;
+  recurrence: RecurrenceType | null;
+  recurrence_interval: number;
+  recur_end_date: string | null;
 };
 
 type CalendarEventItem = {
   id: string;
+  userId: string;
   title: string;
   location: string;
   time: string;
   notify: boolean;
   notifyInAdvance: number | null;
   groupId: string | null;
+  recurrence: RecurrenceType | null;
+  recurrenceInterval: number;
+  recurEndDate: string | null;
+  startDate: string;
 };
 
 type NewEventForm = {
@@ -84,6 +98,10 @@ type NewEventForm = {
   notify: boolean;
   notifyInAdvance: number | null;
   groupId: string | null;
+  recurrence: RecurrenceType | null;
+  recurrenceInterval: number;
+  recurEndDate: string;
+  startDate: string | null;
 };
 
 const getTodayString = () => {
@@ -172,6 +190,87 @@ function eventGroupId(e: { groupId?: unknown; group_id?: unknown }): string | nu
   return String(g);
 }
 
+const RECURRENCE_UNIT: Record<RecurrenceType, string> = {
+  daily:   'day',
+  weekly:  'week',
+  monthly: 'month',
+};
+
+function getRecurrenceLabel(type: RecurrenceType | null, interval: number): string {
+  if (!type) return 'Does not repeat';
+  const unit = RECURRENCE_UNIT[type];
+  if (interval === 1) return `Every ${unit}`;
+  return `Every ${interval} ${unit}s`;
+}
+
+type RecurrencePreset = { label: string; value: RecurrenceType | null; interval: number; custom?: boolean };
+
+const RECURRENCE_PRESETS: RecurrencePreset[] = [
+  { label: 'Does not repeat', value: null,     interval: 1 },
+  { label: 'Every day',       value: 'daily',  interval: 1 },
+  { label: 'Every week',      value: 'weekly', interval: 1 },
+  { label: 'Every 2 weeks',   value: 'weekly', interval: 2 },
+  { label: 'Every month',     value: 'monthly',interval: 1 },
+  { label: 'Custom…',         value: null,     interval: 1, custom: true },
+];
+
+function toISODateString(d: Date): string {
+  return [
+    d.getFullYear(),
+    String(d.getMonth() + 1).padStart(2, '0'),
+    String(d.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function dayBefore(dateStr: string): string {
+  const d = parseISODate(dateStr);
+  d.setDate(d.getDate() - 1);
+  return toISODateString(d);
+}
+
+function nextOccurrenceAfter(dateStr: string, recurrence: RecurrenceType, interval: number): string {
+  const d = parseISODate(dateStr);
+  switch (recurrence) {
+    case 'daily':   d.setDate(d.getDate() + interval); break;
+    case 'weekly':  d.setDate(d.getDate() + 7 * interval); break;
+    case 'monthly': d.setMonth(d.getMonth() + interval); break;
+  }
+  return toISODateString(d);
+}
+
+function expandEvent(row: EventRow): { date: string; item: CalendarEventItem }[] {
+  const interval = row.recurrence_interval ?? 1;
+  const base: CalendarEventItem = {
+    id: row.id,
+    userId: row.user_id,
+    title: row.title,
+    location: row.location ?? '',
+    time: row.time,
+    notify: row.notify,
+    notifyInAdvance: row.notify_in_advance,
+    groupId: row.group_id,
+    recurrence: row.recurrence,
+    recurrenceInterval: interval,
+    recurEndDate: row.recur_end_date,
+    startDate: row.event_date,
+  };
+  if (!row.recurrence || !row.recur_end_date) {
+    return [{ date: row.event_date, item: base }];
+  }
+  const results: { date: string; item: CalendarEventItem }[] = [];
+  const end = parseISODate(row.recur_end_date);
+  const current = parseISODate(row.event_date);
+  while (current <= end) {
+    results.push({ date: toISODateString(current), item: { ...base } });
+    switch (row.recurrence) {
+      case 'daily':   current.setDate(current.getDate() + interval);          break;
+      case 'weekly':  current.setDate(current.getDate() + 7 * interval);      break;
+      case 'monthly': current.setMonth(current.getMonth() + interval);        break;
+    }
+  }
+  return results;
+}
+
 const TODAY = getTodayString();
 
 // Notifications disabled (requires paid Apple Developer account)
@@ -202,6 +301,18 @@ export default function CalendarScreen() {
   const [roomError, setRoomError] = useState<string | null>(null);
   const roomDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [showEndDatePicker, setShowEndDatePicker] = useState(false);
+  const [endDateValue, setEndDateValue] = useState(new Date());
+  const [editingOccurrenceDate, setEditingOccurrenceDate] = useState<string | null>(null);
+  const [editingOriginalEvent, setEditingOriginalEvent] = useState<CalendarEventItem | null>(null);
+
+  const defaultEndDate = () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 90);
+    return d;
+  };
+
   const [newEvent, setNewEvent] = useState<NewEventForm>({
     title: '',
     building: '',
@@ -210,6 +321,10 @@ export default function CalendarScreen() {
     notify: false,
     notifyInAdvance: null,
     groupId: null,
+    recurrence: null,
+    recurrenceInterval: 1,
+    recurEndDate: toISODateString(defaultEndDate()),
+    startDate: null,
   });
 
   const fetchEvents = async () => {
@@ -241,9 +356,11 @@ export default function CalendarScreen() {
       setAdminGroupIds(adminIds);
     }
 
+    setCurrentUserId(user.id);
+
     const { data: eventData, error } = await supabase
       .from('events')
-      .select('id, title, location, time, notify, notify_in_advance, event_date, group_id')
+      .select('*')
       .eq('user_id', user.id);
 
     if (error) {
@@ -253,17 +370,11 @@ export default function CalendarScreen() {
 
     if (eventData) {
       const formattedEvents: Record<string, CalendarEventItem[]> = {};
-      (eventData as EventRow[]).forEach((event) => {
-        if (!formattedEvents[event.event_date]) formattedEvents[event.event_date] = [];
-        formattedEvents[event.event_date].push({
-          id: event.id,
-          title: event.title,
-          location: event.location ?? '',
-          time: event.time,
-          notify: event.notify,
-          notifyInAdvance: event.notify_in_advance,
-          groupId: event.group_id,
-        });
+      (eventData as EventRow[]).forEach((row) => {
+        for (const { date, item } of expandEvent(row)) {
+          if (!formattedEvents[date]) formattedEvents[date] = [];
+          formattedEvents[date].push(item);
+        }
       });
       setEvents(formattedEvents);
     }
@@ -355,6 +466,14 @@ export default function CalendarScreen() {
     });
   };
 
+  const onEndDateChange = (_event: DateTimePickerEvent, selectedDate?: Date) => {
+    if (Platform.OS === 'android') setShowEndDatePicker(false);
+    if (selectedDate) {
+      setEndDateValue(selectedDate);
+      setNewEvent((prev) => ({ ...prev, recurEndDate: toISODateString(selectedDate) }));
+    }
+  };
+
   const onTimeChange = (_event: DateTimePickerEvent, selectedTime?: Date) => {
     if (Platform.OS === 'android') setShowTimePicker(false);
     if (selectedTime) {
@@ -368,15 +487,20 @@ export default function CalendarScreen() {
 
   const handleOpenAddModal = () => {
     setEditingEventId(null);
-    setNewEvent({ title: '', building: '', room: '', time: '', notify: false, notifyInAdvance: null, groupId: null });
+    const ed = defaultEndDate();
+    setEndDateValue(ed);
+    setNewEvent({ title: '', building: '', room: '', time: '', notify: false, notifyInAdvance: null, groupId: null, recurrence: null, recurrenceInterval: 1, recurEndDate: toISODateString(ed), startDate: null });
     setTimeValue(new Date());
     setShowTimePicker(false);
+    setShowEndDatePicker(false);
     setShowAddModal(true);
     setLocationSuggestions([]);
     setLocationSearching(false);
     setRoomSuggestions([]);
     setRoomSearching(false);
     setRoomError(null);
+    setEditingOccurrenceDate(null);
+    setEditingOriginalEvent(null);
   };
 
   const handleOpenEditModal = (event: CalendarEventItem) => {
@@ -385,6 +509,8 @@ export default function CalendarScreen() {
     const dashIdx = stored.indexOf(' - ');
     const building = dashIdx !== -1 ? stored.slice(0, dashIdx) : stored;
     const room = dashIdx !== -1 ? stored.slice(dashIdx + 3) : '';
+    const ed = event.recurEndDate ? parseISODate(event.recurEndDate) : defaultEndDate();
+    setEndDateValue(ed);
     setNewEvent({
       title: event.title,
       building,
@@ -393,15 +519,22 @@ export default function CalendarScreen() {
       notify: event.notify,
       notifyInAdvance: event.notifyInAdvance ?? null,
       groupId: event.groupId ?? null,
+      recurrence: event.recurrence ?? null,
+      recurrenceInterval: event.recurrenceInterval ?? 1,
+      recurEndDate: event.recurEndDate ?? toISODateString(ed),
+      startDate: event.startDate,
     });
     setTimeValue(parseTimeString(event.time));
     setShowTimePicker(false);
+    setShowEndDatePicker(false);
     setShowAddModal(true);
     setLocationSuggestions([]);
     setLocationSearching(false);
     setRoomSuggestions([]);
     setRoomSearching(false);
     setRoomError(null);
+    setEditingOccurrenceDate(selectedDate);
+    setEditingOriginalEvent(event);
   };
 
   const handleBuildingChange = (text: string) => {
@@ -532,15 +665,145 @@ export default function CalendarScreen() {
       Alert.alert('Error', 'You must be signed in to save events.');
       return;
     }
+    if (newEvent.recurrence && !newEvent.recurEndDate) {
+      Alert.alert('Missing end date', 'Please set an end date for the recurring event.');
+      return;
+    }
+    if (newEvent.recurrence && newEvent.recurEndDate && newEvent.recurEndDate <= (newEvent.startDate ?? selectedDate)) {
+      Alert.alert('Invalid end date', 'The end date must be after the event start date.');
+      return;
+    }
+
     const payload = {
-      event_date: selectedDate,
+      event_date: newEvent.startDate ?? selectedDate,
       title: newEvent.title,
       location: combinedLocation,
       time: newEvent.time,
       notify: newEvent.notify,
       notify_in_advance: newEvent.notifyInAdvance,
       group_id: newEvent.groupId,
+      recurrence: newEvent.recurrence,
+      recurrence_interval: newEvent.recurrence ? newEvent.recurrenceInterval : 1,
+      recur_end_date: newEvent.recurrence ? newEvent.recurEndDate : null,
     };
+
+    const resetForm = () => {
+      const ed = defaultEndDate();
+      setEndDateValue(ed);
+      setNewEvent({ title: '', building: '', room: '', time: '', notify: false, notifyInAdvance: null, groupId: null, recurrence: null, recurrenceInterval: 1, recurEndDate: toISODateString(ed), startDate: null });
+      setTimeValue(new Date());
+      setEditingEventId(null);
+      setEditingOccurrenceDate(null);
+      setEditingOriginalEvent(null);
+      setShowTimePicker(false);
+      setShowEndDatePicker(false);
+      setShowAddModal(false);
+    };
+
+    // Prompt scope when editing a recurring event
+    if (editingEventId && editingOriginalEvent?.recurrence) {
+      const occDate = editingOccurrenceDate ?? selectedDate;
+      const orig = editingOriginalEvent;
+
+      const doSave = async (scope: 'this' | 'following') => {
+        const isFirst = occDate === orig.startDate;
+
+        if (scope === 'following') {
+          if (isFirst) {
+            // Update the whole series with new settings
+            const { error } = await supabase.from('events')
+              .update(payload)
+              .eq('id', editingEventId)
+              .eq('user_id', user.id);
+            if (error) { Alert.alert('Error', 'Could not save event. Please try again.'); return; }
+          } else {
+            // Truncate original series to before this occurrence
+            const { error: e1 } = await supabase.from('events')
+              .update({ recur_end_date: dayBefore(occDate) })
+              .eq('id', editingEventId)
+              .eq('user_id', user.id);
+            if (e1) { Alert.alert('Error', 'Could not save event. Please try again.'); return; }
+            // Create new series from this occurrence with new settings
+            const { error: e2 } = await supabase.from('events').insert({
+              ...payload, event_date: occDate, user_id: user.id,
+            });
+            if (e2) { Alert.alert('Error', 'Could not save event. Please try again.'); return; }
+          }
+        } else {
+          // "Just this event"
+          if (isFirst) {
+            const nextDate = nextOccurrenceAfter(occDate, orig.recurrence!, orig.recurrenceInterval);
+            const hasMore = !orig.recurEndDate || nextDate <= orig.recurEndDate;
+            if (hasMore) {
+              // Advance original series past this occurrence
+              const { error: e1 } = await supabase.from('events')
+                .update({ event_date: nextDate })
+                .eq('id', editingEventId)
+                .eq('user_id', user.id);
+              if (e1) { Alert.alert('Error', 'Could not save event. Please try again.'); return; }
+            } else {
+              // No more occurrences remain; remove the now-empty series row
+              const { error: e1 } = await supabase.from('events')
+                .delete()
+                .eq('id', editingEventId)
+                .eq('user_id', user.id);
+              if (e1) { Alert.alert('Error', 'Could not save event. Please try again.'); return; }
+            }
+          } else {
+            // Truncate original series to before this occurrence
+            const { error: e1 } = await supabase.from('events')
+              .update({ recur_end_date: dayBefore(occDate) })
+              .eq('id', editingEventId)
+              .eq('user_id', user.id);
+            if (e1) { Alert.alert('Error', 'Could not save event. Please try again.'); return; }
+            // Re-create future series with original settings (if future occurrences exist)
+            const nextDate = nextOccurrenceAfter(occDate, orig.recurrence!, orig.recurrenceInterval);
+            const hasMore = !orig.recurEndDate || nextDate <= orig.recurEndDate;
+            if (hasMore) {
+              const { error: e2 } = await supabase.from('events').insert({
+                user_id: user.id,
+                title: orig.title,
+                location: orig.location,
+                time: orig.time,
+                notify: orig.notify,
+                notify_in_advance: orig.notifyInAdvance,
+                group_id: orig.groupId,
+                recurrence: orig.recurrence,
+                recurrence_interval: orig.recurrenceInterval,
+                recur_end_date: orig.recurEndDate,
+                event_date: nextDate,
+              });
+              if (e2) { Alert.alert('Error', 'Could not save event. Please try again.'); return; }
+            }
+          }
+          // One-time event for this specific occurrence with the new settings
+          const { error: eNew } = await supabase.from('events').insert({
+            ...payload,
+            event_date: occDate,
+            recurrence: null,
+            recurrence_interval: 1,
+            recur_end_date: null,
+            user_id: user.id,
+          });
+          if (eNew) { Alert.alert('Error', 'Could not save event. Please try again.'); return; }
+        }
+
+        await fetchEvents();
+        resetForm();
+      };
+
+      Alert.alert(
+        'Edit recurring event',
+        'How would you like to apply this change?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Just this event', onPress: () => { void doSave('this'); } },
+          { text: 'This and following', onPress: () => { void doSave('following'); } },
+        ]
+      );
+      return;
+    }
+
     // Never let the client choose the row id. On insert the DB default
     // (gen_random_uuid::text) assigns it; on update we match by id + user_id
     // so the row's user_id can't be rewritten.
@@ -571,65 +834,87 @@ export default function CalendarScreen() {
       savedId = inserted.id;
     }
 
-    const localEvent = {
-      id: savedId,
-      title: newEvent.title,
-      location: combinedLocation,
-      time: newEvent.time,
-      notify: newEvent.notify,
-      notifyInAdvance: newEvent.notifyInAdvance,
-      groupId: newEvent.groupId,
-      group_id: newEvent.groupId,
-    };
-
-    setEvents((prev) => {
-      const current = prev[selectedDate] ?? [];
-      return {
-        ...prev,
-        [selectedDate]: editingEventId
-          ? current.map((e) => (e.id === editingEventId ? localEvent : e))
-          : [...current, localEvent],
+    if (newEvent.recurrence) {
+      await fetchEvents();
+    } else {
+      const eventDate = newEvent.startDate ?? selectedDate;
+      const localEvent: CalendarEventItem = {
+        id: savedId,
+        userId: currentUserId ?? '',
+        title: newEvent.title,
+        location: combinedLocation,
+        time: newEvent.time,
+        notify: newEvent.notify,
+        notifyInAdvance: newEvent.notifyInAdvance,
+        groupId: newEvent.groupId,
+        recurrence: null,
+        recurrenceInterval: 1,
+        recurEndDate: null,
+        startDate: eventDate,
       };
-    });
+      setEvents((prev) => {
+        const current = prev[eventDate] ?? [];
+        return {
+          ...prev,
+          [eventDate]: editingEventId
+            ? current.map((e) => (e.id === editingEventId ? localEvent : e))
+            : [...current, localEvent],
+        };
+      });
+    }
 
-    setNewEvent({ title: '', building: '', room: '', time: '', notify: false, notifyInAdvance: null, groupId: null });
-    setTimeValue(new Date());
-    setEditingEventId(null);
-    setShowTimePicker(false);
-    setShowAddModal(false);
+    resetForm();
   };
 
   const handleDeleteEvent = () => {
     if (!editingEventId) return;
-    Alert.alert('Delete event', 'Are you sure you want to delete this event?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          const { data: { user } } = await supabase.auth.getUser();
-          if (!user) {
-            Alert.alert('Error', 'You must be signed in to delete events.');
-            return;
-          }
-          const { error } = await supabase
-            .from('events')
-            .delete()
-            .eq('id', editingEventId)
-            .eq('user_id', user.id);
-          if (error) {
-            Alert.alert('Error', 'Could not delete event.');
-            return;
-          }
-          setEvents((prev) => ({
-            ...prev,
-            [selectedDate]: (prev[selectedDate] ?? []).filter((e) => e.id !== editingEventId),
-          }));
-          setShowAddModal(false);
-          setEditingEventId(null);
+    const isRecurring = !!newEvent.recurrence;
+    Alert.alert(
+      isRecurring ? 'Delete recurring event' : 'Delete event',
+      isRecurring
+        ? 'This will delete all occurrences of this recurring event. This cannot be undone.'
+        : 'Are you sure you want to delete this event?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+              Alert.alert('Error', 'You must be signed in to delete events.');
+              return;
+            }
+            const { error } = await supabase
+              .from('events')
+              .delete()
+              .eq('id', editingEventId)
+              .eq('user_id', user.id);
+            if (error) {
+              Alert.alert('Error', 'Could not delete event.');
+              return;
+            }
+            if (isRecurring) {
+              setEvents((prev) => {
+                const next: Record<string, CalendarEventItem[]> = {};
+                for (const [date, list] of Object.entries(prev)) {
+                  const filtered = list.filter((e) => e.id !== editingEventId);
+                  if (filtered.length > 0) next[date] = filtered;
+                }
+                return next;
+              });
+            } else {
+              setEvents((prev) => ({
+                ...prev,
+                [selectedDate]: (prev[selectedDate] ?? []).filter((e) => e.id !== editingEventId),
+              }));
+            }
+            setShowAddModal(false);
+            setEditingEventId(null);
+          },
         },
-      },
-    ]);
+      ],
+    );
   };
 
   const totalUpcoming = upcomingEvents.length;
@@ -658,6 +943,10 @@ export default function CalendarScreen() {
         showTimePicker={showTimePicker}
         setShowTimePicker={setShowTimePicker}
         onTimeChange={onTimeChange}
+        showEndDatePicker={showEndDatePicker}
+        setShowEndDatePicker={setShowEndDatePicker}
+        endDateValue={endDateValue}
+        onEndDateChange={onEndDateChange}
         onSave={handleSaveEvent}
         onDelete={handleDeleteEvent}
         locationSuggestions={locationSuggestions}
@@ -863,9 +1152,10 @@ export default function CalendarScreen() {
         ) : (
           sortedEvents.map((item) => (
             <EventCard
-              key={String(item.id)}
+              key={`${selectedDate}-${item.id}`}
               item={item}
               groups={groups}
+              canEdit={item.userId === currentUserId || (!!item.groupId && adminGroupIds.has(item.groupId))}
               onOpen={() => handleEventPress(item.location)}
               onEdit={() => handleOpenEditModal(item)}
             />
@@ -879,11 +1169,13 @@ export default function CalendarScreen() {
 function EventCard({
   item,
   groups,
+  canEdit,
   onOpen,
   onEdit,
 }: {
   item: CalendarEventItem;
   groups: GroupRow[];
+  canEdit: boolean;
   onOpen: () => void;
   onEdit: () => void;
 }) {
@@ -940,6 +1232,14 @@ function EventCard({
                 </Text>
               </View>
             ) : null}
+            {item.recurrence ? (
+              <View className="flex-row items-center gap-1">
+                <MaterialIcons name="repeat" size={10} color={PRIMARY} />
+                <Text style={{ color: PRIMARY }} className="text-[11px] font-semibold">
+                  {getRecurrenceLabel(item.recurrence, item.recurrenceInterval)}
+                </Text>
+              </View>
+            ) : null}
             {item.notify ? (
               <View className="flex-row items-center gap-1">
                 <MaterialIcons name="notifications-active" size={10} color={SECONDARY_DEEP} />
@@ -951,14 +1251,16 @@ function EventCard({
           </View>
         </View>
       </TouchableOpacity>
-      <TouchableOpacity
-        onPress={onEdit}
-        accessibilityLabel="Edit event"
-        style={{ backgroundColor: '#F0EDE5' }}
-        className="w-8 h-8 rounded-[10px] items-center justify-center self-center"
-      >
-        <MaterialIcons name="edit" size={14} color="#3A352D" />
-      </TouchableOpacity>
+      {canEdit && (
+        <TouchableOpacity
+          onPress={onEdit}
+          accessibilityLabel="Edit event"
+          style={{ backgroundColor: '#F0EDE5' }}
+          className="w-8 h-8 rounded-[10px] items-center justify-center self-center"
+        >
+          <MaterialIcons name="edit" size={14} color="#3A352D" />
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -1037,6 +1339,10 @@ type EventFormModalProps = {
   showTimePicker: boolean;
   setShowTimePicker: (v: boolean) => void;
   onTimeChange: (e: DateTimePickerEvent, selectedTime?: Date) => void;
+  showEndDatePicker: boolean;
+  setShowEndDatePicker: (v: boolean) => void;
+  endDateValue: Date;
+  onEndDateChange: (e: DateTimePickerEvent, selectedDate?: Date) => void;
   onSave: () => void;
   onDelete: () => void;
   locationSuggestions: SearchItem[];
@@ -1051,6 +1357,10 @@ type EventFormModalProps = {
 };
 
 function EventFormModal(props: EventFormModalProps) {
+  const insets = useSafeAreaInsets();
+  const { height: screenHeight } = useWindowDimensions();
+  // Limit the scrollable form area so the sheet never overflows the screen.
+  const maxScrollHeight = screenHeight * 0.52;
   const {
     visible,
     onClose,
@@ -1064,6 +1374,10 @@ function EventFormModal(props: EventFormModalProps) {
     showTimePicker,
     setShowTimePicker,
     onTimeChange,
+    showEndDatePicker,
+    setShowEndDatePicker,
+    endDateValue,
+    onEndDateChange,
     onSave,
     onDelete,
     locationSuggestions,
@@ -1077,34 +1391,49 @@ function EventFormModal(props: EventFormModalProps) {
     onSelectRoomSuggestion,
   } = props;
 
+  const [showCustomRepeat, setShowCustomRepeat] = useState(false);
+  const [customFreq, setCustomFreq] = useState<RecurrenceType>('weekly');
+  const [customIntervalVal, setCustomIntervalVal] = useState(1);
+  const [kbVisible, setKbVisible] = useState(false);
+
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardWillShow', () => setKbVisible(true));
+    const hide = Keyboard.addListener('keyboardWillHide', () => setKbVisible(false));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
+
+  const footerPaddingBottom = kbVisible ? 8 : Math.max(insets.bottom, 16);
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        className="flex-1"
-      >
-        <Pressable onPress={onClose} className="flex-1 bg-[rgba(15,23,42,0.45)] justify-end">
-          <Pressable
-            onPress={(e) => e.stopPropagation()}
-            style={shadows.sheet}
-            className="bg-white rounded-t-3xl"
-          >
-            <View style={{ maxHeight: '88%' }}>
-              <View className="self-center w-10 h-[5px] rounded-[3px] bg-[#d4d8de] mt-3 mb-1" />
-              <View className="px-5 pb-3.5 pt-2 border-b border-line">
-                <Text className="text-[22px] font-bold text-primary mb-0.5">
-                  {editingEventId ? 'Edit Event' : 'New Event'}
-                </Text>
-                <Text className="text-[13px] text-ink-subtle font-medium">
-                  {formatSelectedDate(selectedDate)}
-                </Text>
-              </View>
+      {/* Backdrop — separate so it doesn't participate in KAV layout */}
+      <Pressable
+        onPress={onClose}
+        style={{ flex: 1, backgroundColor: 'rgba(15,23,42,0.45)' }}
+      />
+      {/* Sheet — KAV wraps only the sheet so keyboard lifts it cleanly */}
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <Pressable
+          onPress={(e) => e.stopPropagation()}
+          style={shadows.sheet}
+          className="bg-white rounded-t-3xl"
+        >
+          <View className="self-center w-10 h-[5px] rounded-[3px] bg-[#d4d8de] mt-3 mb-1" />
+          <View className="px-5 pb-3.5 pt-2 border-b border-line">
+            <Text className="text-[22px] font-bold text-primary mb-0.5">
+              {editingEventId ? 'Edit Event' : 'New Event'}
+            </Text>
+            <Text className="text-[13px] text-ink-subtle font-medium">
+              {formatSelectedDate(selectedDate)}
+            </Text>
+          </View>
 
-              <ScrollView
-                className="px-5 pt-1"
-                showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="handled"
-              >
+          <ScrollView
+            className="px-5 pt-1"
+            style={{ maxHeight: maxScrollHeight }}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
                 <FormLabel>Group</FormLabel>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-1 mt-1" contentContainerStyle={{ flexGrow: 0 }}>
                   <FormChip
@@ -1270,6 +1599,106 @@ function EventFormModal(props: EventFormModalProps) {
                   ))}
                 </ScrollView>
 
+                <FormLabel>Repeat</FormLabel>
+                <TouchableOpacity
+                  className="flex-row items-center justify-between border border-line-neutral rounded-xl p-3.5 bg-surface-subtle mb-1 mt-1"
+                  onPress={() => {
+                    const isCurrentPreset = (p: RecurrencePreset) =>
+                      p.value === newEvent.recurrence && p.interval === newEvent.recurrenceInterval;
+                    const noneIsSelected = !newEvent.recurrence;
+
+                    if (Platform.OS === 'ios') {
+                      const sheetOptions = [
+                        ...RECURRENCE_PRESETS.map((p) => p.label),
+                        'Cancel',
+                      ];
+                      ActionSheetIOS.showActionSheetWithOptions(
+                        { options: sheetOptions, cancelButtonIndex: sheetOptions.length - 1 },
+                        (idx) => {
+                          const preset = RECURRENCE_PRESETS[idx];
+                          if (!preset) return;
+                          if (preset.custom) {
+                            setCustomFreq(newEvent.recurrence ?? 'weekly');
+                            setCustomIntervalVal(newEvent.recurrenceInterval > 0 ? newEvent.recurrenceInterval : 1);
+                            setShowCustomRepeat(true);
+                            return;
+                          }
+                          setNewEvent((prev) => ({ ...prev, recurrence: preset.value, recurrenceInterval: preset.interval }));
+                        },
+                      );
+                    } else {
+                      Alert.alert(
+                        'Repeat',
+                        undefined,
+                        [
+                          ...RECURRENCE_PRESETS.map((p) => {
+                            const checked = !p.custom && (p.value === null ? noneIsSelected : isCurrentPreset(p));
+                            return {
+                              text: checked ? `✓ ${p.label}` : p.label,
+                              onPress: () => {
+                                if (p.custom) {
+                                  setCustomFreq(newEvent.recurrence ?? 'weekly');
+                                  setCustomIntervalVal(newEvent.recurrenceInterval > 0 ? newEvent.recurrenceInterval : 1);
+                                  setShowCustomRepeat(true);
+                                  return;
+                                }
+                                setNewEvent((prev) => ({ ...prev, recurrence: p.value, recurrenceInterval: p.interval }));
+                              },
+                            };
+                          }),
+                          { text: 'Cancel', style: 'cancel' as const },
+                        ],
+                      );
+                    }
+                  }}
+                >
+                  <View className="flex-row items-center gap-2">
+                    <MaterialIcons name="repeat" size={20} color={newEvent.recurrence ? PRIMARY : '#94a3b8'} />
+                    <Text className={newEvent.recurrence ? 'text-base text-ink font-medium' : 'text-base text-ink-faint'}>
+                      {getRecurrenceLabel(newEvent.recurrence, newEvent.recurrenceInterval)}
+                    </Text>
+                  </View>
+                  <MaterialIcons name="chevron-right" size={20} color="#94a3b8" />
+                </TouchableOpacity>
+
+                {newEvent.recurrence ? (
+                  <>
+                    <FormLabel>Until</FormLabel>
+                    <TouchableOpacity
+                      className="flex-row items-center border border-line-neutral rounded-xl p-3.5 bg-surface-subtle mb-1"
+                      onPress={() => setShowEndDatePicker(true)}
+                    >
+                      <MaterialIcons name="event" size={20} color={PRIMARY} style={{ marginRight: 8 }} />
+                      <Text className={cn('text-base', newEvent.recurEndDate ? 'text-ink' : 'text-ink-faint')}>
+                        {newEvent.recurEndDate
+                          ? parseISODate(newEvent.recurEndDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                          : 'Tap to set end date'}
+                      </Text>
+                    </TouchableOpacity>
+                    {showEndDatePicker && (
+                      <View className={cn(Platform.OS === 'ios' && 'bg-surface-subtle rounded-xl mt-2 overflow-hidden border border-line-neutral')}>
+                        <DateTimePicker
+                          value={endDateValue}
+                          mode="date"
+                          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                          onChange={onEndDateChange}
+                          minimumDate={new Date()}
+                          textColor="#000000"
+                          themeVariant="light"
+                        />
+                        {Platform.OS === 'ios' && (
+                          <TouchableOpacity
+                            className="bg-line-neutral p-3 items-center"
+                            onPress={() => setShowEndDatePicker(false)}
+                          >
+                            <Text className="text-base font-semibold text-primary">Done</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    )}
+                  </>
+                ) : null}
+
                 {editingEventId && (
                   <TouchableOpacity
                     className="flex-row items-center justify-center bg-danger-bgAlt py-3.5 rounded-xl mb-2 mt-2 border border-danger-borderAlt"
@@ -1281,7 +1710,10 @@ function EventFormModal(props: EventFormModalProps) {
                 )}
               </ScrollView>
 
-              <View className="flex-row p-5 pt-3 border-t border-line-faint">
+              <View
+                className="flex-row px-5 pt-3 border-t border-line-faint"
+                style={{ paddingBottom: footerPaddingBottom }}
+              >
                 <TouchableOpacity
                   onPress={onClose}
                   className="flex-1 py-3.5 rounded-xl bg-surface-raised items-center mr-2"
@@ -1297,8 +1729,80 @@ function EventFormModal(props: EventFormModalProps) {
                   </Text>
                 </TouchableOpacity>
               </View>
-            </View>
-          </Pressable>
+
+              {showCustomRepeat && (
+                <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'white', borderTopLeftRadius: 24, borderTopRightRadius: 24 }}>
+                  <View className="self-center w-10 h-[5px] rounded-[3px] bg-[#d4d8de] mt-3 mb-1" />
+                  <View className="px-5 pb-3.5 pt-2 border-b border-line">
+                    <Text className="text-[22px] font-bold text-primary">Custom Repeat</Text>
+                  </View>
+                  <ScrollView className="px-5" showsVerticalScrollIndicator={false}>
+                    <Text className="text-[11px] font-bold text-ink-subtle mb-3 mt-5 tracking-[0.8px] uppercase">Frequency</Text>
+                    <View className="border border-line-neutral rounded-2xl overflow-hidden mb-5">
+                      {([
+                        { label: 'Daily',   value: 'daily'   as RecurrenceType },
+                        { label: 'Weekly',  value: 'weekly'  as RecurrenceType },
+                        { label: 'Monthly', value: 'monthly' as RecurrenceType },
+                      ] as { label: string; value: RecurrenceType }[]).map((opt, i) => (
+                        <TouchableOpacity
+                          key={opt.value}
+                          onPress={() => setCustomFreq(opt.value)}
+                          className={cn(
+                            'flex-row items-center justify-between px-4 py-3.5',
+                            i < 2 ? 'border-b border-line-neutral' : '',
+                          )}
+                        >
+                          <Text className="text-[15px] font-medium text-ink-strong">{opt.label}</Text>
+                          {customFreq === opt.value && <MaterialIcons name="check" size={18} color={PRIMARY} />}
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    <Text className="text-[11px] font-bold text-ink-subtle mb-3 tracking-[0.8px] uppercase">Every</Text>
+                    <View className="flex-row items-center gap-4 border border-line-neutral rounded-2xl px-4 py-3 mb-4">
+                      <TouchableOpacity
+                        onPress={() => setCustomIntervalVal((n) => Math.max(1, n - 1))}
+                        className="w-9 h-9 rounded-full bg-surface-subtle items-center justify-center"
+                      >
+                        <MaterialIcons name="remove" size={20} color={customIntervalVal <= 1 ? '#cbd5e1' : '#3A352D'} />
+                      </TouchableOpacity>
+                      <Text className="flex-1 text-center text-[22px] font-bold text-ink-strong">
+                        {customIntervalVal} {customIntervalVal === 1 ? RECURRENCE_UNIT[customFreq] : `${RECURRENCE_UNIT[customFreq]}s`}
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => setCustomIntervalVal((n) => Math.min(99, n + 1))}
+                        className="w-9 h-9 rounded-full bg-surface-subtle items-center justify-center"
+                      >
+                        <MaterialIcons name="add" size={20} color="#3A352D" />
+                      </TouchableOpacity>
+                    </View>
+                    <Text className="text-[13px] text-ink-subtle text-center mb-4">
+                      {customIntervalVal === 1
+                        ? `Event will occur every ${RECURRENCE_UNIT[customFreq]}.`
+                        : `Event will occur every ${customIntervalVal} ${RECURRENCE_UNIT[customFreq]}s.`}
+                    </Text>
+                  </ScrollView>
+                  <View
+                    className="flex-row px-5 pt-3 border-t border-line-faint"
+                    style={{ paddingBottom: footerPaddingBottom }}
+                  >
+                    <TouchableOpacity
+                      onPress={() => setShowCustomRepeat(false)}
+                      className="flex-1 py-3.5 rounded-xl bg-surface-raised items-center mr-2"
+                    >
+                      <Text className="text-base font-semibold text-ink-subtle">Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setNewEvent((prev) => ({ ...prev, recurrence: customFreq, recurrenceInterval: customIntervalVal }));
+                        setShowCustomRepeat(false);
+                      }}
+                      className="flex-1 py-3.5 rounded-xl bg-primary items-center ml-2"
+                    >
+                      <Text className="text-base font-bold text-white">Done</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+          )}
         </Pressable>
       </KeyboardAvoidingView>
     </Modal>
@@ -1356,3 +1860,4 @@ function FormChip({
     </TouchableOpacity>
   );
 }
+

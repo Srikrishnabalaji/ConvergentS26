@@ -417,6 +417,9 @@ export default function FriendsScreen() {
       Alert.alert('Error', 'Could not remove friend.');
       return;
     }
+    if (errA || errB) {
+      log.warn('Friends', 'Partial friend removal failure', { errA, errB });
+    }
 
     // Both directions must succeed or the ex-friend can still see / be seen.
     const [shareA, shareB] = await Promise.all([
