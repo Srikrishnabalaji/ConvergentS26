@@ -83,6 +83,10 @@ export default function CreateGroupScreen() {
       Alert.alert('Error', 'Please enter a join password, or disable the password option.');
       return;
     }
+    if (joinPassword.trim().length > 200) {
+      Alert.alert('Error', 'Join passwords must be 200 characters or less.');
+      return;
+    }
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       Alert.alert('Error', 'You must be signed in to create a group.');
@@ -127,6 +131,7 @@ export default function CreateGroupScreen() {
         const msg =
           rpcData?.error === 'invalid_name' ? 'Group names must be between 1 and 120 characters.' :
           rpcData?.error === 'description_too_long' ? 'Descriptions must be 1,000 characters or less.' :
+          rpcData?.error === 'password_too_long' ? 'Join passwords must be 200 characters or less.' :
           rpcData?.error === 'invalid_type' ? 'Choose a valid group type.' :
           'Please check your group details and try again.';
         Alert.alert('Failed to create group', groupError ? 'Please try again in a moment.' : msg);

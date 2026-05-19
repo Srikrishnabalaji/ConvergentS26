@@ -590,7 +590,7 @@ export default function MyGroupsScreen() {
 
     const [memberRes, groupsRes, countRes, requestsRes, invitesRes] = await Promise.all([
       supabase.from('group_members').select('group_id, role').eq('user_id', user.id),
-      supabase.from('groups').select('id, name, description, image_url, type, is_private, has_join_password'),
+      supabase.from('groups').select('id, name, description, image_url, type, is_private, has_join_password').limit(500),
       supabase.rpc('get_group_member_counts'),
       supabase.rpc('get_my_join_requests'),
       supabase.rpc('get_my_group_invites'),
@@ -771,17 +771,11 @@ export default function MyGroupsScreen() {
   }
 
   async function handleLeave(groupId: string) {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    if (adminGroupIds.has(groupId)) {
-      const { data: adminMembers } = await supabase
-        .from('group_members')
-        .select('user_id')
-        .eq('group_id', groupId)
-        .eq('role', 'admin');
-
-      if ((adminMembers?.length ?? 0) <= 1) {
+    setLeavingId(groupId);
+    const { data, error } = await supabase.rpc('leave_group', { p_group_id: groupId });
+    setLeavingId(null);
+    if (error || data?.error) {
+      if (data?.error === 'last_admin') {
         Alert.alert(
           'Assign an admin first',
           'You are the only admin. Please assign another member as admin before leaving.',
@@ -790,23 +784,13 @@ export default function MyGroupsScreen() {
             { text: 'Manage Group', onPress: () => router.push(`/edit-group/${groupId}` as never) },
           ],
         );
-        return;
+      } else {
+        Alert.alert('Error', 'Could not leave this group.');
       }
+      return;
     }
-
-    setLeavingId(groupId);
-    const { error } = await supabase
-      .from('group_members')
-      .delete()
-      .eq('group_id', groupId)
-      .eq('user_id', user.id);
-    setLeavingId(null);
-    if (error) {
-      Alert.alert('Error', 'Could not leave this group.');
-    } else {
-      setSelectedGroup(null);
-      fetchGroups();
-    }
+    setSelectedGroup(null);
+    fetchGroups();
   }
 
   const searchedMyGroups = useMemo(() => {
@@ -894,7 +878,7 @@ export default function MyGroupsScreen() {
         visible={showCodeModal}
         title="Join with Code"
         subtitle="Enter the private group's unique code to join."
-        placeholder="e.g. A3BF19CD"
+        placeholder="e.g. A3BF19"
         value={codeInput}
         onChangeText={setCodeInput}
         onConfirm={handleJoinByCode}

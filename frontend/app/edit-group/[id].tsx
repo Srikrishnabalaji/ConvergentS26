@@ -281,13 +281,19 @@ export default function EditGroupScreen() {
 
   async function setMemberRole(targetUserId: string, role: MemberRole) {
     if (!id) return;
-    const { error } = await supabase
-      .from('group_members')
-      .update({ role })
-      .eq('group_id', id)
-      .eq('user_id', targetUserId);
-    if (error) {
-      Alert.alert('Could not update role', 'Please try again.');
+    const { data, error } = await supabase.rpc('change_member_role', {
+      p_group_id: id,
+      p_target_user_id: targetUserId,
+      p_new_role: role,
+    });
+    if (error || data?.error) {
+      const msg =
+        data?.error === 'founder_only'        ? 'Only the founding admin can change another admin or editor.' :
+        data?.error === 'not_authorized'      ? 'Only admins can change member roles.' :
+        data?.error === 'cannot_modify_self'  ? "You can't change your own role." :
+        data?.error === 'not_member'          ? 'That user is no longer in this group.' :
+        'Please try again.';
+      Alert.alert('Could not update role', msg);
       return;
     }
     loadMembers(id);
@@ -304,13 +310,17 @@ export default function EditGroupScreen() {
           text: 'Remove',
           style: 'destructive',
           onPress: async () => {
-            const { error } = await supabase
-              .from('group_members')
-              .delete()
-              .eq('group_id', id)
-              .eq('user_id', targetUserId);
-            if (error) {
-              Alert.alert('Error', 'Could not remove this member.');
+            const { data, error } = await supabase.rpc('remove_group_member', {
+              p_group_id: id,
+              p_target_user_id: targetUserId,
+            });
+            if (error || data?.error) {
+              const msg =
+                data?.error === 'founder_only'   ? 'Only the founding admin can remove another admin or editor.' :
+                data?.error === 'not_authorized' ? 'Only admins can remove members.' :
+                data?.error === 'not_member'     ? 'That user is no longer in this group.' :
+                'Could not remove this member.';
+              Alert.alert('Error', msg);
             } else {
               loadMembers(id);
             }
@@ -433,6 +443,17 @@ export default function EditGroupScreen() {
       return;
     }
 
+    // Mirror the server-side CHECK constraints (migration 0018) so users
+    // see a friendly message instead of a raw 23514 error.
+    if (name.trim().length > 120) {
+      Alert.alert('Error', 'Group names must be 120 characters or less.');
+      return;
+    }
+    if (description.trim().length > 1000) {
+      Alert.alert('Error', 'Descriptions must be 1,000 characters or less.');
+      return;
+    }
+
     if (isEditorOnly) {
       setLoading(true);
       const { data, error } = await supabase.rpc('update_group_description', {
@@ -454,6 +475,11 @@ export default function EditGroupScreen() {
 
     if (showPasswordOption && enablePassword && !passwordValue.trim() && !hadJoinPasswordOnLoad) {
       Alert.alert('Error', 'Please enter a join password or disable the password option.');
+      return;
+    }
+
+    if (passwordValue.trim().length > 200) {
+      Alert.alert('Error', 'Join passwords must be 200 characters or less.');
       return;
     }
 
@@ -519,22 +545,6 @@ export default function EditGroupScreen() {
   async function handleLeave() {
     if (!id || !myUserId) return;
 
-    if (isAdmin) {
-      const { data: adminMembers } = await supabase
-        .from('group_members')
-        .select('user_id')
-        .eq('group_id', id)
-        .eq('role', 'admin');
-
-      if ((adminMembers?.length ?? 0) <= 1) {
-        Alert.alert(
-          'Assign an admin first',
-          'You are the only admin. Please assign another member as admin before leaving.',
-        );
-        return;
-      }
-    }
-
     Alert.alert('Leave Group', 'Are you sure you want to leave this group?', [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -542,14 +552,20 @@ export default function EditGroupScreen() {
         style: 'destructive',
         onPress: async () => {
           setLeaving(true);
-          const { error } = await supabase
-            .from('group_members')
-            .delete()
-            .eq('group_id', id)
-            .eq('user_id', myUserId);
+          const { data, error } = await supabase.rpc('leave_group', { p_group_id: id });
           setLeaving(false);
-          if (error) Alert.alert('Error', 'Could not leave this group.');
-          else router.back();
+          if (error || data?.error) {
+            if (data?.error === 'last_admin') {
+              Alert.alert(
+                'Assign an admin first',
+                'You are the only admin. Please assign another member as admin before leaving.',
+              );
+            } else {
+              Alert.alert('Error', 'Could not leave this group.');
+            }
+            return;
+          }
+          router.back();
         },
       },
     ]);
