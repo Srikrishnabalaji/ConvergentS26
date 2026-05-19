@@ -1,4 +1,11 @@
 import React, { useState, useRef, useMemo, useCallback, useEffect } from 'react';
+import { useAlerts } from '@/lib/useAlerts';
+import { usePathAlerts } from '@/lib/usePathAlerts';
+import { supabase } from '@/lib/supabase';
+import { AlertsOverlay } from './AlertsOverlay';
+import { AlertDetailSheet } from './AlertDetailSheet';
+import { AlertSubmissionForm } from './AlertSubmissionForm';
+import type { AlertCluster } from '@/lib/alerts';
 import {
   View,
   Text,
@@ -125,6 +132,29 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
   // Active floor — default to Floor 2 (f1) where the main entrance is
   const [activeFloorId, setActiveFloorId] = useState('f1');
 
+  // Alert system state
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [selectedCluster, setSelectedCluster] = useState<AlertCluster | null>(null);
+  const [submissionCoords, setSubmissionCoords] = useState<{ nx: number; ny: number } | null>(null);
+  const [showFeedbackToast, setShowFeedbackToast] = useState(false);
+  const [showAlerts, setShowAlerts] = useState(true);
+  const [alertPlacementMode, setAlertPlacementMode] = useState(false);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showToast = useCallback(() => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setShowFeedbackToast(true);
+    toastTimerRef.current = setTimeout(() => setShowFeedbackToast(false), 2000);
+  }, []);
+
+  const { alerts, clusters, refresh: refreshAlerts } = useAlerts(activeFloorId);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setCurrentUserId(data.user?.id ?? null);
+    });
+  }, []);
+
   // Room search
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -138,6 +168,9 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
   const [routeSegments, setRouteSegments] = useState<RouteSegment[]>([]);
   const [activeSegmentIdx, setActiveSegmentIdx] = useState(0);
   const [routeError, setRouteError] = useState('');
+
+  // Detect when the calculated route crosses an alert and notify
+  usePathAlerts(routeSegments, alerts, currentUserId);
 
   // Placement flow: when the destination came from outside (e.g. a calendar
   // event), we ask the user to drop a pin for their starting location before
@@ -302,6 +335,22 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
     [placementMode, destNode, imageWidth, imageHeight, graph, activeFloorId, computeRoute],
   );
 
+  const handleMapTap = useCallback(
+    (e: { nativeEvent: { locationX: number; locationY: number } }) => {
+      if (placementMode === 'tap') {
+        handleFloorPlanTap(e);
+      } else if (alertPlacementMode) {
+        const { locationX, locationY } = e.nativeEvent;
+        setSubmissionCoords({
+          nx: fromImageX(locationX, imageWidth),
+          ny: fromImageY(locationY, imageHeight),
+        });
+        setAlertPlacementMode(false);
+      }
+    },
+    [placementMode, alertPlacementMode, handleFloorPlanTap, imageWidth, imageHeight],
+  );
+
   // Clear route
   const handleClearRoute = useCallback(() => {
     setRouteSegments([]);
@@ -415,7 +464,18 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
           >
             <Pressable
               style={[styles.mapImageWrap, { width: imageWidth, height: imageHeight }]}
-              onPress={placementMode === 'tap' ? handleFloorPlanTap : undefined}
+              onPress={(placementMode === 'tap' || alertPlacementMode) ? handleMapTap : undefined}
+              onLongPress={
+                placementMode !== 'tap' && !alertPlacementMode
+                  ? (e) => {
+                      const { locationX, locationY } = e.nativeEvent;
+                      setSubmissionCoords({
+                        nx: fromImageX(locationX, imageWidth),
+                        ny: fromImageY(locationY, imageHeight),
+                      });
+                    }
+                  : undefined
+              }
             >
               <FloorPlanImage
                 floorId={activeFloorId}
@@ -499,8 +559,56 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
               </>
             )}
               </Svg>
+              {showAlerts && (
+                <AlertsOverlay
+                  clusters={clusters}
+                  imageWidth={imageWidth}
+                  imageHeight={imageHeight}
+                  onClusterPress={setSelectedCluster}
+                />
+              )}
             </Pressable>
           </MapScrollView>
+
+          {/* Alert placement mode hint banner */}
+          {alertPlacementMode && (
+            <View style={styles.alertPlacementBanner} pointerEvents="none">
+              <MaterialIcons name="touch-app" size={16} color="#fff" />
+              <Text style={styles.alertPlacementBannerText}>Tap the map to place your alert</Text>
+            </View>
+          )}
+
+          {/* Alerts toggle pill — top-left, clearly labeled */}
+          <TouchableOpacity
+            style={[styles.alertsTogglePill, !showAlerts && styles.alertsTogglePillHidden]}
+            onPress={() => setShowAlerts((v) => !v)}
+            accessibilityLabel={showAlerts ? 'Hide alerts' : 'Show alerts'}
+          >
+            <MaterialIcons
+              name={showAlerts ? 'visibility' : 'visibility-off'}
+              size={14}
+              color={showAlerts ? PRIMARY : '#94a3b8'}
+            />
+            <Text style={[styles.alertsToggleText, !showAlerts && styles.alertsToggleTextHidden]}>
+              {showAlerts ? 'Hide Alerts' : 'Show Alerts'}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Report button — bottom-left, mirrors zoom rail */}
+          {!isSearching && (
+            <TouchableOpacity
+              style={[styles.mapZoomBtn, styles.reportBtn, alertPlacementMode && styles.reportBtnActive]}
+              onPress={() => setAlertPlacementMode((v) => !v)}
+              accessibilityLabel="Report alert"
+            >
+              <MaterialIcons
+                name="flag"
+                size={20}
+                color={alertPlacementMode ? '#fff' : '#ef4444'}
+              />
+            </TouchableOpacity>
+          )}
+
           <View style={styles.mapZoomRail} pointerEvents="box-none">
             <TouchableOpacity
               style={[styles.mapZoomBtn, mapZoomMul >= MAP_ZOOM_MAX_MUL - 0.001 && styles.mapZoomBtnDisabled]}
@@ -658,6 +766,39 @@ export function IndoorMapView({ graph, onExit, initialDestination }: Props) {
             </TouchableOpacity>
           )}
         </View>
+      )}
+
+      {/* Feedback toast */}
+      {showFeedbackToast && (
+        <View style={styles.feedbackToast} pointerEvents="none">
+          <MaterialIcons name="check-circle" size={16} color="#fff" />
+          <Text style={styles.feedbackToastText}>Thanks for the feedback</Text>
+        </View>
+      )}
+
+      {/* Alert detail sheet — opens when a cluster pin is tapped */}
+      {selectedCluster && (
+        <AlertDetailSheet
+          cluster={selectedCluster}
+          currentUserId={currentUserId}
+          onClose={() => setSelectedCluster(null)}
+          onVoted={() => { setSelectedCluster(null); showToast(); }}
+        />
+      )}
+
+      {/* Alert submission form — opens on long-press of the floor plan */}
+      {submissionCoords && (
+        <AlertSubmissionForm
+          floorId={activeFloorId}
+          x={submissionCoords.nx}
+          y={submissionCoords.ny}
+          currentUserId={currentUserId}
+          onClose={() => setSubmissionCoords(null)}
+          onSubmitted={() => {
+            setSubmissionCoords(null);
+            refreshAlerts();
+          }}
+        />
       )}
 
       {/* Search overlay */}
@@ -844,6 +985,65 @@ const styles = StyleSheet.create({
     right: 10,
     bottom: 10,
     gap: 8,
+  },
+  alertPlacementBanner: {
+    position: 'absolute',
+    top: 10,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(15,23,42,0.78)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    zIndex: 30,
+  },
+  alertPlacementBannerText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  alertsTogglePill: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 3,
+    zIndex: 20,
+  },
+  alertsTogglePillHidden: {
+    borderColor: '#94a3b8',
+  },
+  alertsToggleText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: PRIMARY,
+  },
+  alertsToggleTextHidden: {
+    color: '#94a3b8',
+  },
+  reportBtn: {
+    position: 'absolute',
+    bottom: 10,
+    left: 10,
+    zIndex: 20,
+  },
+  reportBtnActive: {
+    backgroundColor: '#ef4444',
+    borderColor: '#ef4444',
   },
   mapZoomBtn: {
     width: 42,
@@ -1089,5 +1289,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     paddingHorizontal: 24,
+  },
+  feedbackToast: {
+    position: 'absolute',
+    bottom: 100,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(15,23,42,0.82)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    zIndex: 50,
+  },
+  feedbackToastText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

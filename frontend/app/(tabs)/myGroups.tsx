@@ -1015,7 +1015,7 @@ export default function MyGroupsScreen() {
         )}
       </BottomSheet>
 
-      <View className="px-5 pt-6 pb-3">
+      <View className="px-5 pt-6 pb-0">
         <View className="flex-row items-start justify-between mb-5">
           <View className="flex-1 pr-3">
             <Text className="text-[36px] font-bold text-ink-strong tracking-[-1.2px] leading-[36px] mb-2">
@@ -1025,7 +1025,7 @@ export default function MyGroupsScreen() {
               {totalJoined} joined ·{' '}
               {invitesCount > 0 ? (
                 <Text style={{ color: SECONDARY, fontWeight: '600' }}>
-                  {invitesCount} invite{invitesCount === 1 ? '' : 's'} waiting
+                  {invitesCount} invite{invitesCount === 1 ? '' : 's'} pending
                 </Text>
               ) : (
                 'all caught up'
@@ -1052,7 +1052,7 @@ export default function MyGroupsScreen() {
       <ScrollView
         ref={scrollRef}
         className="flex-1"
-        contentContainerClassName="px-4 pt-2 pb-32"
+        contentContainerClassName="px-4 pt-0 pb-32"
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchGroups} tintColor={PRIMARY} />}
