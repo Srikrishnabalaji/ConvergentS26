@@ -123,6 +123,22 @@ export default function EditGroupScreen() {
     );
   }, [members, memberSearch]);
 
+  const inviteSearchAlreadyMembers = useMemo(() => {
+    const q = inviteSearch.trim().toLowerCase();
+    if (!q) return [];
+    return members.filter((m) =>
+      (m.profiles?.full_name ?? '').toLowerCase().includes(q)
+    );
+  }, [members, inviteSearch]);
+
+  const inviteSearchAlreadyInvited = useMemo(() => {
+    const q = inviteSearch.trim().toLowerCase();
+    if (!q) return [];
+    return sentInvites.filter((inv) =>
+      (inv.full_name ?? '').toLowerCase().includes(q)
+    );
+  }, [sentInvites, inviteSearch]);
+
   const showPasswordOption = isAdmin && !isPrivate && !isCampusOrg;
   const showJoinCode = isAdmin && isPrivate;
   const showJoinRequests = isAdmin && isCampusOrg;
@@ -849,45 +865,6 @@ export default function EditGroupScreen() {
               <MaterialIcons name="chevron-right" size={20} color="#94a3b8" />
             </TouchableOpacity>
 
-            {loadingSentInvites ? (
-              <View className="py-4 items-center">
-                <ActivityIndicator color={PRIMARY_HEX} />
-              </View>
-            ) : sentInvites.length === 0 ? (
-              <View className="bg-surface-subtle rounded-xl py-5 items-center mb-2">
-                <MaterialIcons name="mail-outline" size={24} color="#94a3b8" style={{ marginBottom: 6 }} />
-                <Text className="text-sm text-ink-muted font-medium">No pending invites</Text>
-              </View>
-            ) : (
-              <View className="border border-line-neutral rounded-2xl overflow-hidden mb-2">
-                {sentInvites.map((inv) => (
-                  <View
-                    key={inv.invite_id}
-                    className="flex-row items-center px-3.5 py-3 border-b border-line-muted/40 bg-white"
-                  >
-                    <Avatar name={inv.full_name} uri={inv.avatar_url} size="md" className="mr-3" />
-                    <Text className="flex-1 text-[15px] font-medium text-ink-strong" numberOfLines={1}>
-                      {inv.full_name ?? 'Unknown user'}
-                    </Text>
-                    <TouchableOpacity
-                      className="flex-row items-center py-1.5 px-3 rounded-[10px] bg-danger-bgSoft"
-                      activeOpacity={0.7}
-                      onPress={() => handleRevokeInvite(inv.invite_id)}
-                      disabled={revokingInviteId === inv.invite_id}
-                    >
-                      {revokingInviteId === inv.invite_id ? (
-                        <ActivityIndicator size="small" color="#dc2626" />
-                      ) : (
-                        <>
-                          <MaterialIcons name="close" size={14} color="#dc2626" style={{ marginRight: 3 }} />
-                          <Text className="text-danger text-[13px] font-semibold">Cancel</Text>
-                        </>
-                      )}
-                    </TouchableOpacity>
-                  </View>
-                ))}
-              </View>
-            )}
 
             <View className="flex-row items-center mt-6 mb-3">
               <SectionLabel className="mb-0">
@@ -1035,13 +1012,43 @@ export default function EditGroupScreen() {
                   <View className="py-10 items-center">
                     <ActivityIndicator color={PRIMARY_HEX} />
                   </View>
-                ) : inviteSearchResults.length === 0 ? (
+                ) : inviteSearchResults.length === 0 && inviteSearchAlreadyMembers.length === 0 && inviteSearchAlreadyInvited.length === 0 ? (
                   <View className="py-10 items-center">
                     <MaterialIcons name="person-off" size={32} color="#cbd5e1" style={{ marginBottom: 8 }} />
                     <Text className="text-sm text-ink-muted">No people found.</Text>
                   </View>
                 ) : (
                   <View className="border border-line-neutral rounded-2xl overflow-hidden">
+                    {inviteSearchAlreadyMembers.map((m) => (
+                      <View
+                        key={m.user_id}
+                        className="flex-row items-center px-3.5 py-3 border-b border-line-muted/40 bg-white"
+                      >
+                        <Avatar name={m.profiles?.full_name} size="md" className="mr-3" />
+                        <Text className="flex-1 text-[15px] font-medium text-ink-strong" numberOfLines={1}>
+                          {m.profiles?.full_name ?? 'Member'}
+                        </Text>
+                        <View className="flex-row items-center gap-1.5 px-2 py-1.5 rounded-lg bg-primary/10">
+                          <MaterialIcons name="check-circle" size={15} color="#0B617E" />
+                          <Text className="text-xs font-semibold text-primary">Member</Text>
+                        </View>
+                      </View>
+                    ))}
+                    {inviteSearchAlreadyInvited.map((inv) => (
+                      <View
+                        key={inv.invite_id}
+                        className="flex-row items-center px-3.5 py-3 border-b border-line-muted/40 bg-white"
+                      >
+                        <Avatar name={inv.full_name} uri={inv.avatar_url} size="md" className="mr-3" />
+                        <Text className="flex-1 text-[15px] font-medium text-ink-strong" numberOfLines={1}>
+                          {inv.full_name ?? 'Unknown user'}
+                        </Text>
+                        <View className="flex-row items-center gap-1.5 px-2 py-1.5 rounded-lg" style={{ backgroundColor: 'rgba(216,158,58,0.12)' }}>
+                          <MaterialIcons name="schedule" size={15} color="#D89E3A" />
+                          <Text className="text-xs font-semibold" style={{ color: '#D89E3A' }}>Invited</Text>
+                        </View>
+                      </View>
+                    ))}
                     {inviteSearchResults.map((u) => (
                       <View
                         key={u.user_id}

@@ -78,7 +78,6 @@ export function AlertSubmissionForm({
         y,
         description: description.trim() || null,
         submitted_by: currentUserId,
-        status: 'active',
         expires_at: expiresAt,
       });
 

@@ -1015,8 +1015,8 @@ export default function MyGroupsScreen() {
         )}
       </BottomSheet>
 
-      <View className="px-5 pt-6 pb-0">
-        <View className="flex-row items-start justify-between mb-5">
+      <View className="px-4 pt-6 pb-0">
+        <View className="flex-row items-start justify-between mb-5 px-1">
           <View className="flex-1 pr-3">
             <Text className="text-[36px] font-bold text-ink-strong tracking-[-1.2px] leading-[36px] mb-2">
               Groups
@@ -1046,6 +1046,7 @@ export default function MyGroupsScreen() {
           value={activePanel}
           onChange={setActivePanel}
           options={panelOptions}
+          className="mb-3"
         />
       </View>
 
@@ -1065,7 +1066,7 @@ export default function MyGroupsScreen() {
               </View>
             ) : (
               <>
-                <View className="flex-row items-center mt-3 mb-2 gap-2">
+                <View className="flex-row items-center mb-2 gap-2">
                   <View className="flex-1">
                     <SearchInput
                       placeholder="Search groups…"
@@ -1208,7 +1209,7 @@ export default function MyGroupsScreen() {
 
         {activePanel === 'discover' && (
           <>
-            <View className="flex-row items-center mt-3 mb-2 gap-2">
+            <View className="flex-row items-center mb-2 gap-2">
               <View className="flex-1">
                 <SearchInput
                   placeholder="Search groups…"

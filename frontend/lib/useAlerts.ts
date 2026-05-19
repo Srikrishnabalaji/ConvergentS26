@@ -31,7 +31,7 @@ export function useAlerts(floorId: string | null) {
           `*, submitter:profiles!submitted_by(reputation_score), votes:alert_votes(vote)`,
         )
         .eq('floor_id', floorId)
-        .eq('status', 'active');
+        .gt('expires_at', new Date().toISOString());
 
       if (error || !data) return;
 

@@ -16,7 +16,6 @@ export interface CampusAlert {
   y: number;
   description: string | null;
   submitted_by: string;
-  status: 'active' | 'resolved';
   created_at: string;
   expires_at: string;
 }
